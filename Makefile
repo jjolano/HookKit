@@ -11,6 +11,6 @@ HookKit_EXTRA_FRAMEWORKS = Modulous RootBridge
 HookKit_INSTALL_PATH = /Library/Frameworks
 HookKit_CFLAGS = -fobjc-arc -IHeaders -Ivendor/Modulous.framework/Headers -Ivendor/RootBridge.framework/Headers
 HookKit_LDFLAGS = -Fvendor -install_name @rpath/HookKit.framework/HookKit
-HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib
+HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath @loader_path/.jbroot/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib -rpath @loader_path/.jbroot/usr/lib
 
 include $(THEOS_MAKE_PATH)/framework.mk
