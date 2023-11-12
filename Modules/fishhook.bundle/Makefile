@@ -8,7 +8,7 @@ HookKitFishhookModule_BUNDLE_EXTENSION = bundle
 HookKitFishhookModule_FILES = Module.m HKFH.m vendor/fishhook/fishhook.c
 HookKitFishhookModule_EXTRA_FRAMEWORKS = HookKit
 HookKitFishhookModule_CFLAGS = -fobjc-arc -Ivendor/HookKit.framework/Headers
-HookKitFishhookModule_LDFLAGS = -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib
+HookKitFishhookModule_LDFLAGS = -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath @loader_path/.jbroot/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib -rpath @loader_path/.jbroot/usr/lib
 HookKitFishhookModule_LDFLAGS += -Fvendor
 HookKitFishhookModule_INSTALL_PATH = /Library/Modulous/HookKit
 

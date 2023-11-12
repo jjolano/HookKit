@@ -13,6 +13,11 @@ make clean &&
 THEOS_PACKAGE_SCHEME=rootless ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0 make package FINALPACKAGE=1 &&
 cp -p "`ls -dtr1 packages/* | tail -1`" $PWD/build/
 
+# build main project (roothide ver.)
+make clean &&
+THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0 make package FINALPACKAGE=1 &&
+cp -p "`ls -dtr1 packages/* | tail -1`" $PWD/build/
+
 rm -rf $THEOS/lib/HookKit.framework
 
 # build main project (rooted ver.)
@@ -26,4 +31,5 @@ rm -rf $THEOS/lib/HookKit.framework
 for d in Modules/*.bundle ; do
     (cd $d && make clean && make package FINALPACKAGE=1 && cp -p "`ls -dtr1 packages/* | tail -1`" ../../build/) || true
     (cd $d && make clean && THEOS_PACKAGE_SCHEME=rootless ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0 make package FINALPACKAGE=1 && cp -p "`ls -dtr1 packages/* | tail -1`" ../../build/) || true
+    (cd $d && make clean && THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0 make package FINALPACKAGE=1 && cp -p "`ls -dtr1 packages/* | tail -1`" ../../build/) || true
 done
