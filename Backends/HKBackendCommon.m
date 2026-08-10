@@ -9,16 +9,15 @@
 @implementation HKHookOperation
 @end
 
-// Jailbreak-root path seam — compile-time per scheme, same convention as
-// Shadow's JBPath.h. Each package is built for one jailbreak type, so the
-// branch is baked in: rooted = identity (no prefix), rootless = libroot's
-// jbrootpath (auto-linked -lroot by theos; resolves /var/jb or the
-// jailbreak's own prefix), roothide = libroothide's jbroot() (random-named
-// jbroot, no /var/jb).
-#ifdef SHADOW_ROOTHIDE
+// Jailbreak-root path seam — compile-time per scheme. Each package is built
+// for one jailbreak type, so the branch is baked in: rooted = identity (no
+// prefix), rootless = libroot's jbrootpath (auto-linked -lroot by theos;
+// resolves /var/jb or the jailbreak's own prefix), roothide = libroothide's
+// jbroot() (random-named jbroot, no /var/jb).
+#ifdef HK_ROOTHIDE
 #import <roothide.h>
 NSString* HKJBPath(NSString* path) { return jbroot(path); }
-#elif defined(SHADOW_ROOTLESS)
+#elif defined(HK_ROOTLESS)
 #import <rootless.h>
 NSString* HKJBPath(NSString* path) { return ROOT_PATH_NS(path); }
 #else

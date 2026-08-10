@@ -28,9 +28,9 @@ HookKit_LDFLAGS =
 # API; without it the header falls back to roothide/stub.h whose jbroot()
 # resolves through libroot at runtime — wrong semantics for roothide.
 ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
-HookKit_CFLAGS += -DSHADOW_ROOTLESS
+HookKit_CFLAGS += -DHK_ROOTLESS
 else ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-HookKit_CFLAGS += -DSHADOW_ROOTHIDE -DTHEOS_PACKAGE_SCHEME_ROOTHIDE
+HookKit_CFLAGS += -DHK_ROOTHIDE -DTHEOS_PACKAGE_SCHEME_ROOTHIDE
 endif
 # The roothide scheme module forces -install_name "@loader_path/.jbroot...",
 # which would override our @rpath install_name (instance LDFLAGS come after
@@ -42,10 +42,10 @@ else
 HookKit_LDFLAGS += -lroothide
 endif
 HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib
-# Mach-O dylib versions: must match HookKit.tbd (current/compatibility 2.2.2)
+# Mach-O dylib versions: must match HookKit.tbd (current/compatibility 2.2.3)
 # so consumers linking via the tbd record a satisfiable requirement. Theos
 # sets no versions itself, so they come from here.
-HookKit_LDFLAGS += -current_version 2.2.2 -compatibility_version 2.2.2
+HookKit_LDFLAGS += -current_version 2.2.3 -compatibility_version 2.2.3
 # Export boundary: only the public HKSubstitutor ObjC class symbols survive
 # the link (see scripts/export-HookKit.list); every backend/litehook/dobby/
 # fishhook/native symbol becomes local.
