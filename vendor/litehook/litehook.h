@@ -29,8 +29,12 @@ kern_return_t litehook_hook_function(void *source, void *target);
 // Rebind `replacee` to `replacement` in the given image (or every loaded
 // image, past and future, when targetHeader is LITEHOOK_REBIND_GLOBAL).
 // Returns KERN_SUCCESS on success; KERN_MEMORY_FAILURE when growing the global
-// rebind list fails (the live list is left untouched), KERN_FAILURE when the
-// replacement's image cannot be located, KERN_INVALID_ARGUMENT on bad args.
+// rebind list fails (nothing has been patched yet — the list is grown before
+// any hook is installed), KERN_FAILURE when the replacement's image cannot be
+// located, KERN_PROTECTION_FAILURE when a matching GOT/import slot could not be
+// made writable (that slot is skipped — nothing is ever written into a
+// protected region — and no global record is committed), KERN_INVALID_ARGUMENT
+// on bad args.
 //
 // When non-NULL, *outMatchCount receives the number of GOT/import slots this
 // call actually rewrote — captured under the same lock as the apply, so the

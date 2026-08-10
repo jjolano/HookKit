@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 // --- simulated PAC (identity would make the self-check trivially pass) -----
 // sign(p, d) keeps p's address bits and stamps 4 bits of d; strip removes the
@@ -61,6 +63,35 @@ bool hk_native_patch_memory(void *target, const void *data, size_t size) {
     memset(g_patch_bytes, 0, sizeof(g_patch_bytes));
     memcpy(g_patch_bytes, data, size < sizeof(g_patch_bytes) ? size : sizeof(g_patch_bytes));
     return true;
+}
+
+// Fake hk_native_range_readable: the engine's real implementation walks Mach
+// VM regions (native/hk_native.c, iOS-only). On the host, mincore(2) is the
+// equivalent mapped-range probe: ENOMEM means the range contains unmapped
+// pages, and the probe never touches the range itself.
+bool hk_native_range_readable(const void *addr, size_t len) {
+    if(!addr || len == 0) {
+        return false;
+    }
+
+    long page = sysconf(_SC_PAGESIZE);
+    uintptr_t base = (uintptr_t)addr & ~(uintptr_t)(page - 1);
+    uintptr_t end = ((uintptr_t)addr + len + page - 1) & ~(uintptr_t)(page - 1);
+
+    if(end < (uintptr_t)addr) {
+        return false;   // overflow
+    }
+
+    size_t pages = (end - base) / (size_t)page;
+
+    // ponytail: the fake blobs span a few pages at most; larger ranges fail
+    // closed.
+    if(pages > 64) {
+        return false;
+    }
+
+    unsigned char vec[64];
+    return mincore((void *)base, end - base, vec) == 0;
 }
 
 // The engine's swift_demangle hook: the framework layer owns this global on
@@ -360,6 +391,32 @@ static void test_self_check(void) {
     printf("  PASS\n");
 }
 
+static void test_unreadable(void) {
+    printf("unreadable class/descriptor ranges:\n");
+
+    // A bogus non-NULL class pointer must fail cleanly BEFORE any
+    // dereference: the readability probe rejects it.
+    blob_setup();
+    CHECK(!hk_swift_hook_slot((Class)(uintptr_t)0x1, 0, (void *)&fake_a, NULL));
+    expect_error(HK_SWIFT_ERR_UNREADABLE);
+
+    uint32_t index = 99;
+    CHECK(!hk_swift_find_slot((Class)(uintptr_t)0x1, "fake_a", &index));
+    expect_error(HK_SWIFT_ERR_UNREADABLE);
+
+    // A non-NULL Description pointing at unmapped memory: same failure, on
+    // the descriptor path.
+    blob_setup();
+    *(uintptr_t *)(g_metadata + 0x40) = 0x1;
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    expect_error(HK_SWIFT_ERR_UNREADABLE);
+
+    // None of the failures above may have written anything.
+    CHECK(g_patch_calls == 0);
+
+    printf("  PASS\n");
+}
+
 static void test_find_by_name(void) {
     printf("find slot by name:\n");
 
@@ -404,6 +461,7 @@ int main(void) {
 
     test_constants();
     test_validation();
+    test_unreadable();
     test_hook_by_index();
     test_self_check();
     test_find_by_name();

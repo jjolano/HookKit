@@ -136,6 +136,7 @@ typedef struct objc_class *Class;
 #define HK_SWIFT_ERR_INVALID_INDEX        (-9)    // index >= vtable size
 #define HK_SWIFT_ERR_ARG                  (-10)   // null/invalid argument
 #define HK_SWIFT_ERR_WRITE                (-11)   // slot write failed (hk_native_patch_memory)
+#define HK_SWIFT_ERR_UNREADABLE           (-12)   // class/descriptor/vtable range not mapped readable
 
 #pragma mark - swift_demangle (resolved by the framework layer)
 

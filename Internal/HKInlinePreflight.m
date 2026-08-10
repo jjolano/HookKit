@@ -11,6 +11,7 @@
 #endif
 
 #import "native/hk_arm64.h"
+#import "native/hk_native.h"
 
 hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
     // Fail closed before the vendor hook: Dobby's relocator neither rejects
@@ -40,6 +41,19 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
 
         return HK_ERR_NOT_SUPPORTED;
     }
+
+#if defined(__arm64__) || defined(__aarch64__)
+    // The window scan below dereferences the prologue; a bogus non-NULL
+    // address must fail cleanly instead of faulting. (The Mach VM probe is
+    // arm64-only, and so are the inline backends that use this preflight.)
+    if(!hk_native_range_readable(function, window)) {
+        if(outErrno) {
+            *outErrno = EFAULT;
+        }
+
+        return HK_ERR_NOT_SUPPORTED;
+    }
+#endif
 
     if(hk_arm64_has_early_terminator(function, window)) {
         // Function ends inside the overwrite window: patching would smash a

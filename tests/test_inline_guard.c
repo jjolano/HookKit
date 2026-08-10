@@ -9,6 +9,8 @@
 
 static void *fn1 = (void *)(uintptr_t)0x1000;
 static void *fn2 = (void *)(uintptr_t)0x2000;
+static void *fn3 = (void *)(uintptr_t)0x3000;
+static void *fn4 = (void *)(uintptr_t)0x4000;
 static void *repA = (void *)(uintptr_t)0x5000;
 static void *repB = (void *)(uintptr_t)0x6000;
 static void *repC = (void *)(uintptr_t)0x7000;
@@ -31,10 +33,18 @@ int main(void) {
     // 4. Same address, different replacement, SAME backend type: chained OK.
     assert(hk_inline_guard_reserve((uintptr_t)fn1, repB, 1, NULL) == HK_GUARD_OK);
 
-    // 5. update(HK_ERR_NOT_SUPPORTED) releases the entry: a later different
-    //    backend + different replacement succeeds.
-    hk_inline_guard_update((uintptr_t)fn1, 2, NULL);  // NOT_SUPPORTED: wrote nothing
-    assert(hk_inline_guard_reserve((uintptr_t)fn1, repB, 2, NULL) == HK_GUARD_OK);
+    // 5. A failed CHAINED hook (second hook on the same address) must NOT
+    //    release the first hook's ownership: the entry reverts to repA, the
+    //    still-installed first hook. A different backend + different
+    //    replacement is therefore BLOCKED again...
+    hk_inline_guard_update((uintptr_t)fn1, 2, NULL);  // chained repB hook wrote nothing
+    assert(hk_inline_guard_reserve((uintptr_t)fn1, repB, 2, NULL) == HK_GUARD_BLOCKED);
+
+    //    ...and the reverted state is the first hook's: idempotent re-hook
+    //    of repA returns the first hook's original.
+    void *reverted = NULL;
+    assert(hk_inline_guard_reserve((uintptr_t)fn1, repA, 2, &reverted) == HK_GUARD_DUP);
+    assert(reverted == repA);
 
     // 6. update(HK_ERR) taints: a later different-type different-replacement
     //    hook is still BLOCKED even though the replacement differs.
@@ -43,6 +53,50 @@ int main(void) {
 
     // 7. Unrelated address stays free throughout.
     assert(hk_inline_guard_reserve((uintptr_t)fn2, repA, 9, NULL) == HK_GUARD_OK);
+
+    // 8. A failed FRESH hook (nothing installed yet) still releases the
+    //    entry: a later different backend + different replacement succeeds.
+    assert(hk_inline_guard_reserve((uintptr_t)fn3, repA, 1, NULL) == HK_GUARD_OK);
+    hk_inline_guard_update((uintptr_t)fn3, 2, NULL);  // fresh hook wrote nothing
+    assert(hk_inline_guard_reserve((uintptr_t)fn3, repB, 2, NULL) == HK_GUARD_OK);
+
+    // 9. A SUCCESSFUL chain leaves correct state: the entry records the
+    //    chained replacement and its original.
+    assert(hk_inline_guard_reserve((uintptr_t)fn4, repA, 1, NULL) == HK_GUARD_OK);
+    hk_inline_guard_update((uintptr_t)fn4, 0, repC);  // first hook lands, orig = repC
+    assert(hk_inline_guard_reserve((uintptr_t)fn4, repB, 1, NULL) == HK_GUARD_OK);  // chain
+    hk_inline_guard_update((uintptr_t)fn4, 0, repA);  // chained hook lands, orig = repA
+
+    void *chained_orig = NULL;
+    assert(hk_inline_guard_reserve((uintptr_t)fn4, repB, 2, &chained_orig) == HK_GUARD_DUP);
+    assert(chained_orig == repA);                     // the chained hook's original
+    assert(hk_inline_guard_reserve((uintptr_t)fn4, repA, 2, NULL) == HK_GUARD_BLOCKED);  // entry now records repB
+
+    // 10. Table-full fails CLOSED: once every slot is occupied and no entry
+    //     matches, reservation returns HK_GUARD_FULL instead of a silent OK.
+    //     4 entries are live here (fn1 tainted, fn2, fn3 re-taken in case 8,
+    //     fn4), so 60 fresh addresses fit and the 61st is refused.
+    int ok = 0;
+    int full_at = -1;
+
+    for(int i = 0; i < 64; i++) {
+        hk_guard_result_t r = hk_inline_guard_reserve((uintptr_t)(0x10000 + i * 8), repA, 1, NULL);
+
+        if(r == HK_GUARD_OK) {
+            ok += 1;
+        } else {
+            assert(r == HK_GUARD_FULL);
+            full_at = i;
+            break;
+        }
+    }
+
+    assert(ok == 60);
+    assert(full_at == 60);
+
+    // The refused address was not recorded: reserving it again is still FULL,
+    // not DUP.
+    assert(hk_inline_guard_reserve((uintptr_t)(0x10000 + full_at * 8), repA, 1, NULL) == HK_GUARD_FULL);
 
     printf("test_inline_guard: all assertions passed\n");
     return 0;

@@ -243,17 +243,38 @@ const char *litehook_locate_dsc(void)
 	return (const char *)dscPath;
 }
 
-uintptr_t litehook_get_dsc_slide(void)
+// Internal: resolves the dyld shared-cache slide exactly once. Returns false
+// when the slide could not be obtained (task_info failed); *outSlide is then
+// 0 and MUST NOT be used — adding it to a dsc symbol value would yield an
+// unslid address that is not a valid runtime address.
+static bool _litehook_get_dsc_slide(uintptr_t *outSlide)
 {
 	static uintptr_t slide = 0;
+	static bool slideValid = false;
 	static dispatch_once_t onceToken;
 	dispatch_once(&onceToken, ^{
 		task_dyld_info_data_t dyldInfo;
 		uint32_t count = TASK_DYLD_INFO_COUNT;
-		task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyldInfo, &count);
+		kern_return_t kr = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyldInfo, &count);
+		if (kr != KERN_SUCCESS) {
+			// Never dereference all_image_info_addr on a failed lookup — it
+			// may be garbage. slide stays 0 and slideValid stays false, so
+			// every dsc-symbol lookup that needs the slide fails closed
+			// (returns no symbol) instead of signing a bogus address.
+			return;
+		}
 		struct dyld_all_image_infos *infos = (struct dyld_all_image_infos *)dyldInfo.all_image_info_addr;
 		slide = infos->sharedCacheSlide;
+		slideValid = true;
 	});
+	*outSlide = slide;
+	return slideValid;
+}
+
+uintptr_t litehook_get_dsc_slide(void)
+{
+	uintptr_t slide = 0;
+	_litehook_get_dsc_slide(&slide);
 	return slide;
 }
 
@@ -269,10 +290,14 @@ bool is_pointer_to_instructions(const mach_header_u *header, uintptr_t ptr)
 				(const struct section_64 *)((const uint8_t *)seg + sizeof(struct segment_command_64));
 
 			for (uint32_t s = 0; s < seg->nsects; s++, sect++) {
+				// Both bounds are runtime (slid) addresses: sect->addr is an
+				// unslid vmaddr and must not be compared against the slid ptr.
+				// Mixing them would widen the window below the section start
+				// and could PAC-sign a data symbol as code.
 				uint64_t sectStart = (uintptr_t)header + sect->addr;
 				uint64_t sectEnd   = sectStart + sect->size;
 
-				if ((ptr >= sect->addr) && (ptr < sectEnd)) {
+				if ((ptr >= sectStart) && (ptr < sectEnd)) {
 					uint32_t attrs = sect->flags & SECTION_ATTRIBUTES_USR;
 					return (attrs & S_ATTR_PURE_INSTRUCTIONS) ||
 						   (attrs & S_ATTR_SOME_INSTRUCTIONS);
@@ -430,6 +455,12 @@ void *litehook_find_dsc_symbol(const char *imagePath, const char *symbolName)
 
 	if ((entry.nlistStartIndex + entry.nlistCount) > symbolInfo.nlistCount) goto end;
 
+	// The slide is needed to compute a runtime address for any dsc symbol.
+	// If it could not be obtained, skip the whole lookup — an unslid address
+	// is garbage and signing it as code would fault later.
+	uintptr_t dscSlide = 0;
+	if (!_litehook_get_dsc_slide(&dscSlide)) goto end;
+
 	for (uint32_t i = entry.nlistStartIndex; i < entry.nlistStartIndex + entry.nlistCount; i++) {
 		struct nlist_64 n;
 		fseek(symbolDSC, symbolHeader.localSymbolsOffset + symbolInfo.nlistOffset + (sizeof(n) * i), SEEK_SET);
@@ -440,7 +471,7 @@ void *litehook_find_dsc_symbol(const char *imagePath, const char *symbolName)
 		char curSymbolName[len+1];
 		if (fread(curSymbolName, len+1, 1, symbolDSC) != 1) goto end;
 		if (!strcmp(curSymbolName, symbolName)) {
-			symbol = _litehook_sign_if_executable((void *)(litehook_get_dsc_slide() + n.n_value), NULL);
+			symbol = _litehook_sign_if_executable((void *)(dscSlide + n.n_value), NULL);
 		}
 	}
 
@@ -486,7 +517,11 @@ static void _litehook_register_global_rebind_callback(void)
 	_dyld_register_func_for_add_image((void (*)(const struct mach_header *, intptr_t))_litehook_apply_global_rebinds);
 }
 
-void _litehook_rebind_symbol_in_section(const mach_header_u *targetHeader, section_u *section, void *replacee, void *replacement)
+// Returns true if every matching slot was rewritten; false if at least one
+// matching slot could not be made writable (its write was skipped — see
+// below). Callers propagate that as a failure so a partial rebind is never
+// reported as a clean success.
+bool _litehook_rebind_symbol_in_section(const mach_header_u *targetHeader, section_u *section, void *replacee, void *replacement)
 {
 	char segname[sizeof(section->segname)+1];
 	strlcpy(segname, section->segname, sizeof(segname));
@@ -500,6 +535,8 @@ void _litehook_rebind_symbol_in_section(const mach_header_u *targetHeader, secti
 
 	void **symbolPointers = (void **)sectionStart;
 	replacee = ptrauth_strip(ptrauth_auth_function(replacee, ptrauth_key_function_pointer, 0), ptrauth_key_function_pointer);
+
+	bool failed = false;
 
 	for (uint32_t i = 0; i < (sectionSize / sizeof(void *)); i++) {
 		void *symbolPointer = symbolPointers[i];
@@ -517,21 +554,32 @@ void _litehook_rebind_symbol_in_section(const mach_header_u *targetHeader, secti
 				}
 			}
 #endif
-			litehook_unprotect((vm_address_t)&symbolPointers[i], sizeof(void *));
-			if (auth) { 
-				symbolPointers[i] = ptrauth_auth_and_resign(replacement, ptrauth_key_function_pointer, 0, ptrauth_key_process_independent_code, &symbolPointers[i]);
+			kern_return_t kr = litehook_unprotect((vm_address_t)&symbolPointers[i], sizeof(void *));
+			if (kr == KERN_SUCCESS) {
+				if (auth) { 
+					symbolPointers[i] = ptrauth_auth_and_resign(replacement, ptrauth_key_function_pointer, 0, ptrauth_key_process_independent_code, &symbolPointers[i]);
+				}
+				else {
+					symbolPointers[i] = ptrauth_strip(replacement, ptrauth_key_function_pointer);
+				}
+				gRebindMatches++;
 			}
 			else {
-				symbolPointers[i] = ptrauth_strip(replacement, ptrauth_key_function_pointer);
+				// Fail closed: never write into a region that could not be
+				// made writable — a protected/unwritable slot would fault
+				// directly. Skip the write and report the failure so the
+				// caller can surface the partial rebind.
+				failed = true;
 			}
 #if __arm64__
 			if (needsTPRORevert) {
 				os_thread_self_restrict_tpro_to_ro();
 			}
 #endif
-			gRebindMatches++;
 		}
 	}
+
+	return !failed;
 }
 
 typedef struct {
@@ -548,9 +596,12 @@ global_rebind *gRebinds = NULL;
 // global path's per-image application. No counter reset here: the caller
 // (litehook_rebind_symbol) owns the tally window so a global rebind totals
 // every image it touches.
-static void _litehook_rebind_header(const mach_header_u *targetHeader, void *replacee, void *replacement, bool (*exceptionFilter)(const mach_header_u *header))
+// Returns true if every matching slot was rewritten; false if any slot could
+// not be made writable and was skipped.
+static bool _litehook_rebind_header(const mach_header_u *targetHeader, void *replacee, void *replacement, bool (*exceptionFilter)(const mach_header_u *header))
 {
 	struct load_command *lcp = (void *)((uintptr_t)targetHeader + sizeof(mach_header_u));
+	bool failed = false;
 	for(int i = 0; i < targetHeader->ncmds; i++) {
 		if (lcp->cmd == LC_SEGMENT_U) {
 			segment_command_u *segCmd = (segment_command_u *)lcp;
@@ -561,24 +612,30 @@ static void _litehook_rebind_header(const mach_header_u *targetHeader, void *rep
 				for (int j = 0; j < segCmd->nsects; j++) {
 					if ((sections[j].flags & SECTION_TYPE) == S_LAZY_SYMBOL_POINTERS || 
 						(sections[j].flags & SECTION_TYPE) == S_NON_LAZY_SYMBOL_POINTERS) {
-						_litehook_rebind_symbol_in_section(targetHeader, &sections[j], replacee, replacement);
+						if (!_litehook_rebind_symbol_in_section(targetHeader, &sections[j], replacee, replacement)) {
+							failed = true;
+						}
 					}
 				}
 			}
 		}
 		lcp = (void *)((uintptr_t)lcp + lcp->cmdsize);
 	}
+	return !failed;
 }
 
-void _litehook_apply_global_rebind(const mach_header_u *mh, global_rebind *rebind)
+// Returns false if a matching slot could not be made writable (its write was
+// skipped); true otherwise, including when the image was filtered out.
+bool _litehook_apply_global_rebind(const mach_header_u *mh, global_rebind *rebind)
 {
 	if (mh != rebind->sourceHeader) {
 		bool filterAllowed = true;
 		if (rebind->exceptionFilter) filterAllowed = rebind->exceptionFilter(mh);
 		if (filterAllowed) {
-			_litehook_rebind_header(mh, rebind->replacee, rebind->replacement, NULL);
+			return _litehook_rebind_header(mh, rebind->replacee, rebind->replacement, NULL);
 		}
 	}
+	return true;
 }
 
 void _litehook_apply_global_rebinds(const mach_header_u *mh, intptr_t vmaddr_slide)
@@ -591,7 +648,10 @@ void _litehook_apply_global_rebinds(const mach_header_u *mh, intptr_t vmaddr_sli
 
 	if (gRebinds && gRebindCount != 0) {
 		for (uint32_t i = 0; i < gRebindCount; i++) {
-			// Apply all existing rebinds for newly loaded image
+			// Apply all existing rebinds for newly loaded image. The dyld
+			// callback has no error channel: a slot that could not be made
+			// writable is skipped inside (fail closed), and the match tally
+			// stays untouched.
 			_litehook_apply_global_rebind(mh, &gRebinds[i]);
 		}
 	}
@@ -651,12 +711,16 @@ kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *re
 		// yet: the current-image scan below decides whether this rebind has
 		// anything to do. The dyld add-image callback walks gRebinds under the
 		// same lock, so the candidate can never be observed half-committed.
-		// HookKit: upstream litehook appends the global record before scanning,
-		// so a zero-match rebind stayed registered and applied to FUTURE image
-		// loads — silently contradicting the caller's side-effect-free
-		// contract. Committing only on a first match keeps the zero-match path
-		// a true no-op (nothing retained, nothing applied later), and is
-		// exactly as safe under the lock as the old append-first order.
+		// The list is grown BEFORE the scan: patching only starts after the
+		// allocation has succeeded, so a realloc failure returns with nothing
+		// installed and the live list stays consistent with installed state.
+		// The grown slot is only committed if the scan actually rewrote
+		// something — a zero-match rebind stays a true no-op (nothing
+		// retained, nothing applied to future image loads), and the unused
+		// capacity is harmless slack. HookKit: upstream litehook appended the
+		// global record before scanning, so a zero-match rebind stayed
+		// registered and applied to FUTURE image loads — silently
+		// contradicting the caller's side-effect-free contract.
 		global_rebind candidate = {
 			.sourceHeader = sourceHeader,
 			.replacee = replacee,
@@ -664,38 +728,60 @@ kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *re
 			.exceptionFilter = exceptionFilter,
 		};
 
-		for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-			const mach_header_u *header = (const mach_header_u *)_dyld_get_image_header(i);
-			// Apply new rebind for all already loaded images
-			_litehook_apply_global_rebind(header, &candidate);
-		}
-
-		if (gRebindMatches == 0) {
-			// Nothing rewrote a slot: the rebind is a silent no-op. Do not
-			// register it — a zero-match global rebind must apply to NO image,
-			// past or future, so the caller can report a side-effect-free,
-			// retryable failure (HK_ERR_NOT_SUPPORTED). The caller reads the
-			// match tally below under this same lock, so this stays race-free.
-			// HookKit: upstream appended the record regardless of the scan
-			// result, leaking the rebind into every future image load.
-			pthread_mutex_unlock(&gRebindLock);
-			return KERN_SUCCESS;
-		}
-
-		// Grow first so a failed realloc leaves the live list untouched.
+		// Grow first so a failed realloc leaves the live list untouched and
+		// no hook has been patched yet.
 		global_rebind *grown = realloc(gRebinds, sizeof(global_rebind) * (gRebindCount + 1));
 		if (!grown) {
 			pthread_mutex_unlock(&gRebindLock);
 			return KERN_MEMORY_FAILURE;
 		}
 		gRebinds = grown;
-		gRebindCount++;
+
+		bool applyFailed = false;
+		for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+			const mach_header_u *header = (const mach_header_u *)_dyld_get_image_header(i);
+			// Apply new rebind for all already loaded images
+			if (!_litehook_apply_global_rebind(header, &candidate)) {
+				applyFailed = true;
+			}
+		}
+
+		if (applyFailed) {
+			// A slot could not be made writable and its write was skipped:
+			// fail closed. The record is NOT committed (same rule as the
+			// zero-match path below), so the failure is retryable — applying
+			// it again only touches the skipped slots, since already-rewritten
+			// slots no longer match — and the list stays consistent with what
+			// was actually installed.
+			pthread_mutex_unlock(&gRebindLock);
+			return KERN_PROTECTION_FAILURE;
+		}
+
+		if (gRebindMatches == 0) {
+			// The zero-match contract: nothing rewrote a slot, so the rebind
+			// is a silent no-op. Do not register it — a zero-match global
+			// rebind must apply to NO image, past or future, so the caller
+			// can report a side-effect-free, retryable failure
+			// (HK_ERR_NOT_SUPPORTED). The caller reads the match tally below
+			// under this same lock, so this stays race-free. HookKit: upstream
+			// appended the record regardless of the scan result, leaking the
+			// rebind into every future image load. The capacity grown above
+			// goes unused — harmless slack, the list contents are untouched.
+			pthread_mutex_unlock(&gRebindLock);
+			return KERN_SUCCESS;
+		}
 
 		global_rebind *rebind = &gRebinds[gRebindCount-1];
 		*rebind = candidate;
+		gRebindCount++;
 	}
 	else {
-		_litehook_rebind_header(targetHeader, replacee, replacement, exceptionFilter);
+		if (!_litehook_rebind_header(targetHeader, replacee, replacement, exceptionFilter)) {
+			// A matching slot could not be made writable: fail closed rather
+			// than report a clean success for a partial rebind.
+			pthread_mutex_unlock(&gRebindLock);
+			return KERN_PROTECTION_FAILURE;
+		}
 	}
 
 	// Capture the tally under the same lock as the apply, so the caller's

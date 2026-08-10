@@ -1,6 +1,7 @@
 #import "Internal/HKBackendInternal.h"
 
 #import <dlfcn.h>
+#import <pthread.h>
 
 #import "native/hk_native.h"
 #import "native/hk_swift.h"
@@ -32,32 +33,46 @@ static BOOL native_available(void) {
 // so no path rewrite. The probe result is cached unconditionally, success or
 // failure: a Swift runtime that appears after the first probe is not retried.
 static BOOL swift_available(void) {
+    // swift_available() can be queried concurrently (registry selection and
+    // availability introspection), so the probe's cached statics and the
+    // published hk_swift_demangle global must be serialized; the publish
+    // happens-before any reader that got YES through the same mutex.
+    // ponytail: pthread mutex instead of dispatch_once — once-semantics
+    // would cache a failed probe forever and break the documented retry
+    // contract (engine may appear after HookKit loads); os_unfair_lock
+    // needs iOS 10+, above the 9.0 deployment floor (Makefile TARGET).
+    static pthread_mutex_t probeMutex = PTHREAD_MUTEX_INITIALIZER;
     static BOOL cached = NO;
     static BOOL available = NO;
 
-    if(cached) {
-        return available;
-    }
+    pthread_mutex_lock(&probeMutex);
 
-    if(hk_swift_supported()) {
-        if(@available(iOS 12.2, *)) {
-            hk_swift_demangle = (hk_swift_demangle_fn)dlsym(RTLD_DEFAULT, "swift_demangle");
+    if(!cached) {
+        if(hk_swift_supported()) {
+            if(@available(iOS 12.2, *)) {
+                hk_swift_demangle = (hk_swift_demangle_fn)dlsym(RTLD_DEFAULT, "swift_demangle");
 
-            if(!hk_swift_demangle) {
-                void *core = dlopen("/usr/lib/swift/libswiftCore.dylib", RTLD_LAZY);
+                if(!hk_swift_demangle) {
+                    void *core = dlopen("/usr/lib/swift/libswiftCore.dylib", RTLD_LAZY);
 
-                if(core) {
-                    hk_swift_demangle = (hk_swift_demangle_fn)dlsym(core, "swift_demangle");
+                    if(core) {
+                        hk_swift_demangle = (hk_swift_demangle_fn)dlsym(core, "swift_demangle");
+                    }
                 }
-            }
 
-            available = hk_swift_demangle != NULL;
+                available = hk_swift_demangle != NULL;
+            }
         }
+
+        // Swift-specific contract: cached unconditionally (unlike the
+        // jailbreak-provider probes, which retry a failed dlopen).
+        cached = YES;
     }
 
-    cached = YES;
+    BOOL result = available;
+    pthread_mutex_unlock(&probeMutex);
 
-    return available;
+    return result;
 }
 
 // Dobby is compiled in on arm64/arm64e only (the vendored static lib has no

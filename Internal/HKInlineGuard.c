@@ -15,6 +15,8 @@ typedef struct {
     void *orig;
     int type;
     bool tainted;
+    bool pending;           // a chained hook is in flight; replacement holds the chained value
+    void *prev_replacement; // the last INSTALLED replacement, restored if the chain fails
     bool used;
 } hk_guard_entry_t;
 
@@ -61,8 +63,14 @@ hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, 
 
         if(g_entries[i].type == backendType) {
             // Same backend type, different replacement: the provider itself
-            // is chaining on this address — allow it.
+            // is chaining on this address — allow it. The entry's recorded
+            // replacement becomes the chained value; update() settles it on
+            // success or reverts to prev_replacement on failure. The first
+            // hook stays owned either way.
             printf("[HKInlineGuard] note: chaining inline hook on %p via backend type %d\n", (void *)address, backendType);
+            g_entries[i].pending = true;
+            g_entries[i].prev_replacement = g_entries[i].replacement;
+            g_entries[i].replacement = replacement;
             result = HK_GUARD_OK;
             goto unlock;
         }
@@ -73,6 +81,8 @@ hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, 
         goto unlock;
     }
 
+    bool claimed = false;
+
     for(size_t i = 0; i < HK_GUARD_MAX_ENTRIES; i++) {
         if(!g_entries[i].used) {
             g_entries[i].addr = address;
@@ -80,7 +90,10 @@ hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, 
             g_entries[i].orig = NULL;
             g_entries[i].type = backendType;
             g_entries[i].tainted = false;
+            g_entries[i].pending = false;
+            g_entries[i].prev_replacement = NULL;
             g_entries[i].used = true;
+            claimed = true;
 
             if(outOrig) {
                 *outOrig = NULL;    // no original saved yet — update() fills it after the hook lands
@@ -88,6 +101,12 @@ hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, 
 
             break;
         }
+    }
+
+    if(!claimed) {
+        // Every slot is occupied and no entry matched: proceeding would
+        // leave this hook unguarded, which is worse than declining it.
+        result = HK_GUARD_FULL;
     }
 
 unlock:
@@ -105,18 +124,35 @@ void hk_inline_guard_update(uintptr_t address, int status, void *origValue) {
 
         if(status == 0) {
             // HK_OK: the backend wrote the hook; the saved original is the
-            // one future same-replacement re-hooks should return.
+            // one future same-replacement re-hooks should return. For a
+            // chained hook this settles the pending entry: the replacement
+            // recorded by reserve() was the chained value, which is now the
+            // installed one.
+            g_entries[i].pending = false;
             g_entries[i].orig = origValue;
         } else if(status == 1) {
             // HK_ERR: the backend failed mid-flight — the prologue MAY be
             // half-written. Keep the entry and mark it tainted so a later
             // DIFFERENT hook on this address still blocks (it would stack on
-            // whatever is there now).
+            // whatever is there now). A failed chained hook reverts to the
+            // last installed replacement: the first hook is still there.
+            if(g_entries[i].pending) {
+                g_entries[i].replacement = g_entries[i].prev_replacement;
+                g_entries[i].pending = false;
+            }
+
             g_entries[i].tainted = true;
         } else if(status == 2) {
-            // HK_ERR_NOT_SUPPORTED: the backend wrote nothing — release the
-            // entry so a later hook can take the address.
-            g_entries[i].used = false;
+            // HK_ERR_NOT_SUPPORTED: the backend wrote nothing. A FRESH hook
+            // releases the entry so a later hook can take the address; a
+            // failed CHAINED hook must not release it — the first hook is
+            // still installed, so ownership stays and the entry reverts.
+            if(g_entries[i].pending) {
+                g_entries[i].replacement = g_entries[i].prev_replacement;
+                g_entries[i].pending = false;
+            } else {
+                g_entries[i].used = false;
+            }
         }
 
         break;

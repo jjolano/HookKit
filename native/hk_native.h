@@ -30,6 +30,7 @@
 #define HK_NATIVE_ERR_SHORT_FUNCTION (-2)   // target too short to patch without clobbering its neighbour
 #define HK_NATIVE_ERR_RELOCATE       (-3)   // prologue contains something unrelocatable
 #define HK_NATIVE_ERR_NO_MEMORY      (-4)
+#define HK_NATIVE_ERR_UNREADABLE     (-5)   // target/range not mapped readable
 
 // True when this build can hook at all (arm64/arm64e).
 HK_INTERNAL bool hk_native_supported(void);
@@ -46,6 +47,13 @@ HK_INTERNAL int hk_native_last_error(void);
 // through this function, so a preflight accept and the hook can never
 // disagree on the checks they share.
 HK_INTERNAL int hk_native_preflight_function(void *target, void *replacement);
+
+// True when the byte range [addr, addr+len) is mapped and readable in this
+// process. Probes via a Mach VM region walk and never touches the range
+// itself, so a bogus non-NULL address reports false instead of faulting.
+// Used before dereferencing addresses derived from untrusted metadata
+// (class pointers, prologue windows).
+HK_INTERNAL bool hk_native_range_readable(const void *addr, size_t len);
 
 // Inline function hook. On success *out_orig receives a callable pointer to the
 // original implementation (PAC-signed on arm64e).

@@ -78,32 +78,44 @@ bool hk_arm64_is_terminator(uint32_t insn) {
     return false;
 }
 
-// RETAA / RETAB authenticate then return; BRAAZ/BRABZ are authenticated
-// indirect branches. These are exactly the shapes arm64e micro-thunks use.
+// RETAA / RETAB authenticate then return; BRAA/BRAB and their Z forms are
+// authenticated indirect branches. These are exactly the shapes arm64e
+// micro-thunks use.
 //
-// Encodings (ARMv8.3-A, "authenticated indirect branch"):
-//   BRAAZ Xn  0xD71F0800 | (Rn << 5)   (key A, no modifier)  — verified:
-//   BRAAZ X17 = 0xD71F0BF1
-//   BRABZ Xn  same with the key bit (bit 10) set: 0xD71F0C00 | (Rn << 5)
-//   (BRAA/BRAB, the register-pair forms, carry a modifier register and a
-//   different op2 prefix — not matched here; they are vanishingly rare in
-//   function prologues, and a false positive would only decline a hook.)
-//   BLRAAZ/BLRABZ start 0xD73F..., so the 0xD71F prefix already excludes
-//   authenticated calls.
+// Encodings (ARMv8.3-A; verified against clang's assembler and capstone):
+//   BRAA  Xn, Xm  0xD71F0800 | (Rn << 5) | Rm   (key A, modifier Xm)
+//   BRAB  Xn, Xm  0xD71F0C00 | (Rn << 5) | Rm   (key B)
+//   BRAAZ Xn      0xD61F081F | (Rn << 5)        (key A, no modifier -- the Z
+//                                                forms live in the BR space,
+//                                                NOT as aliases of the pair
+//                                                forms above)
+//   BRABZ Xn      0xD61F0C1F | (Rn << 5)
+//   RETAA         0xD65F0BFF                    (fixed)
+//   RETAB         0xD65F0FFF                    (fixed)
+// The authenticated CALLS (BLRAA/BLRAB/BLRAAZ/BLRABZ, 0xD73F.../0xD63F...) are
+// not terminators -- they return, so clobbering one only costs a tail call.
 static bool is_authenticated_terminator(uint32_t insn) {
-    if(insn == 0xD65F0BFCu) {
+    if(insn == 0xD65F0BFFu) {
         return true;    // RETAA (fixed encoding)
     }
 
-    if(insn == 0xD65F0FFCu) {
+    if(insn == 0xD65F0FFFu) {
         return true;    // RETAB (fixed encoding)
     }
 
     if((insn & 0xFFFFFC00u) == 0xD71F0800u) {
-        return true;    // BRAAZ Xn
+        return true;    // BRAA Xn, Xm (any Rn/Rm)
     }
 
     if((insn & 0xFFFFFC00u) == 0xD71F0C00u) {
+        return true;    // BRAB Xn, Xm
+    }
+
+    if((insn & 0xFFFFFC1Fu) == 0xD61F081Fu) {
+        return true;    // BRAAZ Xn (op2 differs from plain BR's)
+    }
+
+    if((insn & 0xFFFFFC1Fu) == 0xD61F0C1Fu) {
         return true;    // BRABZ Xn
     }
 
@@ -175,7 +187,10 @@ size_t hk_arm64_emit_branch(uint32_t *buf, uint64_t buf_addr, uint64_t dest) {
 #pragma mark - Relocation
 
 // Rewrite one instruction. Returns bytes written, or 0 if unrelocatable.
-static size_t relocate_one(uint32_t insn, uint64_t pc, uint32_t *out) {
+// `patch_start`/`patch_end` bound the prologue bytes being overwritten: a
+// branch whose target lands inside them would be retargeted back into the
+// now-patched region, so it is refused (fail closed).
+static size_t relocate_one(uint32_t insn, uint64_t pc, uint64_t patch_start, uint64_t patch_end, uint32_t *out) {
     // ADR / ADRP
     if((insn & 0x1F000000u) == 0x10000000u) {
         uint32_t rd = insn & 31u;
@@ -196,6 +211,10 @@ static size_t relocate_one(uint32_t insn, uint64_t pc, uint32_t *out) {
     // B / BL
     if((insn & 0x7C000000u) == 0x14000000u) {
         uint64_t target = pc + (uint64_t)(sign_extend(insn & 0x03FFFFFFu, 26) << 2);
+
+        if(target >= patch_start && target < patch_end) {
+            return 0;   // lands inside the bytes being overwritten
+        }
 
         if(!(insn & 0x80000000u)) {
             return emit_abs_jump(out, target);
@@ -238,6 +257,10 @@ static size_t relocate_one(uint32_t insn, uint64_t pc, uint32_t *out) {
         }
 
         if(conditional) {
+            if(target >= patch_start && target < patch_end) {
+                return 0;   // lands inside the bytes being overwritten
+            }
+
             out[0] = retargeted;
             out[1] = a64_b(20);
             emit_abs_jump(&out[2], target);
@@ -301,7 +324,7 @@ size_t hk_arm64_relocate(const uint32_t *src, uint64_t src_addr, size_t count,
             return 0;
         }
 
-        size_t emitted = relocate_one(src[i], src_addr + (i * 4), dst + (written / 4));
+        size_t emitted = relocate_one(src[i], src_addr + (i * 4), src_addr, src_addr + count * 4, dst + (written / 4));
 
         if(emitted == 0) {
             return 0;

@@ -2,6 +2,7 @@
 
 #import <dlfcn.h>
 #import <errno.h>
+#import <pthread.h>
 #import <stdlib.h>
 #import <string.h>
 
@@ -25,10 +26,11 @@ static void* libhooker_handle = NULL;
 // %hook SpringBoard -applicationDidFinishLaunching: sent SpringBoard into
 // safe mode exactly this way).
 //
-// Detect the provider at probe time via dladdr on the resolved symbol:
-// the image name distinguishes ElleKit ("libellekit") from real libhooker.
-// Default to ElleKit semantics when detection fails (the modern jailbreak
-// default; the header matches neither provider, so it is no fallback).
+// Detect the provider at probe time: cross-check the filename dladdr
+// reports for the resolved LBHookMessage symbol ("libellekit" -> ElleKit)
+// against symbol evidence (real libhooker exports LHStrError, ElleKit does
+// not). Disagreement fails closed — a wrong ABI read suppresses %orig and
+// crashes v1-era tweaks.
 static BOOL libhooker_uses_applied_count = NO;
 static void (*fn_LBHookMessage)(Class, SEL, void *, void *) = NULL;
 static int (*fn_LHHookFunctions)(const struct LHFunctionHook *, int) = NULL;
@@ -39,14 +41,7 @@ static bool (*fn_LHFindSymbols)(struct libhooker_image *, const char **, void **
 
 // Only successful probes are cached: if dlopen fails, a later call retries
 // (the engine may appear after HookKit loads).
-BOOL libhooker_available(void) {
-    static BOOL cached = NO;
-    static BOOL available = NO;
-
-    if(cached) {
-        return available;
-    }
-
+static BOOL probe_libhooker(void) {
     NSString *jbPath = HKJBPath(@"/usr/lib/libhooker.dylib");
 
     if(!jbPath) {
@@ -88,20 +83,58 @@ BOOL libhooker_available(void) {
 
     // Provider ABI detection: real libhooker (unc0ver/Taurine) returns an
     // applied count from LHHookFunctions/LHPatchMemory and an errno enum
-    // from LBHookMessage; ElleKit returns void/0-on-success. Distinguish by
-    // the image the LBHookMessage symbol lives in. dladdr can fail only if
-    // the symbol isn't in a loaded image — it is, we just dlsym'd it, so a
-    // miss falls through to the ElleKit default.
+    // from LBHookMessage; ElleKit returns void/0-on-success. The filename
+    // heuristic alone is spoofable — a renamed or shim provider recreates
+    // the historical return-value mismatch (the Shadow 3.7.6 NULL-%orig
+    // crash) — so cross-check it against symbol evidence: the vendored real
+    // libhooker header declares LHStrError (a debug helper); ElleKit's
+    // libhooker does not export it. Symbol evidence decides when the
+    // filename is unavailable; when the two disagree, fail closed rather
+    // than guess an ABI.
     Dl_info info;
+    BOOL filenameKnown = dladdr((void *)LBHookMessage, &info) && info.dli_fname;
+    BOOL filenameIsElleKit = filenameKnown && (strstr(info.dli_fname, "libellekit") != NULL);
+    BOOL symbolIsElleKit = (dlsym(libhooker_handle, "LHStrError") == NULL);
 
-    if(dladdr((void *)LBHookMessage, &info) && info.dli_fname) {
-        libhooker_uses_applied_count = (strstr(info.dli_fname, "libellekit") == NULL);
+    if(filenameKnown && filenameIsElleKit != symbolIsElleKit) {
+        // The evidence contradicts itself: refuse to guess. A wrong ABI
+        // read makes every hook look failed and leaves %orig cells NULL.
+        // Stay uncached so a later probe retries if the provider changes.
+        dlclose(libhooker_handle);
+        libhooker_handle = NULL;
+        return NO;
     }
 
-    cached = YES;
-    available = YES;
+    libhooker_uses_applied_count = !symbolIsElleKit;
 
-    return available;
+    return YES;
+}
+
+BOOL libhooker_available(void) {
+    // libhooker_available() can be queried concurrently (registry selection
+    // and availability introspection), so the probe's cached statics, the
+    // ABI decision and the published function-pointer globals must be
+    // serialized; the publish happens-before any reader that got YES
+    // through the same mutex.
+    // ponytail: pthread mutex instead of dispatch_once — once-semantics
+    // would cache a failed probe forever and break the documented retry
+    // contract (engine may appear after HookKit loads); os_unfair_lock
+    // needs iOS 10+, above the 9.0 deployment floor (Makefile TARGET).
+    static pthread_mutex_t probeMutex = PTHREAD_MUTEX_INITIALIZER;
+    static BOOL cached = NO;
+    static BOOL available = NO;
+
+    pthread_mutex_lock(&probeMutex);
+
+    if(!cached && probe_libhooker()) {
+        available = YES;
+        cached = YES;
+    }
+
+    BOOL result = available;
+    pthread_mutex_unlock(&probeMutex);
+
+    return result;
 }
 
 // Preflight-only discovery, for the availability-introspection entry points
@@ -274,7 +307,12 @@ BOOL libhooker_discoverable(void) {
             // Real libhooker: result is the number of hooks applied. ElleKit
             // semantics can't be assumed here — a successful batch returns
             // the full count, so treat result == count as all-succeeded.
-            if(result < count) {
+            // Clamp the provider's claim before using it as an index bound:
+            // an over-count would index past functionOps and a negative
+            // claim would corrupt the success tally.
+            int applied = result < 0 ? 0 : (result > count ? count : result);
+
+            if(applied < count) {
                 if(!detail) {
                     detail = result;
                 }
@@ -282,11 +320,11 @@ BOOL libhooker_discoverable(void) {
                 NSLog(@"[HKElleKit] warning: batch LHHookFunctions retval less than expected (%d/%d)", result, count);
             }
 
-            for(int i = 0; i < result; i++) {
+            for(int i = 0; i < applied; i++) {
                 functionOps[i]->succeeded = YES;
             }
 
-            succeeded += result;
+            succeeded += applied;
         } else {
             // ElleKit: LIBHOOKER_OK (0) on success; non-zero is the failure
             // detail itself, not a partial count. A 0 return means every op
@@ -313,7 +351,11 @@ BOOL libhooker_discoverable(void) {
         int result = fn_LHPatchMemory([memoryHooks mutableBytes], count);
 
         if(libhooker_uses_applied_count) {
-            if(result < count) {
+            // Real libhooker: result is the number of patches applied; clamp
+            // the claim before using it as an index bound, as above.
+            int applied = result < 0 ? 0 : (result > count ? count : result);
+
+            if(applied < count) {
                 if(!detail) {
                     detail = result;
                 }
@@ -321,11 +363,11 @@ BOOL libhooker_discoverable(void) {
                 NSLog(@"[HKElleKit] warning: batch LHPatchMemory retval less than expected (%d/%d)", result, count);
             }
 
-            for(int i = 0; i < result; i++) {
+            for(int i = 0; i < applied; i++) {
                 memoryOps[i]->succeeded = YES;
             }
 
-            succeeded += result;
+            succeeded += applied;
         } else {
             if(result != LIBHOOKER_OK) {
                 if(!detail) {
@@ -377,6 +419,13 @@ BOOL libhooker_discoverable(void) {
     }
 
     char *prefixed = malloc(strlen(name) + 2);
+
+    if(!prefixed) {
+        // OOM: errno is ENOMEM from malloc; nothing was written anywhere.
+        _lastErrno = ENOMEM;
+        return NULL;
+    }
+
     prefixed[0] = '_';
     strcpy(prefixed + 1, name);
 

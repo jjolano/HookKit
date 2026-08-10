@@ -31,29 +31,46 @@ int hk_native_last_error(void) {
 
 #pragma mark - Memory
 
-// Current protection of the region containing `addr`. Restoring what was there
-// matters: hardcoding R-X would leave a patched data page unwritable.
-static bool hk_region_protection(vm_address_t addr, vm_prot_t *out) {
-    vm_address_t region = addr;
-    vm_size_t region_size = 0;
-    vm_region_basic_info_data_64_t info;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object = MACH_PORT_NULL;
+// Current protection of the [start, end) byte range, provided it is uniform
+// across every VM region it crosses. A patch spanning regions with different
+// protections cannot restore them all to one value, so a mixed range fails
+// closed before anything is written.
+static bool hk_range_protection(vm_address_t start, vm_address_t end, vm_prot_t *out) {
+    vm_prot_t first = VM_PROT_NONE;
+    bool have = false;
 
-    kern_return_t kr = vm_region_64(mach_task_self(), &region, &region_size,
-                                    VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
-                                    &count, &object);
+    while(start < end) {
+        vm_address_t region = start;
+        vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
 
-    if(object != MACH_PORT_NULL) {
-        mach_port_deallocate(mach_task_self(), object);
+        kern_return_t kr = vm_region_64(mach_task_self(), &region, &region_size,
+                                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                                        &count, &object);
+
+        if(object != MACH_PORT_NULL) {
+            mach_port_deallocate(mach_task_self(), object);
+        }
+
+        // A region starting past `start` means the range is unmapped there.
+        if(kr != KERN_SUCCESS || region > start || region_size == 0) {
+            return false;
+        }
+
+        if(!have) {
+            first = info.protection;
+            have = true;
+        } else if(info.protection != first) {
+            return false;   // mixed protections: fail closed
+        }
+
+        start = region + region_size;
     }
 
-    if(kr != KERN_SUCCESS || region > addr) {
-        return false;
-    }
-
-    *out = info.protection;
-    return true;
+    *out = first;
+    return have;
 }
 
 // Write `size` bytes over `dst`, which may be read-only or read/execute-only.
@@ -67,7 +84,9 @@ static kern_return_t hk_write(void *dst, const void *src, size_t size) {
 
     // Fail closed. Guessing R-X here would leave a patched data region
     // unwritable to its owner; guessing R-W would leave code writable.
-    if(!hk_region_protection((vm_address_t)dst, &restore)) {
+    // The whole range must share one protection: restoring a single value
+    // over differently protected regions would flatten them.
+    if(!hk_range_protection(start, end, &restore)) {
         return KERN_INVALID_ADDRESS;
     }
 
@@ -77,8 +96,17 @@ static kern_return_t hk_write(void *dst, const void *src, size_t size) {
 
     if(kr == KERN_SUCCESS) {
         memcpy(dst, src, size);
-        vm_protect(task, start, len, FALSE, restore);
         sys_icache_invalidate(dst, size);
+
+        // The patch landed; only the restore can still fail. Report it --
+        // claiming success would leave the page stuck at its patched
+        // protection (e.g. code left non-executable).
+        kr = vm_protect(task, start, len, FALSE, restore);
+
+        if(kr != KERN_SUCCESS) {
+            return kr;
+        }
+
         return KERN_SUCCESS;
     }
 
@@ -117,6 +145,52 @@ static kern_return_t hk_write(void *dst, const void *src, size_t size) {
     }
 
     return kr;
+}
+
+// True when every page of [addr, addr+len) lies inside a VM region with read
+// permission. Walks regions instead of touching the range, so a bogus
+// non-NULL address yields false instead of a fault. The preflight paths and
+// the Swift metadata reader call this before dereferencing addresses that
+// came from untrusted metadata.
+bool hk_native_range_readable(const void *addr, size_t len) {
+    if(!addr || len == 0) {
+        return false;
+    }
+
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_address_t base = (vm_address_t)addr;
+
+    if(base + len < base) {
+        return false;   // address overflow
+    }
+
+    vm_address_t start = base & ~(page - 1);
+    vm_address_t end = ((base + len) + page - 1) & ~(page - 1);
+
+    while(start < end) {
+        vm_address_t region = start;
+        vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+
+        kern_return_t kr = vm_region_64(mach_task_self(), &region, &region_size,
+                                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                                        &count, &object);
+
+        if(object != MACH_PORT_NULL) {
+            mach_port_deallocate(mach_task_self(), object);
+        }
+
+        if(kr != KERN_SUCCESS || region > start || region_size == 0
+           || !(info.protection & VM_PROT_READ)) {
+            return false;
+        }
+
+        start = region + region_size;
+    }
+
+    return true;
 }
 
 #pragma mark - Trampolines
@@ -220,6 +294,13 @@ int hk_native_preflight_function(void *target, void *replacement) {
 
     uint64_t target_addr = (uint64_t)(uintptr_t)raw_target;
     size_t patch_bytes = hk_arm64_branch_size(target_addr, (uint64_t)(uintptr_t)raw_replacement);
+
+    // The window scan below dereferences the target; a bogus non-NULL
+    // address must fail cleanly instead of faulting.
+    if(!hk_native_range_readable(raw_target, patch_bytes)) {
+        return HK_NATIVE_ERR_UNREADABLE;
+    }
+
     const uint32_t *src = (const uint32_t *)raw_target;
 
     // A terminator before the last instruction we would overwrite means the
@@ -340,6 +421,11 @@ bool hk_native_hook_function(void *target, void *replacement, void **out_orig) {
 
 bool hk_native_patch_memory(void *target, const void *data, size_t size) {
     (void)target; (void)data; (void)size;
+    return false;
+}
+
+bool hk_native_range_readable(const void *addr, size_t len) {
+    (void)addr; (void)len;
     return false;
 }
 

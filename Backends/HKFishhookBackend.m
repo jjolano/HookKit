@@ -88,6 +88,17 @@ static NSMutableArray<HKFishhookRebinding *> *fishhookRebindingStore(void) {
     owned->name = strdup(name);
     owned->origCell = calloc(1, sizeof(void *));
 
+    if(!owned->name || !owned->origCell) {
+        // OOM: fishhook retains both pointers for every future dlopen and
+        // dereferences origCell when an import matches, so a NULL must never
+        // reach it. Nothing was registered or retained here — report the
+        // failure (strdup/calloc set errno to ENOMEM).
+        _lastErrno = ENOMEM;
+        free(owned->name);
+        free(owned->origCell);
+        return HK_ERR;
+    }
+
     struct rebinding rebinding = {
         owned->name, replacement, owned->origCell
     };

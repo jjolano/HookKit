@@ -65,6 +65,13 @@ static bool hk_swift_resolve(Class cls, void ***out_vtable, const uint32_t **out
         return false;
     }
 
+    // 1b. The metadata reads below dereference cls at fixed offsets; a stale
+    // or bogus non-NULL class pointer must fail cleanly, not fault.
+    if(!hk_native_range_readable(cls, HK_SWIFT_METADATA_DESCRIPTION_OFFSET + sizeof(uintptr_t))) {
+        hk_swift_errno = HK_SWIFT_ERR_UNREADABLE;
+        return false;
+    }
+
     // 2. Swift class? The low bit of the class metadata Data word is set for
     // Swift metatypes (SWIFT_CLASS_IS_SWIFT_MASK = 1 on Swift 5 runtimes).
     uintptr_t data = *(const uintptr_t *)((const char *)cls + HK_SWIFT_METADATA_DATA_OFFSET);
@@ -86,6 +93,13 @@ static bool hk_swift_resolve(Class cls, void ***out_vtable, const uint32_t **out
     // 4. Signed absolute pointer on arm64e (key process_independent_data).
     // A wrong strip key is caught by the descriptor checks below.
     const char *descriptor = (const char *)hk_strip_data((void *)description_signed);
+
+    // 4b. The descriptor reads span the fixed header through the vtable
+    // header; verify the range before dereferencing it.
+    if(!hk_native_range_readable(descriptor, HK_SWIFT_DESC_METHODS)) {
+        hk_swift_errno = HK_SWIFT_ERR_UNREADABLE;
+        return false;
+    }
 
     // 5. Class descriptor?
     uint32_t flags = *(const uint32_t *)descriptor;
@@ -127,8 +141,20 @@ static bool hk_swift_resolve(Class cls, void ***out_vtable, const uint32_t **out
 
     // Vtable base relative to the metadata address point -- the AnyClass
     // pointer itself (initClassVTable: classWords = self; &classWords[vtableOffset + i]).
-    *out_vtable = (void **)((const char *)cls + (size_t)vtable_offset * HK_SWIFT_VTABLE_ENTRY_SIZE);
-    *out_methods = (const uint32_t *)(descriptor + HK_SWIFT_DESC_METHODS);
+    void **vtable = (void **)((const char *)cls + (size_t)vtable_offset * HK_SWIFT_VTABLE_ENTRY_SIZE);
+    const uint32_t *methods = (const uint32_t *)(descriptor + HK_SWIFT_DESC_METHODS);
+
+    // The vtable and method arrays are derived addresses; verify both before
+    // callers dereference them.
+    if(vtable_size > 0
+       && (!hk_native_range_readable(vtable, (size_t)vtable_size * sizeof(void *))
+           || !hk_native_range_readable(methods, (size_t)vtable_size * HK_SWIFT_METHOD_DESC_SIZE))) {
+        hk_swift_errno = HK_SWIFT_ERR_UNREADABLE;
+        return false;
+    }
+
+    *out_vtable = vtable;
+    *out_methods = methods;
     *out_count = vtable_size;
     return true;
 }

@@ -22,12 +22,16 @@
 //   HK_GUARD_BLOCKED   - same address, DIFFERENT replacement, DIFFERENT
 //                        backend type: caller must NOT invoke the backend
 //                        (nothing was written)
+//   HK_GUARD_FULL      - all ownership slots are occupied and no entry
+//                        matched: nothing was reserved. Caller must refuse
+//                        the hook -- proceeding would leave it unguarded.
 // Same backend type + different replacement is allowed (provider chaining)
 // and logs.
 typedef enum {
     HK_GUARD_OK = 0,
     HK_GUARD_DUP,
-    HK_GUARD_BLOCKED
+    HK_GUARD_BLOCKED,
+    HK_GUARD_FULL
 } hk_guard_result_t;
 
 hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, int backendType, void **outOrig);

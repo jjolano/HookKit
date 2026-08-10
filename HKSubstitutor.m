@@ -1,6 +1,7 @@
 #import <HookKit/Compat.h>
 #import "Internal/HKBackendInternal.h"
 #import "Internal/HKInlineGuard.h"
+#import "Internal/HKInlinePreflight.h"
 
 #import <objc/runtime.h>
 
@@ -53,6 +54,74 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
     return NO;
 }
 
+// Side-effect-free discovery for one backend, used by the availability-
+// introspection entry points: the dlopen-based backends report through their
+// preflight-only *_discoverable() variants (dlopen_preflight never maps the
+// image and never runs its constructors, gum_init_embedded included).
+// Backends WITHOUT a discoverable variant are reported unavailable here —
+// their available() probes are never consulted on the safe path (the Swift
+// probe dlopens libswiftCore, the MS/ElleKit/Frida probes dlopen the
+// provider). The real dlopen happens only on the actual hook path
+// (initLibraries / defaultBackend / auto-cover), which keeps using the full
+// available() probes.
+static BOOL hk_backend_discoverable(hookkit_lib_t type) {
+    switch(type) {
+        case HK_LIB_ELLEKIT:
+            return libhooker_discoverable();
+
+        case HK_LIB_SUBSTRATE:
+            return substrate_discoverable();
+
+        case HK_LIB_SUBSTITUTE:
+            return substitute_discoverable();
+
+        case HK_LIB_FRIDA:
+            return frida_discoverable();
+
+        default:
+            return NO;
+    }
+}
+
+// Conservative shared prologue check for inline-capable backends that bring
+// no preflightFunction: of their own (the MS-compatible providers: ElleKit,
+// Substrate, Substitute). Runs the shared fixed-window validator with the
+// LARGEST overwrite window any inline backend uses (litehook's 20 bytes), so
+// a target that passes here is safe for every smaller (16-byte) window too.
+// Returns YES when the backend may be dispatched, NO to refuse the hook.
+// Backends that implement preflightFunction: guarantee their own checks
+// (their hook paths run the same validator), so they are never double-checked
+// here; non-inline backends have no prologue to validate.
+static BOOL hk_shared_inline_preflight_ok(id<HKSubstitutorBackend> backend, void *function, void *replacement) {
+    if(!hk_backend_is_inline_writer(backend)) {
+        return YES;
+    }
+
+    if([backend respondsToSelector:@selector(preflightFunction:withReplacement:)]) {
+        return YES;
+    }
+
+    return hk_inline_preflight(function, replacement, HK_INLINE_PREFLIGHT_LITEHOOK_WINDOW, NULL) == HK_OK;
+}
+
+// Deferred idempotent-rehook settlement record (see hookFunction:): a dup of
+// a queued-but-not-executed inline hook has no original yet, so the caller's
+// out-pointer cannot be published synchronously. The pointer is borrowed
+// under the batch contract (the caller's storage is valid until executeHooks
+// returns) and is written exactly once, inside executeHooks, never retained
+// past it.
+@interface HKGuardWaiter : NSObject {
+@public
+    uintptr_t address;
+    void *replacement;
+    int backendType;
+    void **callerOrig;
+}
+@end
+
+@implementation HKGuardWaiter
+@end
+
 #pragma mark - HKSubstitutor
 
 @interface HKSubstitutor ()
@@ -83,6 +152,10 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
     // Technique the active backend applies: the winning picker's strategy, or
     // HKStrategyDefault when resolution didn't name one. Zero-init default.
     HKStrategy resolvedStrategy;
+    // Deferred idempotent-rehook settlements (HKGuardWaiter): a dup of a
+    // queued-but-not-executed inline hook has no original until the owning
+    // hook drains, so the caller's out-pointer is settled in executeHooks.
+    NSMutableArray<HKGuardWaiter *> *dupWaiters;
 }
 
 // activeStrategy is resolvedStrategy: set by the resolution branches in
@@ -117,6 +190,7 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
 - (instancetype)init {
     if((self = [super init])) {
         batchHooks = [NSMutableArray new];
+        dupWaiters = [NSMutableArray new];
         backend = nil;
         types = HK_LIB_NONE;
         activeType = HK_LIB_NONE;
@@ -143,6 +217,15 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
         resolvedStrategy = HKStrategyDefault;
 
         for(NSNumber *num in orderedTypes) {
+            // Trust boundary: the list is caller-supplied. A malformed
+            // element (non-NSNumber) would raise an uncaught
+            // NSInvalidArgumentException at unsignedIntegerValue — skip it
+            // like any other unknown entry.
+            if(![num isKindOfClass:[NSNumber class]]) {
+                NSLog(@"[HookKit] warning: %s in type list is not an NSNumber; skipped", class_getName([num class]));
+                continue;
+            }
+
             for(size_t i = 0; i < count; i++) {
                 if(table[i].type == (hookkit_lib_t)num.unsignedIntegerValue && table[i].available()) {
                     backend = [table[i].backendClass new];
@@ -168,6 +251,14 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
         types = HK_LIB_NONE;
 
         for(NSNumber *num in orderedCategories) {
+            // Trust boundary: the list is caller-supplied. Skip malformed
+            // elements (non-NSNumber) instead of raising at
+            // unsignedIntegerValue.
+            if(![num isKindOfClass:[NSNumber class]]) {
+                NSLog(@"[HookKit] warning: %s in category list is not an NSNumber; skipped", class_getName([num class]));
+                continue;
+            }
+
             hookkit_cat_t want = (hookkit_cat_t)num.unsignedIntegerValue;
 
             if(!want) {
@@ -325,39 +416,15 @@ auto_cover_done: ;
     const HKBackendDescriptor *table = hk_backends(&count);
 
     for(size_t i = 0; i < count; i++) {
-        // Introspection must not ACTIVATE engines: the four dlopen-based
-        // backends (ElleKit, Substrate, Substitute, Frida) are probed with
-        // their preflight-only discoverable() variants — dlopen_preflight
-        // never maps the image and never runs its constructors, so this
-        // entry point can no longer initialize a hooking provider. The
-        // remaining backends (fishhook/litehook/native/dobby/swift) are
-        // compile-time or in-process engine checks with no dlopen, so their
-        // available() probes stay as-is. Selection paths (initLibraries,
-        // defaultBackend, ...) keep using the full available() probes.
-        BOOL available = table[i].available();
-
-        switch(table[i].type) {
-            case HK_LIB_ELLEKIT:
-                available = libhooker_discoverable();
-                break;
-
-            case HK_LIB_SUBSTRATE:
-                available = substrate_discoverable();
-                break;
-
-            case HK_LIB_SUBSTITUTE:
-                available = substitute_discoverable();
-                break;
-
-            case HK_LIB_FRIDA:
-                available = frida_discoverable();
-                break;
-
-            default:
-                break;
-        }
-
-        if(available) {
+        // Introspection must not ACTIVATE engines: only side-effect-free
+        // discovery is consulted here (see hk_backend_discoverable) — never
+        // the available() probes, which dlopen providers and run their
+        // constructors (gum_init_embedded can execute inside the host
+        // process). Backends without a discoverable variant are reported
+        // unavailable on the safe path; the real dlopen happens only on the
+        // actual hook path (initLibraries, defaultBackend, auto-cover),
+        // which keeps using the full available() probes.
+        if(hk_backend_discoverable(table[i].type)) {
             types |= table[i].type;
         }
     }
@@ -373,10 +440,9 @@ auto_cover_done: ;
     // hk_category_priorities is the single source of truth for category
     // membership: a category is available when any of its pickers maps to an
     // available backend — the same lookup initLibraries performs. Same
-    // discovery-vs-activation rule as getAvailableSubstitutorTypes: the four
-    // dlopen-based backends are probed preflight-only (discoverable(), never
-    // loading the engine), the compile-time/in-process backends keep their
-    // available() probes.
+    // discovery-vs-activation rule as getAvailableSubstitutorTypes: only
+    // side-effect-free discovery is consulted (see hk_backend_discoverable),
+    // never the available() probes that dlopen and initialize providers.
     for(size_t c = 0; c < hk_category_priority_count; c++) {
         for(size_t o = 0; o < hk_category_priorities[c].count; o++) {
             for(size_t i = 0; i < count; i++) {
@@ -384,30 +450,7 @@ auto_cover_done: ;
                     continue;
                 }
 
-                BOOL available = table[i].available();
-
-                switch(table[i].type) {
-                    case HK_LIB_ELLEKIT:
-                        available = libhooker_discoverable();
-                        break;
-
-                    case HK_LIB_SUBSTRATE:
-                        available = substrate_discoverable();
-                        break;
-
-                    case HK_LIB_SUBSTITUTE:
-                        available = substitute_discoverable();
-                        break;
-
-                    case HK_LIB_FRIDA:
-                        available = frida_discoverable();
-                        break;
-
-                    default:
-                        break;
-                }
-
-                if(available) {
+                if(hk_backend_discoverable(table[i].type)) {
                     cats |= hk_category_priorities[c].category;
                     break;
                 }
@@ -423,8 +466,11 @@ auto_cover_done: ;
     size_t count = 0;
     const HKBackendDescriptor *table = hk_backends(&count);
 
+    // Same discovery-vs-activation rule as the other introspection entry
+    // points: side-effect-free discovery only — the available() probes dlopen
+    // providers and must not run from a "get info" query.
     for(size_t i = 0; i < count; i++) {
-        if((types & table[i].type) && table[i].available()) {
+        if((types & table[i].type) && hk_backend_discoverable(table[i].type)) {
             [result addObject:@{
                 @"id" : table[i].identifier,
                 @"name" : table[i].name,
@@ -495,13 +541,24 @@ auto_cover_done: ;
 //
 // Deliberately preflight-driven only: it never inspects a hook RESULT to
 // decide routing (a failed invocation may have mutated the target). A backend
-// without preflightFunction: is presumed to accept (no known veto), matching
-// its direct-path behavior.
+// without preflightFunction: is presumed to accept only when it is not an
+// inline writer — inline-capable backends without a vendor preflight (the MS
+// providers) are gated by the shared conservative prologue check
+// (hk_shared_inline_preflight_ok), so no inline-capable dispatch ever
+// proceeds unguarded.
 - (id<HKSubstitutorBackend>)hk_backendForAutoCoverFunction:(void *)function replacement:(void *)replacement {
     size_t count = 0;
     const HKBackendDescriptor *table = hk_backends(&count);
 
     for(NSNumber *num in autoCoverCategories) {
+        // Trust boundary: the list is caller-supplied. Skip malformed
+        // elements (non-NSNumber) instead of raising at
+        // unsignedIntegerValue.
+        if(![num isKindOfClass:[NSNumber class]]) {
+            NSLog(@"[HookKit] warning: %s in auto-cover category list is not an NSNumber; skipped", class_getName([num class]));
+            continue;
+        }
+
         hookkit_cat_t want = (hookkit_cat_t)num.unsignedIntegerValue;
 
         if(!want) {
@@ -525,7 +582,19 @@ auto_cover_done: ;
                         }
 
                         if(![candidate respondsToSelector:@selector(preflightFunction:withReplacement:)]) {
-                            return candidate;   // no veto: accept
+                            // No vendor veto channel: enforce the shared
+                            // conservative prologue check for inline-capable
+                            // backends (the MS providers: ElleKit, Substrate,
+                            // Substitute), so a target no inline backend could
+                            // safely overwrite is DECLINED here — the walk
+                            // continues to the next picker instead of
+                            // dispatching unguarded. Non-inline backends
+                            // without a preflight (rebind paths) accept.
+                            if(!hk_shared_inline_preflight_ok(candidate, function, replacement)) {
+                                continue;
+                            }
+
+                            return candidate;
                         }
 
                         hookkit_status_t verdict = [candidate preflightFunction:function withReplacement:replacement];
@@ -603,6 +672,15 @@ auto_cover_done: ;
     void *cell = NULL;
     hookkit_status_t result = [backend hookMessageInClass:dispatchClass withSelector:selector withReplacement:replacement outOldPtr:&cell];
 
+    // Publish-only-non-NULL-original invariant: check the status FIRST, then
+    // the cell. A backend that reports success without writing a real
+    // original has broken its contract (the MS APIs are void, so the cell is
+    // the only observable success signal) — treat as a hard failure and
+    // publish nothing.
+    if(result == HK_OK && !cell) {
+        result = HK_ERR;
+    }
+
     if(result == HK_OK && old_ptr) {
         *old_ptr = cell;
     }
@@ -631,6 +709,19 @@ auto_cover_done: ;
             [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:nil];
             return HK_ERR_NOT_SUPPORTED;
         }
+    }
+
+    // Shared conservative prologue check: an inline-capable backend without a
+    // preflightFunction: of its own (ElleKit/Substrate/Substitute) is only
+    // dispatched when the shared fixed-window validator accepts the target —
+    // the same checks the Dobby/litehook/native backends run themselves. This
+    // covers every inline-capable dispatch path — auto-cover (already declined
+    // in the router, re-checked here), explicit inline, and the batched
+    // enqueue — and refuses BEFORE any guard reservation or write, so a
+    // rejected target never reaches a backend unguarded.
+    if(!hk_shared_inline_preflight_ok(routeBackend, function, replacement)) {
+        [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
+        return HK_ERR_NOT_SUPPORTED;
     }
 
     // Process-wide inline-ownership guard: prevents HookKit-vs-HookKit
@@ -671,9 +762,39 @@ auto_cover_done: ;
             return HK_ERR_NOT_SUPPORTED;
         }
 
+        if(guard == HK_GUARD_FULL) {
+            // The ownership table is full and no entry matched: nothing was
+            // reserved, so proceeding would install an UNGUARDED hook — the
+            // one outcome worse than declining it. Refuse; nothing was
+            // written.
+            [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
+            return HK_ERR_NOT_SUPPORTED;
+        }
+
         if(guard == HK_GUARD_DUP) {
             // Idempotent same-replacement re-hook: the hook is already
-            // installed, so the saved original is the answer.
+            // installed, so the saved original is the answer. A NULL saved
+            // original means the owning entry is still PENDING (its hook is
+            // queued in a batch and has not executed yet — the original does
+            // not exist) or tainted (original unknowable). While this call
+            // will itself be batched, defer the publish: executeHooks settles
+            // the caller's cell from the guard after the drain, when the
+            // owner's original exists.
+            if(!guardOrig && old_ptr && batching && backend && [backend batchingSupported] && [backend supportsHookKind:HKHookKindFunction]) {
+                HKGuardWaiter *waiter = [HKGuardWaiter new];
+                waiter->address = addr;
+                waiter->replacement = replacement;
+                waiter->backendType = [self typeForBackend:routeBackend];
+                waiter->callerOrig = old_ptr;
+
+                @synchronized(self) {
+                    [dupWaiters addObject:waiter];
+                }
+
+                [self noteHookResult:HK_OK fromBackend:routeBackend];
+                return HK_OK;
+            }
+
             if(old_ptr) {
                 *old_ptr = guardOrig;
             }
@@ -700,6 +821,15 @@ auto_cover_done: ;
     // owned cell: the backend never touches the caller's pointer directly
     void *cell = NULL;
     hookkit_status_t result = [routeBackend hookFunction:function withReplacement:replacement outOldPtr:&cell];
+
+    // Publish-only-non-NULL-original invariant: check the status FIRST, then
+    // the cell. A backend that reports success without writing a real
+    // original has broken its contract and the outcome is unknowable (the
+    // prologue may be written) — treat as a hard failure so the guard taints
+    // and nothing is published.
+    if(result == HK_OK && !cell) {
+        result = HK_ERR;
+    }
 
     if(guardAddr) {
         // Settle the guard with the actual outcome: OK stores the saved
@@ -823,6 +953,15 @@ auto_cover_done: ;
     NSUInteger found = 0;
 
     for(NSString *symbolName in symbolNames) {
+        // Trust boundary: symbolNames is caller-supplied. A malformed element
+        // (non-NSString) would raise an uncaught NSInvalidArgumentException at
+        // length/UTF8String inside findSymbolInImage: — reject with the
+        // invalid-argument convention instead of raising.
+        if(![symbolName isKindOfClass:[NSString class]]) {
+            NSLog(@"[HookKit] warning: %s in symbolNames is not an NSString; rejected", class_getName([symbolName class]));
+            return HK_ERR_INVALID_ARGUMENT;
+        }
+
         void *symbol = [self findSymbolInImage:image symbolName:symbolName];
 
         if(symbol) {
@@ -857,7 +996,7 @@ auto_cover_done: ;
     NSArray<HKHookOperation *> *hooks;
 
     @synchronized(self) {
-        if(![batchHooks count]) {
+        if(![batchHooks count] && ![dupWaiters count]) {
             [self noteHookResult:HK_OK];
             return HK_OK;
         }
@@ -866,10 +1005,28 @@ auto_cover_done: ;
         [batchHooks removeAllObjects];
     }
 
-    hookkit_status_t result = backend ? [backend executeHooks:hooks] : HK_ERR_NOT_SUPPORTED;
+    // An empty drain (waiters only: a deferred dup whose owner hooks in
+    // another substitutor) has nothing for the backend to execute.
+    hookkit_status_t result = HK_OK;
+
+    if([hooks count]) {
+        result = backend ? [backend executeHooks:hooks] : HK_ERR_NOT_SUPPORTED;
+    }
 
     // copy per-op results back to the callers and drop all borrowed references
     for(HKHookOperation *hook in hooks) {
+        // Batch form of the publish-only-non-NULL-original invariant: an op
+        // the backend marked succeeded MUST have written a real original into
+        // the batch-owned cell (origValue — storage that lives for the full
+        // drain duration; the drained ops are retained until this loop
+        // finishes). A succeeded op with a NULL cell has an unknowable
+        // outcome — demote it to failure so the guard taints and the caller's
+        // cell is never written a NULL "original". Memory ops have no
+        // original by design.
+        if(hook->succeeded && !hook->origValue && hook->kind != HKHookKindMemory) {
+            hook->succeeded = NO;
+        }
+
         // Settle the inline guard for guarded function ops with the batch's
         // per-op outcome. NOT_SUPPORTED never comes out of executeHooks (only
         // the succeeded flag), so taint-on-failure is the honest contract:
@@ -881,6 +1038,10 @@ auto_cover_done: ;
             hk_inline_guard_update(hook->guardAddr, hook->succeeded ? 0 : 1, hook->origValue);
         }
 
+        // Synchronous publish from batch-owned storage, inside executeHooks,
+        // while the drained ops are retained and the caller's storage is
+        // valid (batch contract: alive until executeHooks returns). Never
+        // retained past this point.
         if(hook->callerOrig) {
             if(hook->succeeded) {
                 *hook->callerOrig = hook->origValue;
@@ -888,6 +1049,42 @@ auto_cover_done: ;
 
             hook->callerOrig = NULL;
         }
+    }
+
+    // Settle deferred idempotent-rehook originals (see hookFunction:): the
+    // drain just executed or released the owning hook, so the guard now holds
+    // the definitive answer. Synchronous, inside executeHooks — the waiters'
+    // caller storage is valid until executeHooks returns (the batch contract
+    // that also governs the ops' callerOrig) — and the waiters are dropped
+    // here, never retained past the drain.
+    @synchronized(self) {
+        for(HKGuardWaiter *waiter in dupWaiters) {
+            void *settled = NULL;
+            hk_guard_result_t guard = hk_inline_guard_reserve(waiter->address, waiter->replacement, waiter->backendType, &settled);
+
+            if(guard == HK_GUARD_DUP) {
+                // The owning hook is installed: the stored original is the
+                // answer. NULL when the entry is tainted (original
+                // unknowable) or still pending in ANOTHER substitutor's
+                // un-drained batch (ponytail: cross-substitutor drain
+                // ordering race — the same-substitutor case is fully settled
+                // by this drain; nothing honest exists to publish yet).
+                *waiter->callerOrig = settled;
+            } else if(guard == HK_GUARD_OK) {
+                // The owner's hook was released (wrote nothing): nothing is
+                // installed, so the function itself is the original. Return
+                // the entry we just re-claimed — nobody owns it.
+                hk_inline_guard_update(waiter->address, 2, NULL);
+                *waiter->callerOrig = (void *)waiter->address;
+            } else {
+                // BLOCKED (a different hook now owns the address) or FULL:
+                // the duplicate was never installed and there is no original
+                // to publish.
+                *waiter->callerOrig = NULL;
+            }
+        }
+
+        [dupWaiters removeAllObjects];
     }
 
     [self noteHookResult:result];

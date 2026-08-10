@@ -58,8 +58,11 @@ HK_INTERNAL size_t hk_arm64_emit_branch(uint32_t *buf, uint64_t buf_addr, uint64
 // targets. Every rewrite resolves to an absolute address, so where `dst` ends up
 // does not matter.
 //
-// Returns bytes written to `dst`, or 0 if the sequence cannot be relocated or
-// would exceed `dst_capacity`.
+// Returns bytes written to `dst`, or 0 if the sequence cannot be relocated,
+// would exceed `dst_capacity`, or contains a branch (conditional or B/BL)
+// whose target lands inside the prologue bytes being overwritten — that
+// branch would be retargeted back into the patched region, so the hook must
+// be refused instead of mis-relocated.
 HK_INTERNAL size_t hk_arm64_relocate(const uint32_t *src, uint64_t src_addr, size_t count,
                                      uint32_t *dst, size_t dst_capacity);
 

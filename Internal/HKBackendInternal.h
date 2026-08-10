@@ -17,8 +17,15 @@ typedef NS_ENUM(int, HKHookKind) {
 };
 
 // A deferred hook. Storage that the backend may retain (memory patch bytes,
-// the out-cell written by the backend) is owned here; callerOrig is borrowed
-// and only used for the post-execution copy in executeHooks.
+// the out-cell written by the backend) is owned here: origValue is the
+// batch-owned out-cell the backend writes at execute time, and that storage
+// lives for the FULL drain duration — the drained ops are retained until the
+// settle loop in executeHooks finishes, so the publish below never reads
+// storage that has died. callerOrig is a borrowed caller out-pointer: it is
+// dereferenced ONLY inside executeHooks, synchronously, to publish the
+// original from origValue while the drained ops (and the caller's storage,
+// per the batch contract: alive until executeHooks returns) are still valid,
+// and is never retained past executeHooks.
 @interface HKHookOperation : NSObject {
 @public
     HKHookKind kind;
@@ -26,7 +33,7 @@ typedef NS_ENUM(int, HKHookKind) {
     SEL selector;
     void *function;
     void *replacement;
-    void *origValue;    // owned out-cell the backend writes at execute time
+    void *origValue;    // batch-owned out-cell the backend writes at execute time
     void **callerOrig;  // borrowed caller out-pointer; copied once, then cleared
     void *target;
     NSData *data;       // owned copy of the memory patch bytes
