@@ -771,7 +771,7 @@ kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *re
 			return KERN_SUCCESS;
 		}
 
-		global_rebind *rebind = &gRebinds[gRebindCount-1];
+		global_rebind *rebind = &gRebinds[gRebindCount];
 		*rebind = candidate;
 		gRebindCount++;
 	}
