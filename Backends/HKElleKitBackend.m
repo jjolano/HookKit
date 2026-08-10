@@ -26,11 +26,15 @@ static void* libhooker_handle = NULL;
 // %hook SpringBoard -applicationDidFinishLaunching: sent SpringBoard into
 // safe mode exactly this way).
 //
-// Detect the provider at probe time: cross-check the filename dladdr
-// reports for the resolved LBHookMessage symbol ("libellekit" -> ElleKit)
-// against symbol evidence (real libhooker exports LHStrError, ElleKit does
-// not). Disagreement fails closed — a wrong ABI read suppresses %orig and
-// crashes v1-era tweaks.
+// Detect the provider at probe time via dladdr on the resolved symbol:
+// the image name distinguishes ElleKit ("libellekit") from real libhooker.
+// Default to ElleKit semantics when detection fails (the modern jailbreak
+// default; the header matches neither provider, so it is no fallback).
+// NOTE: symbol evidence cannot arbitrate — ElleKit exports LHStrError too
+// (libhooker-compat layer, verified v0.4.3 through v1.1.3), so dlsym
+// succeeds on BOTH providers and any cross-check either never fires or
+// fails closed against a legitimate ElleKit install. Filename is the only
+// usable signal until a true ElleKit-only symbol exists.
 static BOOL libhooker_uses_applied_count = NO;
 static void (*fn_LBHookMessage)(Class, SEL, void *, void *) = NULL;
 static int (*fn_LHHookFunctions)(const struct LHFunctionHook *, int) = NULL;
@@ -83,29 +87,20 @@ static BOOL probe_libhooker(void) {
 
     // Provider ABI detection: real libhooker (unc0ver/Taurine) returns an
     // applied count from LHHookFunctions/LHPatchMemory and an errno enum
-    // from LBHookMessage; ElleKit returns void/0-on-success. The filename
-    // heuristic alone is spoofable — a renamed or shim provider recreates
-    // the historical return-value mismatch (the Shadow 3.7.6 NULL-%orig
-    // crash) — so cross-check it against symbol evidence: the vendored real
-    // libhooker header declares LHStrError (a debug helper); ElleKit's
-    // libhooker does not export it. Symbol evidence decides when the
-    // filename is unavailable; when the two disagree, fail closed rather
-    // than guess an ABI.
+    // from LBHookMessage; ElleKit returns void/0-on-success. Distinguish by
+    // the image the LBHookMessage symbol lives in. dladdr can fail only if
+    // the symbol isn't in a loaded image — it is, we just dlsym'd it, so a
+    // miss falls through to the ElleKit default (the modern jailbreak
+    // default; the vendored header matches neither provider, so it is no
+    // fallback). A renamed/shim provider stays misclassified — the same
+    // limitation as 2.2.3-1; no symbol evidence exists that separates the
+    // two (both export LHStrError), so fail-closed arbitration is
+    // impossible without a true ElleKit-only symbol.
     Dl_info info;
-    BOOL filenameKnown = dladdr((void *)LBHookMessage, &info) && info.dli_fname;
-    BOOL filenameIsElleKit = filenameKnown && (strstr(info.dli_fname, "libellekit") != NULL);
-    BOOL symbolIsElleKit = (dlsym(libhooker_handle, "LHStrError") == NULL);
 
-    if(filenameKnown && filenameIsElleKit != symbolIsElleKit) {
-        // The evidence contradicts itself: refuse to guess. A wrong ABI
-        // read makes every hook look failed and leaves %orig cells NULL.
-        // Stay uncached so a later probe retries if the provider changes.
-        dlclose(libhooker_handle);
-        libhooker_handle = NULL;
-        return NO;
+    if(dladdr((void *)LBHookMessage, &info) && info.dli_fname) {
+        libhooker_uses_applied_count = (strstr(info.dli_fname, "libellekit") == NULL);
     }
-
-    libhooker_uses_applied_count = !symbolIsElleKit;
 
     return YES;
 }

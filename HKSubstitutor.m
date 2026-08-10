@@ -55,15 +55,15 @@ static BOOL hk_backend_is_inline_writer(id<HKSubstitutorBackend> backend) {
 }
 
 // Side-effect-free discovery for one backend, used by the availability-
-// introspection entry points: the dlopen-based backends report through their
-// preflight-only *_discoverable() variants (dlopen_preflight never maps the
-// image and never runs its constructors, gum_init_embedded included).
-// Backends WITHOUT a discoverable variant are reported unavailable here —
-// their available() probes are never consulted on the safe path (the Swift
-// probe dlopens libswiftCore, the MS/ElleKit/Frida probes dlopen the
-// provider). The real dlopen happens only on the actual hook path
-// (initLibraries / defaultBackend / auto-cover), which keeps using the full
-// available() probes.
+// introspection entry points: the dlopen-based jailbreak providers (ElleKit,
+// Substrate, Substitute, Frida) report through their preflight-only
+// *_discoverable() variants (dlopen_preflight never maps the image and never
+// runs its constructors, gum_init_embedded included). The remaining backends
+// (fishhook, litehook, native, dobby — compile-time/arch checks; swift — a
+// plain system dylib dlsym, never a jailbreak provider) have side-effect-free
+// available() probes, so they are reported through those. The real dlopen
+// happens only on the actual hook path (initLibraries / defaultBackend /
+// auto-cover), which keeps using the full available() probes.
 static BOOL hk_backend_discoverable(hookkit_lib_t type) {
     switch(type) {
         case HK_LIB_ELLEKIT:
@@ -78,8 +78,18 @@ static BOOL hk_backend_discoverable(hookkit_lib_t type) {
         case HK_LIB_FRIDA:
             return frida_discoverable();
 
-        default:
+        default: {
+            size_t count = 0;
+            const HKBackendDescriptor *table = hk_backends(&count);
+
+            for(size_t i = 0; i < count; i++) {
+                if(table[i].type == type) {
+                    return table[i].available();
+                }
+            }
+
             return NO;
+        }
     }
 }
 
