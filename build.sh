@@ -36,7 +36,7 @@ build_rootless() {
 
 # roothide: iOS 15-17, random-named jbroot (no /var/jb). Requires the
 # roothide theos fork (THEOS_PACKAGE_SCHEME=roothide) + libroothide; the
-# Makefile defines SHADOW_ROOTHIDE for this scheme.
+# Makefile defines HK_ROOTHIDE for this scheme.
 build_roothide() {
     make clean &&
     test -d "${THEOS:?}/vendor/mod/roothide" && \
