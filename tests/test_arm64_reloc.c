@@ -162,16 +162,25 @@ static void test_has_early_terminator(void) {
     uint32_t ret = 0xD65F03C0;
     assert(hk_arm64_has_early_terminator(&ret, 4));
 
-    // RETAA / RETAB (authenticated returns)
-    uint32_t retaa = 0xD65F0BFC;
+    // RETAA / RETAB (authenticated returns) — encodings verified against
+    // clang's assembler: 0xD65F0BFF / 0xD65F0FFF.
+    uint32_t retaa = 0xD65F0BFF;
     assert(hk_arm64_has_early_terminator(&retaa, 4));
-    uint32_t retab = 0xD65F0FFC;
+    uint32_t retab = 0xD65F0FFF;
     assert(hk_arm64_has_early_terminator(&retab, 4));
 
-    // BRAAZ X17 / BRABZ X17 (authenticated indirect branches)
-    uint32_t braaz = 0xD71F0BF1;
+    // BRAA X17, X17 / BRAB X17, X17 (register-pair authenticated branches:
+    // 0xD71F0800/0xC00 | Rn<<5 | Rm).
+    uint32_t braa = 0xD71F0A31;
+    assert(hk_arm64_has_early_terminator(&braa, 4));
+    uint32_t brab = 0xD71F0E31;
+    assert(hk_arm64_has_early_terminator(&brab, 4));
+
+    // BRAAZ X17 / BRABZ X17 — the Z forms live in the BR space
+    // (0xD61F081F/0xC1F | Rn<<5), distinct from plain BR (op2 0).
+    uint32_t braaz = 0xD61F0A3F;
     assert(hk_arm64_has_early_terminator(&braaz, 4));
-    uint32_t brabz = 0xD71F0FF1;    // key-B variant (bit 10 set)
+    uint32_t brabz = 0xD61F0E3F;
     assert(hk_arm64_has_early_terminator(&brabz, 4));
 
     // Unconditional B in a window.
@@ -187,8 +196,8 @@ static void test_has_early_terminator(void) {
     uint32_t mid[4] = { 0xD503201F, 0xD65F03C0, 0xD503201F, 0xD503201F };
     assert(hk_arm64_has_early_terminator(mid, 16));
 
-    // BLRAA (authenticated call) is NOT a terminator.
-    uint32_t blraaz = 0xD73F0BF1;
+    // BLRAAZ (authenticated call) is NOT a terminator.
+    uint32_t blraaz = 0xD63F0A3F;
     assert(!hk_arm64_has_early_terminator(&blraaz, 4));
 
     // BLR is not a terminator.
@@ -272,6 +281,30 @@ static void test_multi_and_capacity(void) {
     assert(hk_arm64_relocate(small, PC, 0, out, sizeof(out)) == 0);
 }
 
+static void test_branch_into_prologue(void) {
+    // A branch whose target lands inside the overwritten window must fail
+    // closed: the trampoline would jump back into the now-patched bytes.
+    // B #+4 at 0x1000 with window [0x1000, 0x1008): target 0x1004 is inside.
+    uint32_t two[2] = { 0x14000001, 0xD503201F };
+    memset(out, 0, sizeof(out));
+    assert(hk_arm64_relocate(two, PC, 2, out, sizeof(out)) == 0);
+
+    // B.EQ #+4 at 0x1000 -> 0x1004, also inside the window.
+    uint32_t eq[2] = { 0x54000020, 0xD503201F };
+    memset(out, 0, sizeof(out));
+    assert(hk_arm64_relocate(eq, PC, 2, out, sizeof(out)) == 0);
+
+    // B #0 (self-loop) in a one-instruction window is inside too.
+    assert(reloc(0x14000000) == 0);
+
+    // A branch to the instruction right after the window is fine (that is
+    // the trampoline's return point), as is any branch out of the window.
+    uint32_t after[2] = { 0x14000002, 0xD503201F };    // B #+8 -> 0x1008
+    memset(out, 0, sizeof(out));
+    assert(hk_arm64_relocate(after, PC, 2, out, sizeof(out)) == 16 + 4);
+    assert(reloc(0x17FFFFF0) == 16);                   // B #-0x40 -> 0xFC0
+}
+
 int main(void) {
     test_verbatim();
     test_adr();
@@ -285,6 +318,7 @@ int main(void) {
     test_has_literal_load();
     test_branch_emit();
     test_multi_and_capacity();
+    test_branch_into_prologue();
 
     printf("all arm64 relocator tests passed\n");
     return 0;

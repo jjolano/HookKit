@@ -76,8 +76,17 @@
         return HK_ERR_NOT_SUPPORTED;
 #endif
         // Prologue inline trampoline variant (denyFishHook-immune). litehook
-        // has no original-call trampoline, so the original body is gone once
-        // hooked: old_ptr stays NULL when requested.
+        // has no original-call trampoline, so no original can ever be
+        // produced: a caller that requires one (old_ptr) would receive a
+        // NULL cell and crash on %orig. Refuse BEFORE installing (fail
+        // closed, side-effect-free) so the caller can switch to a technique
+        // that produces an original. When no original is requested the
+        // inline hook is safe to install.
+        if(old_ptr) {
+            _lastErrno = EOPNOTSUPP;
+            return HK_ERR_NOT_SUPPORTED;
+        }
+
         hookkit_status_t preflight = [self hk_litehook_inline_preflight:function replacement:replacement];
 
         if(preflight != HK_OK) {
@@ -88,10 +97,6 @@
 
         kern_return_t kr = litehook_hook_function(function, replacement);
         _lastErrno = kr;
-
-        if(old_ptr) {
-            *old_ptr = NULL;
-        }
 
         return kr == KERN_SUCCESS ? HK_OK : HK_ERR;
     }

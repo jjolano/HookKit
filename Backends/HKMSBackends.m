@@ -2,7 +2,11 @@
 
 #import <dlfcn.h>
 #import <errno.h>
+#import <mach-o/dyld.h>
+#import <mach/mach.h>
 #import <objc/runtime.h>
+#import <pthread.h>
+#import <string.h>
 
 #import "vendor/substrate/substrate.h"
 #import "vendor/substitute/substitute.h"
@@ -22,14 +26,7 @@ static void (*substrate_hookMemory)(void *, const void *, size_t) = NULL;
 
 // Only successful probes are cached: if dlopen fails, a later call retries
 // (the engine may appear after HookKit loads).
-BOOL substrate_available(void) {
-    static BOOL cached = NO;
-    static BOOL available = NO;
-
-    if(cached) {
-        return available;
-    }
-
+static BOOL probe_substrate(void) {
     NSString *jbPath = HKJBPath(@"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate");
 
     if(!jbPath) {
@@ -66,10 +63,33 @@ BOOL substrate_available(void) {
     substrate_findSymbol = findSymbol;
     substrate_hookMemory = hookMemory;
 
-    cached = YES;
-    available = YES;
+    return YES;
+}
 
-    return available;
+BOOL substrate_available(void) {
+    // substrate_available() can be queried concurrently (registry selection
+    // and availability introspection), so the probe's cached statics and the
+    // published function-pointer globals must be serialized; the publish
+    // happens-before any reader that got YES through the same mutex.
+    // ponytail: pthread mutex instead of dispatch_once — once-semantics
+    // would cache a failed probe forever and break the documented retry
+    // contract (engine may appear after HookKit loads); os_unfair_lock
+    // needs iOS 10+, above the 9.0 deployment floor (Makefile TARGET).
+    static pthread_mutex_t probeMutex = PTHREAD_MUTEX_INITIALIZER;
+    static BOOL cached = NO;
+    static BOOL available = NO;
+
+    pthread_mutex_lock(&probeMutex);
+
+    if(!cached && probe_substrate()) {
+        available = YES;
+        cached = YES;
+    }
+
+    BOOL result = available;
+    pthread_mutex_unlock(&probeMutex);
+
+    return result;
 }
 
 // Preflight-only discovery, for the availability-introspection entry points
@@ -118,14 +138,7 @@ static void *resolve_ms_symbol(void *handle, const char *name, const char *fallb
 
 // Only successful probes are cached: if dlopen fails, a later call retries
 // (the engine may appear after HookKit loads).
-BOOL substitute_available(void) {
-    static BOOL cached = NO;
-    static BOOL available = NO;
-
-    if(cached) {
-        return available;
-    }
-
+static BOOL probe_substitute(void) {
     NSString *jbPath = HKJBPath(@"/usr/lib/libsubstitute.0.dylib");
 
     if(!jbPath) {
@@ -184,10 +197,33 @@ BOOL substitute_available(void) {
     fn_substitute_interpose_imports = interposeImports;
     substitute_native_available = nativeAvailable;
 
-    cached = YES;
-    available = YES;
+    return YES;
+}
 
-    return available;
+BOOL substitute_available(void) {
+    // substitute_available() can be queried concurrently (registry selection
+    // and availability introspection), so the probe's cached statics and the
+    // published function-pointer globals must be serialized; the publish
+    // happens-before any reader that got YES through the same mutex.
+    // ponytail: pthread mutex instead of dispatch_once — once-semantics
+    // would cache a failed probe forever and break the documented retry
+    // contract (engine may appear after HookKit loads); os_unfair_lock
+    // needs iOS 10+, above the 9.0 deployment floor (Makefile TARGET).
+    static pthread_mutex_t probeMutex = PTHREAD_MUTEX_INITIALIZER;
+    static BOOL cached = NO;
+    static BOOL available = NO;
+
+    pthread_mutex_lock(&probeMutex);
+
+    if(!cached && probe_substitute()) {
+        available = YES;
+        cached = YES;
+    }
+
+    BOOL result = available;
+    pthread_mutex_unlock(&probeMutex);
+
+    return result;
 }
 
 // Preflight-only discovery, for the availability-introspection entry points
@@ -243,22 +279,65 @@ BOOL substitute_discoverable(void) {
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    // MSHookMessageEx is void and its success is unverifiable — the hook is
-    // submitted, unverified (Substrate API limitation). Some Substrate builds
-    // signal failure through errno.
+    // MSHookMessageEx is void; the only observable success signal is the
+    // original IMP being written into the out cell. Always pass a slot WE
+    // own (never the caller's directly): a call that produced no original
+    // must not publish a NULL cell as success (HKSubstitutor invariant:
+    // publish only non-NULL originals). Some Substrate builds also signal
+    // failure through errno.
+    IMP original = NULL;
     errno = 0;
-    msHookMessageEx(objcClass, selector, replacement, old_ptr);
+    msHookMessageEx(objcClass, selector, replacement, (void **)&original);
     _lastErrno = errno;
-    return errno ? HK_ERR : HK_OK;
+
+    if(errno) {
+        // Failure signalled through errno: the hook may already be applied.
+        return HK_ERR;
+    }
+
+    if(!original) {
+        // No errno but no original either: nothing observable happened, so
+        // the hook was not applied — a capability-style miss, side-effect-
+        // free, so callers may switch technique.
+        _lastErrno = ENOENT;
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    if(old_ptr) {
+        *old_ptr = (void *)original;
+    }
+
+    return HK_OK;
 }
 
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    // MSHookFunction is void — submitted, unverified; some Substrate builds
-    // signal failure through errno.
+    // MSHookFunction is void — success is only observable through the
+    // original being written into the out cell (some builds also signal
+    // failure through errno). Same contract as hookMessageInClass: pass a
+    // slot we own, and never publish a NULL original as success.
+    void *original = NULL;
     errno = 0;
-    msHookFunction(function, replacement, old_ptr);
+    msHookFunction(function, replacement, &original);
     _lastErrno = errno;
-    return errno ? HK_ERR : HK_OK;
+
+    if(errno) {
+        // Failure signalled through errno: the hook may already be applied.
+        return HK_ERR;
+    }
+
+    if(!original) {
+        // No errno but no original either: the function was not hooked (too
+        // short / bad shape / no writable prologue) — nothing was written,
+        // so callers may switch technique.
+        _lastErrno = ENOENT;
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    if(old_ptr) {
+        *old_ptr = original;
+    }
+
+    return HK_OK;
 }
 
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
@@ -294,6 +373,56 @@ BOOL substitute_discoverable(void) {
 }
 @end
 
+#pragma mark - Verified void memory patching
+
+// MSHookMemory / SubHookMemory are void: no status, no errno contract. The
+// only honest success signal is the patch being present afterwards, so verify
+// by reading the target back and comparing to what was written. The read goes
+// through mach_vm_read (not memcmp) so an unreadable target reports
+// "unverifiable" instead of faulting the process.
+// ponytail: no read-before — the decision-relevant compare is read-after vs
+// the expected bytes; a pre-existing-equal region is already the desired
+// state, and any mismatch is a failure either way.
+static hookkit_status_t hk_verified_memory_patch(void *target, const void *data, size_t size, void (*hookMemory)(void *, const void *, size_t), int *outErrno) {
+    if(!target || !data) {
+        *outErrno = EINVAL;
+        return HK_ERR_INVALID_ARGUMENT;
+    }
+
+    if(size == 0) {
+        // Nothing to write, nothing to verify: a zero-byte patch has no
+        // observable effect, so success cannot be a lie.
+        *outErrno = 0;
+        return HK_OK;
+    }
+
+    hookMemory(target, data, size);
+
+    vm_address_t readback = 0;
+    mach_msg_type_number_t readSize = 0;
+    kern_return_t kr = vm_read(mach_task_self(), (vm_address_t)target, size, &readback, &readSize);
+
+    if(kr != KERN_SUCCESS || readSize != size || !readback) {
+        // Unverifiable: the void API gave no status and the outcome cannot
+        // be confirmed. Treat as suspect (HK_ERR, never retry), not success.
+        *outErrno = ENODATA;
+        return HK_ERR;
+    }
+
+    BOOL landed = (memcmp((const void *)readback, data, size) == 0);
+    vm_deallocate(mach_task_self(), readback, (vm_size_t)readSize);
+
+    if(!landed) {
+        // The patch did not land (or was reverted): the region may be in a
+        // partially-patched state, so this is terminal, not retryable.
+        *outErrno = EIO;
+        return HK_ERR;
+    }
+
+    *outErrno = 0;
+    return HK_OK;
+}
+
 #pragma mark - HKSubstrateBackend
 
 @implementation HKSubstrateBackend
@@ -303,9 +432,7 @@ BOOL substitute_discoverable(void) {
 
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
     if(substrate_hookMemory) {
-        _lastErrno = 0;
-        substrate_hookMemory(target, data, size);
-        return HK_OK;
+        return hk_verified_memory_patch(target, data, size, substrate_hookMemory, &_lastErrno);
     }
 
     _lastErrno = 0;
@@ -410,28 +537,60 @@ static hookkit_status_t substitute_error_to_status(int err) {
                 .options = 0
             };
 
-            // substitute_interpose_imports requires the importing image's
-            // handle (vendored substitute.h: "@handle handle of the importing
-            // library") and dereferences it, so NULL is a latent crash. The
-            // only concrete handle derivable here is the target function's
-            // defining image, opened from dladdr's path. If it can't be
-            // opened, skip the fallback and let the original result stand.
-            struct substitute_image *importingImage = info.dli_fname ? fn_substitute_open_image(info.dli_fname) : NULL;
+            // substitute_interpose_imports requires the handle of the image
+            // that IMPORTS the symbol (vendored substitute.h: "@handle
+            // handle of the importing library") and dereferences it, so NULL
+            // is a latent crash. The function's DEFINING image (dladdr's
+            // dli_fname) is the wrong handle: an image does not import its
+            // own exports through the GOT, so interposing on it reports
+            // SUBSTITUTE_OK while hooking nothing. Iterate the loaded
+            // images and interpose on each until one actually imports the
+            // symbol — evidenced by interposedOld being written non-NULL.
+            // Success is never claimed without that write.
+            // ponytail: stops at the first importer (matching the pre-fix
+            // single-image scope); iterate every importer if a partial-hook
+            // report ever matters.
+            int lastInterposeErr = SUBSTITUTE_OK;
+            BOOL interposedAny = NO;
 
-            if(importingImage) {
+            for(uint32_t i = 0; i < _dyld_image_count() && !interposedAny; i++) {
+                struct substitute_image *importingImage = fn_substitute_open_image(_dyld_get_image_name(i));
+
+                if(!importingImage) {
+                    continue;
+                }
+
                 int interposeResult = fn_substitute_interpose_imports(importingImage, &ih, 1, NULL, 0);
                 fn_substitute_close_image(importingImage);
-                _lastErrno = interposeResult;
+                lastInterposeErr = interposeResult;
 
-                // Publish the interpose result's old value only on success.
-                if(interposeResult == SUBSTITUTE_OK) {
-                    if(old_ptr) {
-                        *old_ptr = interposedOld;
-                    }
-
-                    return HK_OK;
+                if(interposeResult == SUBSTITUTE_OK && interposedOld) {
+                    interposedAny = YES;
                 }
             }
+
+            _lastErrno = lastInterposeErr;
+
+            if(interposedAny) {
+                if(old_ptr) {
+                    *old_ptr = interposedOld;
+                }
+
+                return HK_OK;
+            }
+
+            if(lastInterposeErr != SUBSTITUTE_OK) {
+                // An importer was found but its interpose failed: its GOT
+                // may be partially rewritten, so this is terminal — never
+                // retry with a second interposition.
+                return HK_ERR;
+            }
+
+            // Every image accepted with nothing rewritten: no loaded image
+            // imports the symbol through the GOT. Side-effect-free miss, so
+            // callers may switch technique.
+            _lastErrno = ENOENT;
+            return HK_ERR_NOT_SUPPORTED;
         }
     }
 
@@ -498,9 +657,7 @@ static hookkit_status_t substitute_error_to_status(int err) {
 // SubHookMemory on Substitute (the native API has no separate memory hook).
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
     if(substitute_hookMemory) {
-        _lastErrno = 0;
-        substitute_hookMemory(target, data, size);
-        return HK_OK;
+        return hk_verified_memory_patch(target, data, size, substitute_hookMemory, &_lastErrno);
     }
 
     _lastErrno = 0;

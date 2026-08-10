@@ -3,6 +3,7 @@
 
 #import <dlfcn.h>
 #import <errno.h>
+#import <pthread.h>
 
 #include <stdint.h>
 
@@ -146,8 +147,8 @@
 // is the whole gate (verified: built HKGum arm64 slice carries minos 12.0).
 static void *hkgum_handle = NULL;
 static int (*fn_hkgum_hook_function)(void *, void *, void **) = NULL;
-static int (*fn_hkgum_begin_transaction)(void) = NULL;
-static int (*fn_hkgum_end_transaction)(void) = NULL;
+static void (*fn_hkgum_begin_transaction)(void) = NULL;
+static void (*fn_hkgum_end_transaction)(void) = NULL;
 
 // Frida is available when the HKGum.dylib wrapper dlopens AND the full
 // required symbol set resolves (see the resolution block above). Only
@@ -155,15 +156,9 @@ static int (*fn_hkgum_end_transaction)(void) = NULL;
 // the handle is closed and nothing is cached, so a later probe retries.
 // The function-pointer globals are published only after the complete symbol
 // set is validated, so a partial probe never leaves half-initialized state
-// for hook paths to trip over.
-BOOL frida_available(void) {
-    static BOOL cached = NO;
-    static BOOL available = NO;
-
-    if(cached) {
-        return available;
-    }
-
+// for hook paths to trip over. Single probe attempt, no caching and not
+// thread-safe on its own — frida_available serializes callers.
+static BOOL frida_probe(void) {
     NSString *jbPath = HKJBPath(@"/usr/lib/HKGum.dylib");
 
     if(!jbPath) {
@@ -177,8 +172,8 @@ BOOL frida_available(void) {
     }
 
     int (*hookFunction)(void *, void *, void **) = (int (*)(void *, void *, void **))dlsym(handle, "hkgum_hook_function");
-    int (*beginTransaction)(void) = (int (*)(void))dlsym(handle, "hkgum_begin_transaction");
-    int (*endTransaction)(void) = (int (*)(void))dlsym(handle, "hkgum_end_transaction");
+    void (*beginTransaction)(void) = (void (*)(void))dlsym(handle, "hkgum_begin_transaction");
+    void (*endTransaction)(void) = (void (*)(void))dlsym(handle, "hkgum_end_transaction");
 
     if(!hookFunction || !beginTransaction || !endTransaction) {
         // ABI-incomplete: not the wrapper we expect. Leave state uncached so
@@ -193,10 +188,33 @@ BOOL frida_available(void) {
     fn_hkgum_begin_transaction = beginTransaction;
     fn_hkgum_end_transaction = endTransaction;
 
-    available = YES;
-    cached = YES;
+    return YES;
+}
 
-    return available;
+BOOL frida_available(void) {
+    // frida_available() can be queried concurrently (registry selection and
+    // availability introspection), so the probe's cached statics and the
+    // published function-pointer globals must be serialized; the publish
+    // happens-before any reader that got YES through the same mutex.
+    // ponytail: pthread mutex instead of dispatch_once — once-semantics
+    // would cache a failed probe forever and break the documented retry
+    // contract (engine may appear after HookKit loads); os_unfair_lock
+    // needs iOS 10+, above the 9.0 deployment floor (Makefile TARGET).
+    static pthread_mutex_t probeMutex = PTHREAD_MUTEX_INITIALIZER;
+    static BOOL cached = NO;
+    static BOOL available = NO;
+
+    pthread_mutex_lock(&probeMutex);
+
+    if(!cached && frida_probe()) {
+        available = YES;
+        cached = YES;
+    }
+
+    BOOL result = available;
+    pthread_mutex_unlock(&probeMutex);
+
+    return result;
 }
 
 // Preflight-only discovery, for the availability-introspection entry points
@@ -261,24 +279,23 @@ BOOL frida_discoverable(void) {
 }
 
 // One gum transaction around the whole batch: replacements inside a
-// transaction are only published at end_transaction, so the batch is applied
-// atomically. end_transaction's result is authoritative: a commit failure
-// means nothing was published, so no operation may be reported successful and
-// the batch fails as a whole. Individual hook failures (a rejected or
-// already-replaced target) stay per-operation: they fail the batch without a
-// rollback, exactly as documented. Message/memory hooks are not supported
-// (succeeded stays NO).
+// transaction are staged and only published at end_transaction, so the batch
+// is applied atomically. frida-gum 17.17 reports no failure at the
+// transaction boundary — begin and end are void (frida-gum.h:52094-52095,
+// wrappers in hkgum.c) — so there is no begin/commit status to check. The
+// only failure channel is the per-hook GumReplaceReturn: a failed replace is
+// never staged, so end_transaction never publishes it, and the op stays
+// succeeded=NO — which is what settles the inline guard as tainted at the
+// substitutor layer (HKSubstitutor.m: failed op -> HK_ERR -> taint), so no
+// failure is ever claimed successful. Individual hook failures fail the batch
+// without a rollback, exactly as documented. Message/memory hooks are not
+// supported (succeeded stays NO).
 - (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
     int total = (int)[hooks count];
     int succeeded = 0;
     int failureErrno = 0;
 
-    if(fn_hkgum_begin_transaction() != 0) {
-        // Transaction never opened: nothing below was applied, so no hook can
-        // be marked successful.
-        _lastErrno = HK_ERR;
-        return HK_ERR;
-    }
+    fn_hkgum_begin_transaction();
 
     for(HKHookOperation *hook in hooks) {
         switch(hook->kind) {
@@ -305,18 +322,7 @@ BOOL frida_discoverable(void) {
         }
     }
 
-    int commit = fn_hkgum_end_transaction();
-
-    if(commit != 0) {
-        // Nothing was published: the staged successes above never took
-        // effect, so report the whole batch as failed.
-        for(HKHookOperation *hook in hooks) {
-            hook->succeeded = NO;
-        }
-
-        _lastErrno = commit;
-        return HK_ERR;
-    }
+    fn_hkgum_end_transaction();
 
     _lastErrno = failureErrno;
 
