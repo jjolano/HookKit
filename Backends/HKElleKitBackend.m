@@ -257,13 +257,27 @@ BOOL libhooker_discoverable(void) {
         switch(hook->kind) {
             case HKHookKindMessage: {
                 // void LBHookMessage: success is the original being written
-                // into hook->origValue; there is no status return to read.
-                hook->origValue = NULL;
-                fn_LBHookMessage(hook->objcClass, hook->selector, hook->replacement, (void *)&hook->origValue);
+                // into the out cell; there is no status return to read.
+                void *cell = NULL;
+                fn_LBHookMessage(hook->objcClass, hook->selector, hook->replacement, (void *)&cell);
+                hook->origValue = cell;
 
-                if(hook->origValue) {
+                if(cell) {
                     hook->succeeded = YES;
                     succeeded += 1;
+
+                    // Publish at apply time: the replacement is live the
+                    // moment LBHookMessage returns, so the caller's %orig
+                    // cell must hold the original before the drain moves on
+                    // — a later op in this same batch can re-enter this hook
+                    // (ElleKit's patch writer calls vm_region_recurse_64,
+                    // which Shadow's Hook_Memory group hooks) and would hit
+                    // a NULL original otherwise. v1 passed the caller's cell
+                    // straight through; v2's owned cells deferred it to the
+                    // end of the drain, re-creating that NULL window.
+                    if(hook->callerOrig) {
+                        *hook->callerOrig = cell;
+                    }
                 } else if(!detail) {
                     detail = LIBHOOKER_ERR_SELECTOR_NOT_FOUND;
                 }
@@ -272,8 +286,14 @@ BOOL libhooker_discoverable(void) {
             }
 
             case HKHookKindFunction: {
+                // callerOrig (when present) is the out-pointer: libhooker
+                // writes the original into the caller's cell the moment the
+                // hook applies, so a mid-batch re-entrant call into this
+                // replacement (see the message branch note) sees a real
+                // original. NULL callerOrig falls back to the batch-owned
+                // cell; the drain publishes nothing for it either way.
                 struct LHFunctionHook lh = {
-                    hook->function, hook->replacement, &hook->origValue, NULL
+                    hook->function, hook->replacement, hook->callerOrig ?: &hook->origValue, NULL
                 };
 
                 [functionHooks appendBytes:&lh length:sizeof(struct LHFunctionHook)];
@@ -337,6 +357,16 @@ BOOL libhooker_discoverable(void) {
 
                 succeeded += count;
             }
+        }
+    }
+
+    // Sync the batch-owned cell from the caller cell for ops that published
+    // at apply time (callerOrig was the out-pointer): the drain's
+    // publish-only-non-NULL invariant and the inline-guard settlement read
+    // origValue, so it must hold the same original the caller cell got.
+    for(HKHookOperation *op in functionOps) {
+        if(op->succeeded && op->callerOrig) {
+            op->origValue = *op->callerOrig;
         }
     }
 
