@@ -48,6 +48,47 @@ struct rebinding {
 };
 
 /*
+ * Outcome tally for a rebind call. matched counts the indirect symbol slots
+ * actually rewritten; failed counts matching slots whose write had to be
+ * skipped because the section's pages could not be made writable (never
+ * written — a skipped write is reported, not attempted blind). A call where
+ * failed > 0 is a partial rebind.
+ */
+struct rebind_stats {
+  uint32_t matched;
+  uint32_t failed;
+  // Set (1) when at least one section's original page protection could not
+  // be restored after its slots were written: those pages may remain
+  // writable, so matched > 0 && restore_failed is a hard/partial result,
+  // not a clean success.
+  uint32_t restore_failed;
+};
+
+/*
+ * Outcome tally for rebind_symbols_hook: matched counts the indirect symbol
+ * slots actually rewritten; failed counts matching slots whose write had to
+ * be skipped because the section's pages could not be made writable.
+ */
+struct rebind_result {
+  size_t matched;
+  size_t failed;
+  // Set (1) when at least one section's original page protection could not
+  // be restored after its slots were written (see
+  // struct rebind_stats.restore_failed).
+  size_t restore_failed;
+};
+
+/*
+ * Called by rebind_symbols_hook with the caller's original implementation
+ * pointer (resigned to the standard C function-pointer scheme on arm64e)
+ * BEFORE the first replacement slot of a rebind goes live, so the caller can
+ * publish its original before any caller of the hooked symbol can observe the
+ * replacement. Invoked at most once per rebind entry, on the first writable
+ * matching slot; later matching slots and future image loads skip it.
+ */
+typedef void (*rebind_publish_fn)(void *context, void *original);
+
+/*
  * For each rebinding in rebindings, rebinds references to external, indirect
  * symbols with the specified name to instead point at replacement for each
  * image in the calling process as well as for all future images that are loaded
@@ -71,6 +112,36 @@ int rebind_symbols_checked(struct rebinding rebindings[],
                            size_t *outMatched);
 
 /*
+ * Like rebind_symbols, but additionally reports in outStats how many slots
+ * were rewritten (matched) and how many matching slots could not be written
+ * (failed, see struct rebind_stats). outStats may be NULL (then this behaves
+ * exactly like rebind_symbols).
+ */
+FISHHOOK_VISIBILITY
+int rebind_symbols_stats(struct rebinding rebindings[],
+                         size_t rebindings_nel,
+                         struct rebind_stats *outStats);
+
+/*
+ * Like rebind_symbols_stats, but additionally solves the C1 ordering
+ * problem: for the FIRST writable matching slot of each rebinding entry the
+ * original pointer is captured (and, on arm64e, resigned) and handed to
+ * publish(context, original) BEFORE the replacement is written into the
+ * slot — the caller's original is therefore observable no later than the
+ * first replacement. Subsequent matching slots skip the callback, and the
+ * callback/context are cleared once the initial scan finishes, so future
+ * image loads apply the rebind silently. result may be NULL (matched/failed
+ * are then not reported); publish may be NULL (then this behaves exactly
+ * like rebind_symbols_stats).
+ */
+FISHHOOK_VISIBILITY
+int rebind_symbols_hook(struct rebinding rebindings[],
+                        size_t count,
+                        struct rebind_result *result,
+                        rebind_publish_fn publish,
+                        void *context);
+
+/*
  * Rebinds as above, but only in the specified image. The header should point
  * to the mach-o header, the slide should be the slide offset. Others as above.
  */
@@ -79,6 +150,18 @@ int rebind_symbols_image(void *header,
                          intptr_t slide,
                          struct rebinding rebindings[],
                          size_t rebindings_nel);
+
+/*
+ * Like rebind_symbols_image, but additionally reports matched/failed slot
+ * counts in outStats (see struct rebind_stats). outStats may be NULL (then
+ * this behaves exactly like rebind_symbols_image).
+ */
+FISHHOOK_VISIBILITY
+int rebind_symbols_image_stats(void *header,
+                               intptr_t slide,
+                               struct rebinding rebindings[],
+                               size_t rebindings_nel,
+                               struct rebind_stats *outStats);
 
 /*
  * Removes the entries previously added by rebind_symbols /
