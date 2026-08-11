@@ -38,14 +38,20 @@ build_rootless() {
 # roothide theos fork (THEOS_PACKAGE_SCHEME=roothide) + libroothide; the
 # Makefile defines HK_ROOTHIDE for this scheme.
 build_roothide() {
+    # The roothide deb needs firmware (>= 15.0) to match the 15.0 deploy
+    # target, but the shared control says 9.0. Never rewrite the tracked
+    # control in place (a kill -9 mid-build would leave the tree modified):
+    # generate a scheme-specific control in the build dir and hand it to the
+    # package stage. theos has no public override for the deb control path,
+    # so pass its internal variable on the command line (command-line
+    # assignments beat the := in deb.mk); the grep below fails loudly if a
+    # theos upgrade renames it and the stock 9.0 control gets used instead.
     make clean &&
-    test -d "${THEOS:?}/vendor/mod/roothide" && \
-    local BAK=/tmp/hookkit-control-roothide.bak.$$
-    trap "mv $BAK control 2>/dev/null || true" EXIT
-    cp control "$BAK"
-    sed -e 's/firmware (>= 9.0)/firmware (>= 15.0)/' control > control.tmp && mv control.tmp control
+    test -d "${THEOS:?}/vendor/mod/roothide" &&
+    sed -e 's/firmware (>= 9.0)/firmware (>= 15.0)/' control > build/control.roothide &&
     make test &&
-    THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:17.0 make package FINALPACKAGE=1 &&
+    THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:15.0 make package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH=build/control.roothide &&
+    grep -q 'firmware (>= 15.0)' .theos/_/DEBIAN/control &&
     cp -p "$(cat .theos/last_package)" build/ &&
     make check-exports
 
