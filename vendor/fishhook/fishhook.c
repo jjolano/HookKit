@@ -232,8 +232,17 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
 static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
                                      const struct mach_header *header,
                                      intptr_t slide) {
-  Dl_info info;
-  if (dladdr(header, &info) == 0) {
+  // NOTE: the stock fishhook validates the header with dladdr() here, but
+  // that call is dead weight (the Dl_info is never used — every caller
+  // supplies a header from dyld itself) and it is a self-hosting hazard:
+  // once this library's own dladdr import slot is rebound, the validation
+  // re-enters the replacement. If that replacement's original is published
+  // only after the scan completes (batched/deferred publication), the
+  // re-entry jumps through a NULL original (PC=0 SIGSEGV, observed
+  // on-device: ShadowCore ctor → hookFunction:dladdr → rebind scan →
+  // replaced_dladdr → original_dladdr still NULL). dyld-provided headers
+  // are always valid, so the guard is unnecessary — drop it.
+  if (!header) {
     return;
   }
 
