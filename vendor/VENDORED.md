@@ -13,7 +13,7 @@ where relevant.
 |---|---|---|---|---|---|
 | `vendor/fishhook/` | fishhook.c, fishhook.h | https://github.com/facebook/fishhook | `aadc161ac3b80db07a9908851839a17ba63a9eb1` (2021-10-12); base byte-identical to that commit, recorded in commit 51e1c7b | BSD-3-Clause (header comment, 2013 Facebook) | yes — heavy fork, see below |
 | `vendor/litehook/` | litehook.c, litehook.h, dyld_cache_format.h, fixup-chains.h, LICENSE | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); vendored copies byte-identical to pristine upstream at that commit (verified against every upstream commit) | MIT (LICENSE, Lars Fröder 2022-2024); dyld_cache_format.h carries Apple APSL 2.0 header | yes — see below |
-| `vendor/dobby/` | dobby.h, libdobby.a, LICENSE | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); release "latest" ships dobby-iphoneos-all.tar.gz (URL in dobby.h comment); in-tree dobby.h = upstream include/dobby.h + one provenance comment line, otherwise byte-identical | Apache-2.0 (LICENSE vendored) | none (binary; header carries provenance comment) |
+| `vendor/dobby/` | dobby.h, libdobby.a, LICENSE | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); release "latest" ships dobby-iphoneos-all.tar.gz (URL in dobby.h comment); in-tree dobby.h = upstream include/dobby.h + one provenance comment line, otherwise byte-identical | Apache-2.0 (LICENSE vendored) | yes — binary rebuilt from source with one reorder patch (publication-before-activation), see below; dobby.h unchanged |
 | `vendor/gum/` | frida-gum.h, libfrida-gum.a, hkgum.c, COPYING | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; devkit tarballs from frida/frida release 17.17.0 (2026-08-05); frida-gum.h byte-identical to devkit; libfrida-gum.a = lipo of both official devkit slices (SHA-256 verified per slice) | wxWindows Library Licence 3.1 (LGPL-2.1 + wxWindows exception; COPYING vendored) | hkgum.c wrapper only — see below |
 | `vendor/libhooker/` | libhooker.h, libblackjack.h, LICENSE | https://github.com/coolstar/libhooker | master; only milestone is OSS 1.6.9 commit `4f85a68dae` (2023-04-17); in-tree headers predate that release (unchanged since HookKit's initial commit 75cdb22) | BSD-4-Clause (LICENSE vendored) | small header deltas — see below |
 | `vendor/substitute/` | substitute.h | https://github.com/comex/substitute | master; header frozen since `83442f9005` (2015-07-16); no v2 git tag exists upstream | public domain / CC0 1.0 (header comment; upstream has no LICENSE file — fetch of master/LICENSE 404s) | 2 small deltas — see below |
@@ -62,6 +62,29 @@ below): `litehook_locate_dsc` / `litehook_find_dsc_symbol` stubbed out,
 replaced by `native/hk_symbols.c`.
 
 Rebuild: none; compiled from source by the Makefile.
+
+### dobby (binary rebuilt from source, one internal reorder patch)
+
+Base https://github.com/jmpews/Dobby @
+`5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14). The vendored
+`libdobby.a` was rebuilt from that commit with one local patch; `dobby.h` is
+byte-identical to upstream `include/dobby.h` (+ the provenance comment line)
+and the patch touches no public symbol or signature — ABI unchanged.
+
+- `2026-08-11` — `source/InterceptRouting/InlineHookRouting.h`: publish the
+  relocated original into the caller's out cell **before** activation.
+  Upstream `DobbyHook` assigns `*out_origin_func` *after*
+  `routing->Active()` (the trampoline is already written over the prologue by
+  then). The patch moves the `if (out_origin_func)` block (and the
+  `arm64e_pac_strip_and_sign` on the cell) ahead of `routing->Active()`;
+  ordering only — the error check still runs after `Active()` so a failed
+  commit still reports -1. Verified at the instruction level in both slices:
+  arm64 `str x8,[x19]` at 0x314 precedes the `blr` Active call at 0x324
+  (upstream: `blr` at 0x300 before `str` at 0x334); arm64e `str` at 0x3a8
+  before `blraa` at 0x3d4 (upstream: `blraa` at 0x394 before `str` at 0x3c4).
+
+Rebuild: `libdobby.a` from source (arm64 + arm64e slices, theos clang
+13.0.0) — see Rebuild commands below.
 
 ### gum (wrapper only; devkit binary is pristine)
 
@@ -123,9 +146,26 @@ Update this file when that lane lands.
 ## Rebuild commands
 
 - fishhook, litehook: none — built from source by `make`.
-- dobby: none — `libdobby.a` comes from the upstream `dobby-iphoneos-all.tar.gz`
-  (release "latest", commit `5dfc854`); re-fetch from
-  https://github.com/jmpews/Dobby/releases to update.
+- dobby: rebuilt from source (2026-08-11) at upstream commit `5dfc854` with the
+  publication-before-activation patch (see Local patches). Commands, per arch
+  (`SDK=$HOME/theos/sdks/iPhoneOS16.5.sdk`, `TC=$HOME/theos/toolchain/linux/iphone/bin`,
+  `$ARCH`/`$MIN` = `arm64`/`9.3` and `arm64e`/`14.0`):
+
+  ```
+  cmake -S . -B build-$ARCH -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+    -DCMAKE_OSX_ARCHITECTURES=$ARCH -DCMAKE_OSX_SYSROOT=$SDK \
+    -DCMAKE_C_COMPILER=$TC/clang -DCMAKE_CXX_COMPILER=$TC/clang++ -DCMAKE_ASM_COMPILER=$TC/clang \
+    -DCMAKE_AR=$TC/ar -DCMAKE_RANLIB=$TC/ranlib -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+    -DCMAKE_BUILD_TYPE=Release -DDOBBY_BUILD_EXAMPLE=OFF -DDOBBY_BUILD_TEST=OFF \
+    "-DCMAKE_C_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK" \
+    "-DCMAKE_CXX_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK" \
+    "-DCMAKE_ASM_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK -x assembler-with-cpp"
+  cmake --build build-$ARCH --target dobby_static -j8
+  lipo -create build-arm64/libdobby.a build-arm64e/libdobby.a -output libdobby.a
+  ```
+
+  Re-fetch from https://github.com/jmpews/Dobby/releases only to re-base the
+  patch on a newer upstream commit.
 - gum: none — `libfrida-gum.a`/`frida-gum.h` from the frida 17.17.0 devkit;
   re-fetch from
   https://github.com/frida/frida/releases/download/17.17.0/frida-gum-devkit-17.17.0-ios-arm64.tar.xz

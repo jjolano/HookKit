@@ -195,9 +195,11 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
             .defaultTechnique = HKFunctionTechniqueInline,
-            // Upstream writes *out_origin_func after routing activates —
-            // NOT safe for a requested original.
-            .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationAfterActivation },
+            // The vendored static lib is rebuilt from upstream 5dfc854 with a
+            // reorder patch: DobbyHook publishes *out_origin_func BEFORE
+            // routing->Active() commits the trampoline (instruction-verified
+            // in both slices, 2026-08-11) — safe for a requested original.
+            .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
             .nativeBatch = NO,
             .sharedArm64Preflight = YES,
         };
@@ -340,7 +342,7 @@ const HKCategoryPriority hk_category_priorities[] = {
     // the category, and Dobby/Frida report unavailable at runtime, so no
     // resolution can select HKStrategyInline there.
     { HK_CAT_FUNCTION_INLINE, { {HK_LIB_ELLEKIT, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, YES},
-                                {HK_LIB_DOBBY, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationAfterActivation}, NO, YES},
+                                {HK_LIB_DOBBY, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
                                 {HK_LIB_FRIDA, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, YES, YES},
 #if defined(__arm64__) || defined(__arm64e__)
                                 // litehook inline: no original trampoline, so
