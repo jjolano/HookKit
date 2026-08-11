@@ -13,7 +13,17 @@
 #import "native/hk_arm64.h"
 #import "native/hk_native.h"
 
+// Executable-range probe: not declared in hk_native.h, whose public contract
+// is readable-only (the Swift metadata reader depends on that). The inline
+// preflight inspects CODE, so it needs the stronger check.
+HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len);
+
 hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
+    if(outErrno) {
+        *outErrno = 0;
+    }
+
+#if defined(__arm64__) || defined(__aarch64__)
     // Fail closed before the vendor hook: Dobby's relocator neither rejects
     // short functions (it reads its overwrite window without recognizing
     // early exits, smashing whatever follows) nor handles literal loads (it
@@ -22,10 +32,6 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
     // smashing the pool or address the instruction points at. The checks
     // below read only the window and never write, so a reject leaves the
     // target untouched.
-    if(outErrno) {
-        *outErrno = 0;
-    }
-
 #if __has_feature(ptrauth_calls)
     // Strip PAC so the raw address is what the relocator will inspect
     // (arm64e). Replacement is stripped too so the self-hook check below
@@ -34,7 +40,10 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
     replacement = ptrauth_strip(replacement, ptrauth_key_asia);
 #endif
 
-    if(((uintptr_t)function & 0x3) != 0 || function == replacement) {
+    // Mirror of the target check: the replacement is branched to, so it must
+    // sit on an instruction boundary too (AArch64 instructions are 4-byte
+    // aligned).
+    if(((uintptr_t)function & 0x3) != 0 || ((uintptr_t)replacement & 0x3) != 0 || function == replacement) {
         if(outErrno) {
             *outErrno = EINVAL;
         }
@@ -42,20 +51,41 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
         return HK_ERR_NOT_SUPPORTED;
     }
 
-#if defined(__arm64__) || defined(__aarch64__)
-    // The window scan below dereferences the prologue; a bogus non-NULL
-    // address must fail cleanly instead of faulting. (The Mach VM probe is
-    // arm64-only, and so are the inline backends that use this preflight.)
-    if(!hk_native_range_readable(function, window)) {
+    // The replacement is jumped to, never inspected: its mapping only needs to
+    // be mapped and executable for the branch to land. 4 bytes covers the
+    // branch-target instruction (the page-rounded probe spans whatever it
+    // straddles); same EFAULT convention as the target range check.
+    if(!hk_native_range_readable(replacement, 4)
+       || !hk_native_range_executable(replacement, 4)) {
         if(outErrno) {
             *outErrno = EFAULT;
         }
 
         return HK_ERR_NOT_SUPPORTED;
     }
-#endif
 
-    if(hk_arm64_has_early_terminator(function, window)) {
+    // The window scan below dereferences the prologue; a bogus non-NULL
+    // address must fail cleanly instead of faulting. (The Mach VM probe is
+    // arm64-only, and so are the inline backends that use this preflight.)
+    // The mapping must be executable too: the window is code — a
+    // readable-only mapping (a data blob) is not a patchable prologue.
+    if(!hk_native_range_readable(function, window)
+       || !hk_native_range_executable(function, window)) {
+        if(outErrno) {
+            *outErrno = EFAULT;
+        }
+
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    // A terminator in the final fully-overwritten instruction is not "early":
+    // the last instruction is replaced wholesale by the branch, so only
+    // terminators in the preceding window-4 bytes can end the function inside
+    // the patch. (A window of 4 bytes or less is a single overwritten
+    // instruction: nothing to refuse.)
+    size_t scan = (window > 4) ? window - 4 : 0;
+
+    if(scan && hk_arm64_has_early_terminator(function, scan)) {
         // Function ends inside the overwrite window: patching would smash a
         // neighbor's bytes.
         if(outErrno) {
@@ -76,4 +106,13 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
     }
 
     return HK_OK;
+#else
+    // Not arm64/arm64e: no AArch64 decoder is compiled in here. Pass through
+    // — the MS providers (Substrate, Substitute) validate their own Thumb
+    // prologues, and the fixed-window inline backends are arm64-only.
+    (void)function;
+    (void)replacement;
+    (void)window;
+    return HK_OK;
+#endif
 }

@@ -15,14 +15,6 @@
     int _lastErrno;
 }
 
-- (BOOL)batchingSupported {
-    return YES;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return YES;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -75,6 +67,7 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
         case HK_NATIVE_ERR_UNSUPPORTED:
         case HK_NATIVE_ERR_SHORT_FUNCTION:
         case HK_NATIVE_ERR_RELOCATE:
+        case HK_NATIVE_ERR_UNREADABLE:
             return HK_ERR_NOT_SUPPORTED;
 
         default:
@@ -112,19 +105,18 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    void *orig = NULL;
-
-    if(!hk_native_hook_function(function, replacement, &orig)) {
+    // C1: the engine publishes the sealed trampoline into *out_orig BEFORE
+    // the target is patched (hk_native.c hk_native_hook_function), so hand
+    // the caller's cell straight to it — no local staging, no
+    // copy-after-activation. Every failure path returns before the publish;
+    // a post-publish write failure keeps the (real, executable) trampoline
+    // in the cell, which a mid-write crash must not lose.
+    if(!hk_native_hook_function(function, replacement, old_ptr)) {
         _lastErrno = hk_native_last_error();
         return hk_native_map_engine_failure(_lastErrno);
     }
 
     _lastErrno = 0;
-
-    if(old_ptr) {
-        *old_ptr = orig;
-    }
-
     return HK_OK;
 }
 
@@ -143,23 +135,26 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
     return HK_OK;
 }
 
-// No cross-hook batching to exploit — each patch is independent — but the
-// protocol's batch path is still honoured so callers get uniform semantics.
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    int total = (int)[hooks count];
-    int succeeded = 0;
-    int failureErrno = 0;
-
+// No cross-hook batching to exploit — each patch is independent — and the
+// descriptor's nativeBatch=NO means the facade drains per-op through
+// executeOperation:onBackend: instead of calling this. The protocol still
+// requires a correct batch path, so each op runs the full publication cycle
+// (begin -> apply -> publish -> finish) exactly like the facade's single-op
+// helper, with status and backendErrno carrying the per-op outcome.
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
     for(HKHookOperation *hook in hooks) {
+        hk_original_begin(&hook->original);
+
+        void **cell = hk_original_output_cell(&hook->original);
         hookkit_status_t result = HK_ERR;
 
         switch(hook->kind) {
             case HKHookKindMessage:
-                result = [self hookMessageInClass:hook->objcClass withSelector:hook->selector withReplacement:hook->replacement outOldPtr:&hook->origValue];
+                result = [self hookMessageInClass:hook->objcClass withSelector:hook->selector withReplacement:hook->replacement outOldPtr:cell];
                 break;
 
             case HKHookKindFunction:
-                result = [self hookFunction:hook->function withReplacement:hook->replacement outOldPtr:&hook->origValue];
+                result = [self hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell];
                 break;
 
             case HKHookKindMemory:
@@ -167,17 +162,18 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
                 break;
         }
 
-        if(result == HK_OK) {
-            hook->succeeded = YES;
-            succeeded += 1;
-        } else if(!failureErrno) {
-            failureErrno = _lastErrno;
+        // Record what the backend produced (idempotent when it wrote straight
+        // into the caller's cell; marks published so finish's invariant
+        // passes), then finalize: finish applies the publish-only-real-
+        // original invariant and may change the status.
+        hk_original_publish(&hook->original, cell ? *cell : NULL);
+        result = hk_original_finish(&hook->original, result);
+        hook->status = result;
+
+        if(result != HK_OK) {
+            hook->backendErrno = _lastErrno;
         }
     }
-
-    _lastErrno = failureErrno;
-
-    return hk_batch_status(succeeded, total);
 }
 
 - (HKImageRef)openImage:(NSString *)path {
@@ -224,15 +220,6 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
     int _lastErrno;
 }
 
-- (BOOL)batchingSupported {
-    return NO;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    // Swift vtable hooking is a separate API; none of the three kinds apply
-    return NO;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -252,9 +239,15 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
     return HK_ERR_NOT_SUPPORTED;
 }
 
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // nothing pending: Swift hooks apply at hook time (batchingSupported NO)
-    return HK_OK;
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // nothing pending: Swift hooks apply at hook time (descriptor
+    // nativeBatch = NO).
+    // Defensive honesty: an op reaching here was never installed, so it must
+    // not report success (the facade's finish restores any begun cell for
+    // NOT_SUPPORTED).
+    for(HKHookOperation *hook in hooks) {
+        hook->status = HK_ERR_NOT_SUPPORTED;
+    }
 }
 
 - (HKImageRef)openImage:(NSString *)path {
@@ -293,37 +286,27 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
 }
 
 - (hookkit_status_t)hookSwiftMethodInClass:(Class)objcClass withName:(NSString *)name withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    // owned cell: the engine never touches the caller's pointer directly
-    void *orig = NULL;
-
-    if(!hk_swift_hook_method(objcClass, [name UTF8String], replacement, &orig)) {
+    // C1: the engine publishes the stripped original into *out_orig BEFORE
+    // the slot mutates (hk_swift.c hk_swift_hook_slot), so hand the caller's
+    // cell straight to it — no local staging, no copy-after-activation.
+    if(!hk_swift_hook_method(objcClass, [name UTF8String], replacement, old_ptr)) {
         _lastErrno = hk_swift_last_error();
         return [self mapEngineError:_lastErrno];
     }
 
     _lastErrno = 0;
-
-    if(old_ptr) {
-        *old_ptr = orig;
-    }
-
     return HK_OK;
 }
 
 - (hookkit_status_t)hookSwiftVtableSlotInClass:(Class)objcClass withIndex:(NSUInteger)index withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    void *orig = NULL;
-
-    if(!hk_swift_hook_vtable_slot(objcClass, (uint32_t)index, replacement, &orig)) {
+    // C1: same contract as hookSwiftMethodInClass: — the original is
+    // published before the slot write, so pass the caller's cell directly.
+    if(!hk_swift_hook_vtable_slot(objcClass, (uint32_t)index, replacement, old_ptr)) {
         _lastErrno = hk_swift_last_error();
         return [self mapEngineError:_lastErrno];
     }
 
     _lastErrno = 0;
-
-    if(old_ptr) {
-        *old_ptr = orig;
-    }
-
     return HK_OK;
 }
 @end

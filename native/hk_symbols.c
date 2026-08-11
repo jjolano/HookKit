@@ -25,7 +25,22 @@ struct hk_image {
     const char *strings;
     uint32_t strings_size;
     void *dl_handle;                // fallback for exported symbols
+    uint32_t *sect_flags;           // section flags in n_sect order (loaded image), or NULL
+    uint32_t sect_count;
 };
+
+// Pointer authentication (arm64e only; identity on plain arm64): private
+// symbols that resolve into instruction sections are returned signed with the
+// function-pointer key, discriminator 0 -- the same recipe hk_native.c uses
+// for the originals it hands out. Data symbols stay unsigned.
+#if __has_feature(ptrauth_calls)
+#include <ptrauth.h>
+#define hk_sym_strip(p)  ptrauth_strip((p), ptrauth_key_function_pointer)
+#define hk_sym_sign(p)   ptrauth_sign_unauthenticated((void *)(p), ptrauth_key_function_pointer, 0)
+#else
+#define hk_sym_strip(p)  (p)
+#define hk_sym_sign(p)   ((void *)(p))
+#endif
 
 #pragma mark - Loaded image lookup
 
@@ -396,6 +411,69 @@ static bool bind_ondisk_symbols(const char *path, struct hk_image *image) {
     return false;
 }
 
+#pragma mark - Section flags
+
+// Section flags of a *loaded* image's header, in n_sect order (1-based,
+// concatenated across segments in load-command order). Used to tell code
+// symbols (instruction sections, PAC-signed on arm64e) from data symbols
+// (plain pointers). The header belongs to a live image, so the command list
+// is dyld-validated; only a degenerate cmdsize is guarded.
+static uint32_t *collect_section_flags(const struct mach_header_64 *header, uint32_t *out_count) {
+    uint32_t count = 0;
+    const uint8_t *cursor = (const uint8_t *)header + sizeof(struct mach_header_64);
+
+    for(uint32_t i = 0; i < header->ncmds; i++) {
+        const struct load_command *lc = (const struct load_command *)cursor;
+
+        if(lc->cmdsize < sizeof(struct load_command)) {
+            break;
+        }
+
+        if(lc->cmd == LC_SEGMENT_64) {
+            count += ((const struct segment_command_64 *)lc)->nsects;
+        }
+
+        cursor += lc->cmdsize;
+    }
+
+    if(count == 0) {
+        *out_count = 0;
+        return NULL;
+    }
+
+    uint32_t *flags = malloc((size_t)count * sizeof(uint32_t));
+
+    if(!flags) {
+        *out_count = 0;
+        return NULL;
+    }
+
+    uint32_t idx = 0;
+    cursor = (const uint8_t *)header + sizeof(struct mach_header_64);
+
+    for(uint32_t i = 0; i < header->ncmds; i++) {
+        const struct load_command *lc = (const struct load_command *)cursor;
+
+        if(lc->cmdsize < sizeof(struct load_command)) {
+            break;
+        }
+
+        if(lc->cmd == LC_SEGMENT_64) {
+            const struct segment_command_64 *seg = (const struct segment_command_64 *)lc;
+            const struct section_64 *sect = (const struct section_64 *)(seg + 1);
+
+            for(uint32_t s = 0; s < seg->nsects; s++) {
+                flags[idx++] = sect[s].flags;
+            }
+        }
+
+        cursor += lc->cmdsize;
+    }
+
+    *out_count = count;
+    return flags;
+}
+
 #pragma mark - Public API
 
 hk_image *hk_native_open_image(const char *path) {
@@ -420,6 +498,7 @@ hk_image *hk_native_open_image(const char *path) {
 
     image->slide = slide;
     image->dl_handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+    image->sect_flags = collect_section_flags(header, &image->sect_count);
 
     if(!bind_cache_symbols(header, image)) {
         bind_ondisk_symbols(path, image);
@@ -443,6 +522,7 @@ void hk_native_close_image(hk_image *image) {
         dlclose(image->dl_handle);
     }
 
+    free(image->sect_flags);
     free(image);
 }
 
@@ -474,7 +554,20 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
             }
 
             if(symbol_matches(image->strings + symbol->n_un.n_strx, name)) {
-                return (void *)(uintptr_t)((intptr_t)symbol->n_value + image->slide);
+                void *addr = (void *)(uintptr_t)((intptr_t)symbol->n_value + image->slide);
+
+                // Sign code only: n_sect identifies the Mach-O section the
+                // symbol lives in. Instruction sections (code) get the
+                // function-pointer signature; data symbols and unknown
+                // sections stay unsigned (fail closed -- the callers that
+                // consume these strip them anyway).
+                if(symbol->n_sect > 0 && symbol->n_sect <= image->sect_count
+                   && (image->sect_flags[symbol->n_sect - 1]
+                       & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS))) {
+                    addr = hk_sym_sign(hk_sym_strip(addr));
+                }
+
+                return addr;
             }
         }
     }

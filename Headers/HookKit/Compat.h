@@ -39,15 +39,22 @@ typedef const struct HKImage* HKImageRef;
  *                      / Frida / litehook)
  *   PRIVATE_SYMBOL   — Private symbol lookup in a loaded image (ElleKit /
  *                      Substrate / Substitute / litehook)
+ *   MEMORY           — Memory patching (hookMemory:). A hook-kind bit, not a
+ *                      selectable category: no substitutorWithCategory:
+ *                      backend is chosen by it — it reports the memory kind
+ *                      in backend descriptors/type info, so callers can tell
+ *                      which backends serve hookMemory:.
  *
- * Flags are powers of two and may be OR'd for getAvailableCategories.
+ * Flags are powers of two and may be OR'd for getAvailableCategories (which
+ * reports the four category bits, never HK_CAT_MEMORY).
  */
 typedef enum {
     HK_CAT_NONE             = 0,
     HK_CAT_MESSAGE          = (1 << 0),
     HK_CAT_FUNCTION_REBIND  = (1 << 1),
     HK_CAT_FUNCTION_INLINE  = (1 << 2),
-    HK_CAT_PRIVATE_SYMBOL   = (1 << 3)
+    HK_CAT_PRIVATE_SYMBOL   = (1 << 3),
+    HK_CAT_MEMORY           = (1 << 4)
 } hookkit_cat_t;
 
 /*
@@ -95,17 +102,28 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * old_ptr. The caller's old_ptr storage is borrowed: it must stay alive until
  * executeHooks returns, and is never retained past it. Disabling batching
  * while operations are queued leaves them queued — they still run at the next
- * executeHooks — while new hook calls execute immediately. Batching backends
- * may not preserve submission order across hook kinds: ElleKit partitions
- * operations per kind (messages/functions/memory), and a Frida transaction is
- * an atomic publication of the batch, not a rollback on partial failure.
- * Backends without batching ignore the queue: they apply hooks immediately
- * even while batching is on.
+ * executeHooks — while new hook calls execute immediately. Queue-always
+ * batching (H2): while batching is on, EVERY supported hook kind is queued —
+ * whether or not the backend has a native batch primitive — and no hook
+ * applies before executeHooks. Backends with a native batch primitive apply
+ * the drained batch at once (a Frida transaction is an atomic publication of
+ * the batch, not a rollback on partial failure); backends without one are
+ * applied one op at a time, in submission order, at executeHooks.
  *
- * Availability: per-process results are cached at the first probe — the
- * ElleKit, Substrate, Substitute and Frida probes cache only positive results
- * (a failed dlopen is retried on a later probe), while the Swift probe caches
- * both success and failure.
+ * Availability: getAvailableSubstitutorTypes / getAvailableCategories /
+ * getSubstitutorTypeInfo: report DISCOVERY, not activation — the dlopen-based
+ * jailbreak providers (ElleKit, Substrate, Substitute, Frida) are probed
+ * side-effect-free via dlopen_preflight (never mapped, constructors never
+ * run) and the remaining backends through their own side-effect-free checks.
+ * A "discoverable" result therefore means the provider is present, not that
+ * it is verified activatable; engines are actually dlopen'd and initialized
+ * only when a backend is selected and used (initLibraries /
+ * defaultSubstitutor / the auto-cover path), which runs the full activation
+ * probes. Those activation probes cache per-process results at the first
+ * probe — the ElleKit, Substrate, Substitute and Frida probes cache only
+ * positive results (a failed dlopen is retried on a later probe), while the
+ * Swift probe caches both success and failure; the discovery probes are
+ * deliberately uncached.
  *
  * Error reporting: getLibErrno: is an OPAQUE backend-specific code, not a
  * normalized error enum — do not rely on cross-backend meaning. For ElleKit it
@@ -127,13 +145,16 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * technique. Backends that cannot promise a side-effect-free failure report
  * HK_ERR instead (a failed invocation may have applied). Per backend:
  * fishhook returns it when a symbol is exported but no loaded image
- * references it, and unregisters the rebinding so nothing applies to future
- * image loads (rebind_symbols_unbind); substitute maps the capability-miss
- * codes (FUNC_TOO_SHORT / BAD_INSN_AT_START / CALLS_AT_START /
- * JUMPS_TO_START / OUT_OF_RANGE / NO_SUCH_SELECTOR) through
- * substitute_error_to_status, and the GOT/PLT interpose fallback fires only
- * for those five function codes, with a fresh out-cell; the native engine
- * maps its UNSUPPORTED / SHORT_FUNCTION / RELOCATE failures the same way;
+ *  references it, and unregisters the rebinding so nothing applies to future
+ *  image loads (rebind_symbols_unbind); substitute maps the capability-miss
+ *  codes (FUNC_TOO_SHORT / BAD_INSN_AT_START / CALLS_AT_START /
+ *  JUMPS_TO_START / OUT_OF_RANGE / NO_SUCH_SELECTOR) through
+ *  substitute_error_to_status, which classifies the native Substitute result
+ *  as-is — a capability miss stays HK_ERR_NOT_SUPPORTED with no technique
+ *  change behind the descriptor (the old GOT/PLT interpose fallback is gone);
+ *  callers that need interposition use auto-cover with an explicit rebind
+ *  category; the native engine
+ *  maps its UNSUPPORTED / SHORT_FUNCTION / RELOCATE failures the same way;
  * the preflight rejections below use it too. Everything else — OOM, VM,
  * NOT_ON_MAIN_THREAD, UNEXPECTED_PC_ON_OTHER_THREAD, unknown/future codes —
  * is HK_ERR: the hook may already be applied, so it must never be retried.
@@ -181,12 +202,19 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // The substitutorWith... constructors already do this for you.
 - (void)initLibraries;
 
-// Returns an integer representing available substitutor types on the system. Use getSubstitutorTypeInfo to receive an array for more details.
+// Returns an integer representing the substitutor types DISCOVERABLE on the
+// system — side-effect-free probes only (dlopen_preflight for the dlopen-based
+// providers, never an engine load), so the result means the provider is
+// present, not that it is verified activatable: engines are activated only
+// when a backend is actually selected and used. Use getSubstitutorTypeInfo to
+// receive an array for more details.
 + (hookkit_lib_t)getAvailableSubstitutorTypes;
 
 // Returns the OR of all category flags for which at least one backend is
-// available on the current device. Callers can use this to probe which
-// categories are usable before requesting a backend by category.
+// discoverable on the current device (same side-effect-free discovery as
+// getAvailableSubstitutorTypes — never an engine load). Callers can use this
+// to probe which categories are usable before requesting a backend by
+// category; a positive result does not verify that the engine activates.
 + (hookkit_cat_t)getAvailableCategories;
 
 // Returns an array of dictionaries containing information on given substitutor types, as supported by the running version of HookKit.
@@ -294,8 +322,9 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // Just like findSymbolsInImage, but for one symbol. Returns the symbol address, or NULL if not found.
 - (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName;
 
-// Installs every hook queued while batching was enabled (batching-capable
-// backends only; others never queue). Drains the queue. Returns HK_OK if all
+// Installs every hook queued while batching was enabled (queue-always: every
+// supported kind is queued while batching is on, whether or not the backend
+// has a native batch primitive). Drains the queue. Returns HK_OK if all
 // operations succeeded, HK_ERR_PARTIAL if some did, HK_ERR if all failed;
 // old_ptr cells are written only for the operations that succeeded.
 // Concurrent calls are not serialized — call from one thread.

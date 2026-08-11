@@ -2,7 +2,6 @@
 
 #import <dlfcn.h>
 #import <errno.h>
-#import <mach-o/dyld.h>
 #import <mach/mach.h>
 #import <objc/runtime.h>
 #import <pthread.h>
@@ -123,7 +122,6 @@ static struct substitute_image *(*fn_substitute_open_image)(const char *) = NULL
 static void (*fn_substitute_close_image)(struct substitute_image *) = NULL;
 static int (*fn_substitute_find_private_syms)(struct substitute_image *, const char **, void **, size_t) = NULL;
 static void *(*fn_substitute_sym_to_ptr)(struct substitute_image *, substitute_sym *) = NULL;
-static int (*fn_substitute_interpose_imports)(const struct substitute_image *, const struct substitute_import_hook *, size_t, struct substitute_import_hook_record **, int) = NULL;
 static BOOL substitute_native_available = NO;
 
 static void *resolve_ms_symbol(void *handle, const char *name, const char *fallback) {
@@ -166,7 +164,6 @@ static BOOL probe_substitute(void) {
     void (*closeImage)(struct substitute_image *) = (void (*)(struct substitute_image *))dlsym(handle, "substitute_close_image");
     int (*findPrivateSyms)(struct substitute_image *, const char **, void **, size_t) = (int (*)(struct substitute_image *, const char **, void **, size_t))dlsym(handle, "substitute_find_private_syms");
     void *(*symToPtr)(struct substitute_image *, substitute_sym *) = (void *(*)(struct substitute_image *, substitute_sym *))dlsym(handle, "substitute_sym_to_ptr");
-    int (*interposeImports)(const struct substitute_image *, const struct substitute_import_hook *, size_t, struct substitute_import_hook_record **, int) = (int (*)(const struct substitute_image *, const struct substitute_import_hook *, size_t, struct substitute_import_hook_record **, int))dlsym(handle, "substitute_interpose_imports");
 
     BOOL nativeAvailable = hookFunctions && hookObjcMessage
         && openImage && closeImage
@@ -194,7 +191,6 @@ static BOOL probe_substitute(void) {
     fn_substitute_close_image = closeImage;
     fn_substitute_find_private_syms = findPrivateSyms;
     fn_substitute_sym_to_ptr = symToPtr;
-    fn_substitute_interpose_imports = interposeImports;
     substitute_native_available = nativeAvailable;
 
     return YES;
@@ -261,14 +257,6 @@ BOOL substitute_discoverable(void) {
     return self;
 }
 
-- (BOOL)batchingSupported {
-    return NO;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return kind == HKHookKindMessage || kind == HKHookKindFunction;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -313,11 +301,14 @@ BOOL substitute_discoverable(void) {
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
     // MSHookFunction is void — success is only observable through the
     // original being written into the out cell (some builds also signal
-    // failure through errno). Same contract as hookMessageInClass: pass a
-    // slot we own, and never publish a NULL original as success.
-    void *original = NULL;
+    // failure through errno). C1: hand the caller's cell straight to the
+    // vendor — no local staging, no copy-after-activation — so the original
+    // lands in the caller-visible cell as the patch is applied. The
+    // publish-only-non-NULL invariant is preserved by the facade: a call
+    // that produced no original leaves the cell NULL (begin NULLed it), this
+    // reports NOT_SUPPORTED, and finish restores the saved value.
     errno = 0;
-    msHookFunction(function, replacement, &original);
+    msHookFunction(function, replacement, old_ptr);
     _lastErrno = errno;
 
     if(errno) {
@@ -325,16 +316,12 @@ BOOL substitute_discoverable(void) {
         return HK_ERR;
     }
 
-    if(!original) {
+    if(!old_ptr || !*old_ptr) {
         // No errno but no original either: the function was not hooked (too
         // short / bad shape / no writable prologue) — nothing was written,
         // so callers may switch technique.
         _lastErrno = ENOENT;
         return HK_ERR_NOT_SUPPORTED;
-    }
-
-    if(old_ptr) {
-        *old_ptr = original;
     }
 
     return HK_OK;
@@ -345,9 +332,10 @@ BOOL substitute_discoverable(void) {
     return HK_ERR_NOT_SUPPORTED;
 }
 
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // nothing pending: hooks are applied at hook time
-    return HK_OK;
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // No native batch primitive (descriptor nativeBatch=NO): the facade
+    // drains per-op via executeOperation:onBackend: and never calls this.
+    // Hooks are applied at hook time; nothing is pending here.
 }
 
 - (HKImageRef)openImage:(NSString *)path {
@@ -443,7 +431,7 @@ static hookkit_status_t hk_verified_memory_patch(void *target, const void *data,
 #pragma mark - Substitute error classification
 
 // Maps a native libsubstitute error code to the hookkit status. Pure: no
-// state, just the code table. Shared by hookFunction: and hookMessageInClass:.
+// state, just the code table. Used by hookFunction:.
 //
 // Capability misses mean the hook was NOT applied — the function's shape or
 // the selector's absence make this technique unusable, which is what
@@ -478,18 +466,11 @@ static hookkit_status_t substitute_error_to_status(int err) {
 }
 
 - (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    if(!substitute_native_available) {
-        return [super hookMessageInClass:objcClass withSelector:selector withReplacement:replacement outOldPtr:old_ptr];
-    }
-
-    if(!class_getInstanceMethod(objcClass, selector) && !class_getClassMethod(objcClass, selector)) {
-        _lastErrno = 0;
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
-    int result = fn_substitute_hook_objc_message(objcClass, selector, replacement, old_ptr, NULL);
-    _lastErrno = result;
-    return substitute_error_to_status(result);
+    // The facade's central runtime hook (hk_apply_message_hook) owns all
+    // message hooking — this protocol method is never dispatched anymore.
+    // Minimal conforming stub: side-effect-free refusal.
+    _lastErrno = 0;
+    return HK_ERR_NOT_SUPPORTED;
 }
 
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
@@ -504,96 +485,12 @@ static hookkit_status_t substitute_error_to_status(int err) {
     int result = fn_substitute_hook_functions(&hook, 1, NULL, 0);
     _lastErrno = result;
 
-    if(result == SUBSTITUTE_OK) {
-        return HK_OK;
-    }
-
-    // GOT/PLT interposition fallback: on iOS 16.2+ the AMFI/APT policy
-    // changes broke executable-code patching, so substitute_hook_functions
-    // fails on functions it could otherwise hook. The fallback fires ONLY
-    // for the five capability-miss codes — substitute reported it could not
-    // patch the function, so nothing was written and interposing is safe.
-    // Any other code (OOM, VM, NOT_ON_MAIN_THREAD, UNEXPECTED_PC_ON_OTHER_
-    // THREAD, ADJUSTING_THREADS, or unknown/future) means the hook may
-    // already be applied — retrying with interposition could double-hook.
-    // Same taxonomy as the status mapping above (Internal/HKSubstituteErrors.c).
-    if(fn_substitute_interpose_imports && hk_substitute_err_is_retryable(result)) {
-        Dl_info info;
-
-#if __has_feature(ptrauth_calls)
-        function = ptrauth_strip(function, ptrauth_key_asia);
-#endif
-
-        if(dladdr(function, &info) && info.dli_sname) {
-            // Fresh zeroed out-cell: substitute may have written old_ptr
-            // while preparing the failed inline hook — never reuse a
-            // possibly-written cell.
-            void *interposedOld = NULL;
-
-            struct substitute_import_hook ih = {
-                .name = info.dli_sname,
-                .replacement = replacement,
-                .old_ptr = &interposedOld,
-                .options = 0
-            };
-
-            // substitute_interpose_imports requires the handle of the image
-            // that IMPORTS the symbol (vendored substitute.h: "@handle
-            // handle of the importing library") and dereferences it, so NULL
-            // is a latent crash. The function's DEFINING image (dladdr's
-            // dli_fname) is the wrong handle: an image does not import its
-            // own exports through the GOT, so interposing on it reports
-            // SUBSTITUTE_OK while hooking nothing. Iterate the loaded
-            // images and interpose on each until one actually imports the
-            // symbol — evidenced by interposedOld being written non-NULL.
-            // Success is never claimed without that write.
-            // ponytail: stops at the first importer (matching the pre-fix
-            // single-image scope); iterate every importer if a partial-hook
-            // report ever matters.
-            int lastInterposeErr = SUBSTITUTE_OK;
-            BOOL interposedAny = NO;
-
-            for(uint32_t i = 0; i < _dyld_image_count() && !interposedAny; i++) {
-                struct substitute_image *importingImage = fn_substitute_open_image(_dyld_get_image_name(i));
-
-                if(!importingImage) {
-                    continue;
-                }
-
-                int interposeResult = fn_substitute_interpose_imports(importingImage, &ih, 1, NULL, 0);
-                fn_substitute_close_image(importingImage);
-                lastInterposeErr = interposeResult;
-
-                if(interposeResult == SUBSTITUTE_OK && interposedOld) {
-                    interposedAny = YES;
-                }
-            }
-
-            _lastErrno = lastInterposeErr;
-
-            if(interposedAny) {
-                if(old_ptr) {
-                    *old_ptr = interposedOld;
-                }
-
-                return HK_OK;
-            }
-
-            if(lastInterposeErr != SUBSTITUTE_OK) {
-                // An importer was found but its interpose failed: its GOT
-                // may be partially rewritten, so this is terminal — never
-                // retry with a second interposition.
-                return HK_ERR;
-            }
-
-            // Every image accepted with nothing rewritten: no loaded image
-            // imports the symbol through the GOT. Side-effect-free miss, so
-            // callers may switch technique.
-            _lastErrno = ENOENT;
-            return HK_ERR_NOT_SUPPORTED;
-        }
-    }
-
+    // Return the classified native result as-is. The old GOT/PLT interpose
+    // fallback (which fired for the capability-miss codes) is gone by
+    // reviewed decision: it changed the technique behind the descriptor,
+    // mishandled stale per-image out-cells, and could not represent a
+    // partial mutation honestly. Callers that need interposition use
+    // auto-cover with an explicit rebind category.
     return substitute_error_to_status(result);
 }
 

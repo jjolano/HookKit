@@ -45,16 +45,16 @@ void *hk_search_loaded_images(void *(^probe)(const char *imageName)) {
     return NULL;
 }
 
-hookkit_status_t hk_batch_status(int succeeded, int total) {
-    if(succeeded < total) {
-        NSLog(@"[HookKit] warning: successfully hooked less than expected (%d/%d)", succeeded, total);
+hookkit_status_t hk_batch_status(int okCount, int total) {
+    if(okCount < total) {
+        NSLog(@"[HookKit] warning: successfully hooked less than expected (%d/%d)", okCount, total);
     }
 
-    if(succeeded == total) {
+    if(okCount == total) {
         return HK_OK;
     }
 
-    return succeeded > 0 ? HK_ERR_PARTIAL : HK_ERR;
+    return okCount > 0 ? HK_ERR_PARTIAL : HK_ERR;
 }
 
 // Shared dlfcn image lookup for the backends whose engines bring no image API
