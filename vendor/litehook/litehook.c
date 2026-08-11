@@ -5,7 +5,6 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <string.h>
-#include <sys/fcntl.h>
 #include <mach/mach.h>
 #include <mach/arm/kern_return.h>
 #include <mach/port.h>
@@ -17,9 +16,6 @@
 #include <libkern/OSCacheControl.h>
 #include <mach-o/nlist.h>
 #include <mach-o/dyld_images.h>
-#include <sys/syslimits.h>
-#include <dispatch/dispatch.h>
-#include <dyld_cache_format.h>
 #include <ptrauth.h>
 #include <sys/mman.h>
 
@@ -74,16 +70,9 @@ void os_thread_self_restrict_tpro_to_ro(void)
 
 size_t _lth_fstrlen(FILE *f)
 {
-	size_t sz = 0;
-	uint32_t prev = ftell(f);
-	while (true) {
-		char c = 0;
-		if (fread(&c, sizeof(c), 1, f) != 1) break;
-		if (c == 0) break;
-		sz++;
-	}
-	fseek(f, prev, SEEK_SET);
-	return sz;
+	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	(void)f;
+	return 0;
 }
 
 uint32_t _lth_arm64_gen_movk(uint8_t x, uint16_t val, uint16_t lsl)
@@ -207,75 +196,14 @@ kern_return_t litehook_hook_function(void *source, void *target)
 
 const char *litehook_locate_dsc(void)
 {
-	static char dscPath[PATH_MAX] = {};
-	static dispatch_once_t onceToken;
-	dispatch_once(&onceToken, ^{
-		char *dyldSharedRegion   = getenv("DYLD_SHARED_REGION");
-		char *dyldSharedCacheDir = getenv("DYLD_SHARED_CACHE_DIR");
-		if (dyldSharedRegion && dyldSharedCacheDir && !strcmp(dyldSharedRegion, "private")) {
-			// If the local process uses a custom private dsc, use that as the path
-			strlcpy(dscPath, dyldSharedCacheDir, PATH_MAX);
-			strlcat(dscPath, "/dyld_shared_cache", PATH_MAX);
-		}
-		else if (!access("/System/Library/Caches/com.apple.dyld", F_OK)) /* iOS <=15 */ {
-			strlcpy(dscPath, "/System/Library/Caches/com.apple.dyld/dyld_shared_cache", PATH_MAX);
-		}
-		else if (!access("/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld", F_OK)) /* iOS >=16 */ {
-			strlcpy(dscPath, "/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld/dyld_shared_cache", PATH_MAX);
-		}
-
-		const char *suffixCandidates[] = {
-			"_arm64e",
-			"_arm64",
-			"_armv7s",
-			"_armv7",
-		};
-		char *rChar = &dscPath[strlen(dscPath)];
-		for (int i = 0; i < sizeof(suffixCandidates)/sizeof(*suffixCandidates); i++) {
-			*rChar = '\0';
-			strlcat(dscPath, suffixCandidates[i], PATH_MAX);
-			if (!access(dscPath, F_OK)) {
-				break;
-			}
-		}
-		if (access(dscPath, F_OK) != 0) strlcpy(dscPath, "", PATH_MAX);
-	});
-	return (const char *)dscPath;
-}
-
-// Internal: resolves the dyld shared-cache slide exactly once. Returns false
-// when the slide could not be obtained (task_info failed); *outSlide is then
-// 0 and MUST NOT be used — adding it to a dsc symbol value would yield an
-// unslid address that is not a valid runtime address.
-static bool _litehook_get_dsc_slide(uintptr_t *outSlide)
-{
-	static uintptr_t slide = 0;
-	static bool slideValid = false;
-	static dispatch_once_t onceToken;
-	dispatch_once(&onceToken, ^{
-		task_dyld_info_data_t dyldInfo;
-		uint32_t count = TASK_DYLD_INFO_COUNT;
-		kern_return_t kr = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyldInfo, &count);
-		if (kr != KERN_SUCCESS) {
-			// Never dereference all_image_info_addr on a failed lookup — it
-			// may be garbage. slide stays 0 and slideValid stays false, so
-			// every dsc-symbol lookup that needs the slide fails closed
-			// (returns no symbol) instead of signing a bogus address.
-			return;
-		}
-		struct dyld_all_image_infos *infos = (struct dyld_all_image_infos *)dyldInfo.all_image_info_addr;
-		slide = infos->sharedCacheSlide;
-		slideValid = true;
-	});
-	*outSlide = slide;
-	return slideValid;
+	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	return NULL;
 }
 
 uintptr_t litehook_get_dsc_slide(void)
 {
-	uintptr_t slide = 0;
-	_litehook_get_dsc_slide(&slide);
-	return slide;
+	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	return 0;
 }
 
 bool is_pointer_to_instructions(const mach_header_u *header, uintptr_t ptr)
@@ -390,100 +318,10 @@ void *litehook_find_symbol(const mach_header_u *header, const char *symbolName)
 
 void *litehook_find_dsc_symbol(const char *imagePath, const char *symbolName)
 {
-	const char *mainDSCPath = litehook_locate_dsc();
-	if (!strlen(mainDSCPath)) return NULL;
-
-	char symbolDSCPath[PATH_MAX];
-	strcpy(symbolDSCPath, mainDSCPath);
-	strcat(symbolDSCPath, ".symbols");
-
-	void *symbol = NULL;
-
-	FILE *mainDSC = fopen(mainDSCPath, "rb");
-	if (!mainDSC) goto end;
-	FILE *symbolDSC = fopen(symbolDSCPath, "rb") ?: mainDSC;
-
-	int imageIndex = -1;
-
-	struct dyld_cache_header mainHeader;
-	if (fread(&mainHeader, sizeof(mainHeader), 1, mainDSC) != 1) goto end;
-
-	for (int i = 0; i < mainHeader.imagesCount; i++) {
-		struct dyld_cache_image_info imageInfo;
-		fseek(mainDSC, mainHeader.imagesOffset + sizeof(imageInfo) * i, SEEK_SET);
-		if (fread(&imageInfo, sizeof(imageInfo), 1, mainDSC) != 1) goto end;
-
-		char path[PATH_MAX];
-		fseek(mainDSC, imageInfo.pathFileOffset, SEEK_SET);
-		if (fread(path, PATH_MAX, 1, mainDSC) != 1) goto end;
-
-		if (!strcmp(path, imagePath)) {
-			imageIndex = i;
-			break;
-		}
-	}
-
-	struct dyld_cache_header symbolHeader;
-	if (fread(&symbolHeader, sizeof(symbolHeader), 1, symbolDSC) != 1) goto end;
-
-	struct dyld_cache_local_symbols_info symbolInfo;
-	fseek(symbolDSC, symbolHeader.localSymbolsOffset, SEEK_SET);
-	if (fread(&symbolInfo, sizeof(symbolInfo), 1, symbolDSC) != 1) goto end;
-
-	if (imageIndex >= symbolInfo.entriesCount) goto end;
-
-	struct dyld_cache_local_symbols_entry_64 entry;
-
-	if (mainHeader.mappingOffset >= offsetof(struct dyld_cache_header, symbolFileUUID)) {
-		// New shared cache, dyld_cache_local_symbols_entry_64
-		fseek(symbolDSC, symbolHeader.localSymbolsOffset + symbolInfo.entriesOffset + (sizeof(entry) * imageIndex), SEEK_SET);
-		if (fread(&entry, sizeof(entry), 1, symbolDSC) != 1) goto end;
-	}
-	else {
-		// Old shared cache, dyld_cache_local_symbols_entry
-		struct dyld_cache_local_symbols_entry entryOld;
-		fseek(symbolDSC, symbolHeader.localSymbolsOffset + symbolInfo.entriesOffset + (sizeof(entryOld) * imageIndex), SEEK_SET);
-		if (fread(&entryOld, sizeof(entryOld), 1, symbolDSC) != 1) goto end;
-
-		// Convert dyld_cache_local_symbols_entry to dyld_cache_local_symbols_entry_64
-		entry = (struct dyld_cache_local_symbols_entry_64) {
-			.dylibOffset = entryOld.dylibOffset,
-			.nlistStartIndex = entryOld.nlistStartIndex,
-			.nlistCount = entryOld.nlistCount,
-		};
-	}
-
-	if ((entry.nlistStartIndex + entry.nlistCount) > symbolInfo.nlistCount) goto end;
-
-	// The slide is needed to compute a runtime address for any dsc symbol.
-	// If it could not be obtained, skip the whole lookup — an unslid address
-	// is garbage and signing it as code would fault later.
-	uintptr_t dscSlide = 0;
-	if (!_litehook_get_dsc_slide(&dscSlide)) goto end;
-
-	for (uint32_t i = entry.nlistStartIndex; i < entry.nlistStartIndex + entry.nlistCount; i++) {
-		struct nlist_64 n;
-		fseek(symbolDSC, symbolHeader.localSymbolsOffset + symbolInfo.nlistOffset + (sizeof(n) * i), SEEK_SET);
-		if (fread(&n, sizeof(n), 1, symbolDSC) != 1) goto end;
-
-		fseek(symbolDSC, symbolHeader.localSymbolsOffset + symbolInfo.stringsOffset + n.n_un.n_strx, SEEK_SET);
-		size_t len = _lth_fstrlen(symbolDSC);
-		char curSymbolName[len+1];
-		if (fread(curSymbolName, len+1, 1, symbolDSC) != 1) goto end;
-		if (!strcmp(curSymbolName, symbolName)) {
-			symbol = _litehook_sign_if_executable((void *)(dscSlide + n.n_value), NULL);
-		}
-	}
-
-end:
-	if (mainDSC) {
-		if (symbolDSC != mainDSC) {
-			fclose(symbolDSC);
-		}
-		fclose(mainDSC);
-	}
-
-	return symbol;
+	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	(void)imagePath;
+	(void)symbolName;
+	return NULL;
 }
 
 // Tally of GOT slots rewritten by the most recent litehook_rebind_symbol
