@@ -3,6 +3,7 @@
 
 #import <errno.h>
 
+#import "native/hk_native.h"
 #import "vendor/litehook/litehook.h"
 
 #pragma mark - HKLitehookBackend
@@ -46,14 +47,6 @@
     return [self hk_litehook_inline_preflight:function replacement:replacement];
 }
 
-- (BOOL)batchingSupported {
-    return NO;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return kind == HKHookKindFunction || kind == HKHookKindMemory;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -71,22 +64,21 @@
         // litehook's inline trampoline emits AArch64 opcodes unconditionally
         // (4x MOVK + BR), so on 32-bit archs it would write ARM64 garbage into
         // an ARMv7 prologue. Refuse explicitly — never fall back to rebinding,
-        // which the caller did not ask for.
+        // which the caller did not ask for. (Unreachable in practice:
+        // setStrategy: already refuses inline on 32-bit archs.)
         _lastErrno = EOPNOTSUPP;
         return HK_ERR_NOT_SUPPORTED;
 #endif
         // Prologue inline trampoline variant (denyFishHook-immune). litehook
         // has no original-call trampoline, so no original can ever be
-        // produced: a caller that requires one (old_ptr) would receive a
-        // NULL cell and crash on %orig. Refuse BEFORE installing (fail
-        // closed, side-effect-free) so the caller can switch to a technique
-        // that produces an original. When no original is requested the
-        // inline hook is safe to install.
-        if(old_ptr) {
-            _lastErrno = EOPNOTSUPP;
-            return HK_ERR_NOT_SUPPORTED;
-        }
-
+        // produced. The facade's policy enforcement (inline resolves to
+        // HKOriginalPublicationUnavailable in the registry) refuses
+        // requested-original ops BEFORE dispatch, and hk_original_finish's
+        // publish-only-real-original invariant converts any that slip through
+        // to HK_ERR — so this branch writes NOTHING to the output cell: a
+        // non-requested op needs no original, and fabricating one (or
+        // NULL-ing the cell) would be a lie the finish invariant would
+        // misread as an attempted publication.
         hookkit_status_t preflight = [self hk_litehook_inline_preflight:function replacement:replacement];
 
         if(preflight != HK_OK) {
@@ -105,6 +97,19 @@
     // whose value equals `function`. No original-call trampoline — the
     // function body at `function` is untouched, so `function` is still the
     // original implementation (same semantic as fishhook's old_ptr).
+    //
+    // C1: publish the original BEFORE the rebind scan — a reentrant
+    // replacement never observes a NULL original (the facade's begin already
+    // NULLed the caller's cell, so without this write a reentrant call
+    // mid-scan would read NULL). In the drained path old_ptr is
+    // hk_original_output_cell(&op->original), so this write reaches the
+    // caller immediately and is idempotent with the drain's re-publish; in
+    // the immediate path old_ptr is the facade's owned cell, discarded
+    // unless the call succeeds.
+    if(old_ptr) {
+        *old_ptr = function;
+    }
+
     unsigned int matched = 0;
     kern_return_t kr = litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, function, replacement, NULL, &matched);
 
@@ -119,14 +124,13 @@
     // first match, so a zero-match call registers NOTHING: no future image
     // load is affected and nothing is retained. Report the side-effect-free,
     // retryable HK_ERR_NOT_SUPPORTED (callers may switch technique), not the
-    // "may already be applied" HK_ERR.
+    // "may already be applied" HK_ERR. Returning NOT_SUPPORTED also lets the
+    // facade's hk_original_finish restore the caller's saved cell value,
+    // undoing the publish above (drained path), and the immediate path's
+    // owned cell is simply discarded on failure.
     if(matched == 0) {
         _lastErrno = ENOENT;  // no GOT slot referenced this function
         return HK_ERR_NOT_SUPPORTED;
-    }
-
-    if(old_ptr) {
-        *old_ptr = function;
     }
 
     return HK_OK;
@@ -138,9 +142,14 @@
     return kr == KERN_SUCCESS ? HK_OK : HK_ERR;
 }
 
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // nothing pending: function hooks and memory patches apply at hook time
-    return HK_OK;
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // Unreachable from the facade (nativeBatch = NO: the drain runs ops
+    // per-op through executeOperation:onBackend:). Defensive honesty: an op
+    // reaching here was never installed, so it must not report success — the
+    // facade's finish restores any begun cell for NOT_SUPPORTED.
+    for(HKHookOperation *hook in hooks) {
+        hook->status = HK_ERR_NOT_SUPPORTED;
+    }
 }
 
 - (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName {
@@ -161,6 +170,22 @@
 
             if(!result && underscored) {
                 result = litehook_find_dsc_symbol(image_name, [underscored UTF8String]);
+            }
+
+            // H7: the vendored DSC lookup is stubbed out (returns NULL — see
+            // vendor/VENDORED.md), so fall back to HookKit's own bounded
+            // parser (native/hk_symbols.c) for private symbols. The parser
+            // matches both plain and leading-underscore names itself
+            // (symbol_matches), so the plain name suffices. On armv7 the
+            // parser is a NULL stub, so this degrades to the dlsym scan in
+            // super (private-symbol strategy is arm64/arm64e only anyway).
+            if(!result) {
+                hk_image *handle = hk_native_open_image(image_name);
+
+                if(handle) {
+                    result = hk_native_find_symbol(handle, plain);
+                    hk_native_close_image(handle);
+                }
             }
 
             return result;

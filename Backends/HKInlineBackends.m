@@ -20,14 +20,6 @@
 
 #if defined(__arm64__) || defined(__arm64e__)
 @implementation HKDobbyBackend
-- (BOOL)batchingSupported {
-    return NO;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return kind == HKHookKindFunction || kind == HKHookKindMemory;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -84,6 +76,13 @@
 }
 
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
+    // DobbyCodePatch takes a uint32_t size: a patch over the cap would be
+    // silently truncated — refuse BEFORE calling Dobby (side-effect-free).
+    if(size > UINT32_MAX) {
+        _lastErrno = EOVERFLOW;
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
     // DobbyCodePatch returns 0 on success; -1 on failure (invalid arguments
     // or a mach vm_protect error).
     int result = DobbyCodePatch(target, (uint8_t *)data, (uint32_t)size);
@@ -91,22 +90,19 @@
     return result == 0 ? HK_OK : HK_ERR;
 }
 
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // nothing pending: function hooks and memory patches apply at hook time
-    return HK_OK;
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // Unreachable from the facade (nativeBatch = NO: the drain runs ops
+    // per-op through executeOperation:onBackend:). Defensive honesty: an op
+    // reaching here was never installed, so it must not report success — the
+    // facade's finish restores any begun cell for NOT_SUPPORTED.
+    for(HKHookOperation *hook in hooks) {
+        hook->status = HK_ERR_NOT_SUPPORTED;
+    }
 }
 @end
 #else   // !arm64: stub — the class symbol must exist for the registry entry,
         // but dobby_available() is NO on armv7 so this is never instantiated.
 @implementation HKDobbyBackend
-- (BOOL)batchingSupported {
-    return NO;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return kind == HKHookKindFunction || kind == HKHookKindMemory;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -126,8 +122,13 @@
     return HK_ERR_NOT_SUPPORTED;
 }
 
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    return HK_OK;
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // Unreachable from the facade (nativeBatch = NO, and dobby_available()
+    // is NO on armv7 so this class is never instantiated). Defensive
+    // honesty: an op reaching here was never installed.
+    for(HKHookOperation *hook in hooks) {
+        hook->status = HK_ERR_NOT_SUPPORTED;
+    }
 }
 // image methods inherited from HKDlfcnBackend: they were NULL stubs here, but
 // dobby_available() is NO on armv7 so this class is never instantiated — the
@@ -240,14 +241,6 @@ BOOL frida_discoverable(void) {
 @implementation HKFridaBackend {
     int _lastErrno;
 }
-- (BOOL)batchingSupported {
-    return YES;
-}
-
-- (BOOL)supportsHookKind:(HKHookKind)kind {
-    return kind == HKHookKindFunction;
-}
-
 - (int)lastErrno {
     return _lastErrno;
 }
@@ -258,19 +251,16 @@ BOOL frida_discoverable(void) {
 }
 
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    void *orig = NULL;
-    int result = fn_hkgum_hook_function(function, replacement, &orig);
+    // C1: gum_interceptor_replace publishes the original through the
+    // out-param as it stages the replacement, so hand the caller's cell
+    // straight to it — no local staging, no copy-after-activation. On
+    // failure gum reports the error without publishing an original, and the
+    // facade's publish-only-non-NULL invariant catches any vendor that
+    // claims success without producing one.
+    int result = fn_hkgum_hook_function(function, replacement, old_ptr);
     _lastErrno = result;
 
-    if(result != 0) {
-        return HK_ERR;
-    }
-
-    if(old_ptr) {
-        *old_ptr = orig;
-    }
-
-    return HK_OK;
+    return result == 0 ? HK_OK : HK_ERR;
 }
 
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
@@ -285,14 +275,13 @@ BOOL frida_discoverable(void) {
 // wrappers in hkgum.c) — so there is no begin/commit status to check. The
 // only failure channel is the per-hook GumReplaceReturn: a failed replace is
 // never staged, so end_transaction never publishes it, and the op stays
-// succeeded=NO — which is what settles the inline guard as tainted at the
-// substitutor layer (HKSubstitutor.m: failed op -> HK_ERR -> taint), so no
-// failure is ever claimed successful. Individual hook failures fail the batch
-// without a rollback, exactly as documented. Message/memory hooks are not
-// supported (succeeded stays NO).
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    int total = (int)[hooks count];
-    int succeeded = 0;
+// HK_ERR with backendErrno carrying the gum detail — which settles the
+// inline guard as tainted at the substitutor layer (HKSubstitutor.m: failed
+// op -> HK_ERR -> taint), so no failure is ever claimed successful.
+// Individual hook failures fail the batch without a rollback, exactly as
+// documented. Message/memory hooks are not supported (ops get
+// HK_ERR_NOT_SUPPORTED; the facade's finish restores any begun cell).
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
     int failureErrno = 0;
 
     fn_hkgum_begin_transaction();
@@ -304,12 +293,22 @@ BOOL frida_discoverable(void) {
                 int result = fn_hkgum_hook_function(hook->function, hook->replacement, &orig);
 
                 if(result == 0) {
-                    // Staged only: published by end_transaction below.
-                    hook->origValue = orig;
-                    hook->succeeded = YES;
-                    succeeded += 1;
-                } else if(!failureErrno) {
-                    failureErrno = result;
+                    // C1: publish the original BEFORE end_transaction — the
+                    // replacement goes live the moment the transaction ends,
+                    // and a reentrant replacement must never observe a NULL
+                    // original. The facade already began the publication
+                    // (caller cell saved and NULLed), so this write reaches
+                    // the caller immediately; the drain's re-publish is
+                    // idempotent.
+                    hk_original_publish(&hook->original, orig);
+                    hook->status = HK_OK;
+                } else {
+                    hook->status = HK_ERR;
+                    hook->backendErrno = result;
+
+                    if(!failureErrno) {
+                        failureErrno = result;
+                    }
                 }
 
                 break;
@@ -317,7 +316,8 @@ BOOL frida_discoverable(void) {
 
             case HKHookKindMessage:
             case HKHookKindMemory:
-                // not supported: succeeded stays NO
+                // not supported
+                hook->status = HK_ERR_NOT_SUPPORTED;
                 break;
         }
     }
@@ -325,7 +325,5 @@ BOOL frida_discoverable(void) {
     fn_hkgum_end_transaction();
 
     _lastErrno = failureErrno;
-
-    return hk_batch_status(succeeded, total);
 }
 @end

@@ -308,6 +308,15 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
         return false;
     }
 
+    // 10b. Only ordinary instance methods (kind == Method, instance bit set)
+    // are supported: initializers (kind != Method) and static/class methods
+    // (instance bit clear) do not follow the slot signing convention the
+    // recipe below relies on. Fail closed.
+    if((*method & HK_SWIFT_METHOD_KIND_MASK) != 0 || !(*method & HK_SWIFT_METHOD_IS_INSTANCE)) {
+        hk_swift_errno = HK_SWIFT_ERR_UNSUPPORTED_LAYOUT;
+        return false;
+    }
+
     void **slot = vtable + index;
     uintptr_t extra = (uintptr_t)(*method >> HK_SWIFT_METHOD_EXTRA_SHIFT);
     uintptr_t disc = hk_blend_disc((void *)slot, extra);
@@ -323,7 +332,16 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
         return false;
     }
 
-    void *new_value = hk_sign_code(replacement, disc);
+    // Publish the stripped original BEFORE the slot mutates: callers wiring a
+    // trampoline chain to the original need it before the write, not after.
+    if(out_orig) {
+        *out_orig = hk_strip_code(old);
+    }
+
+    // Strip-then-sign: the replacement may arrive already PAC-signed (dlsym,
+    // objc methodImplementation, a hooked slot's old value). Signing it
+    // directly would bake stale PAC bits in under the slot discriminator.
+    void *new_value = hk_sign_code(hk_strip_code(replacement), disc);
 
     // Single aligned pointer store via hk_native_patch_memory, which handles
     // read-only __DATA_CONST by breaking the COW (VM_PROT_COPY) or remapping
@@ -331,10 +349,6 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
     if(!hk_native_patch_memory(slot, &new_value, sizeof(new_value))) {
         hk_swift_errno = HK_SWIFT_ERR_WRITE;
         return false;
-    }
-
-    if(out_orig) {
-        *out_orig = hk_strip_code(old);
     }
 
     return true;

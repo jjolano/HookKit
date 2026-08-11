@@ -4,13 +4,13 @@ A slim iOS developer framework that unifies nine hooking backends behind one API
 
 ## Backends
 
-The best backend available on the device is picked at runtime, in priority order: ElleKit > Cydia Substrate > Substitute > Dobby > fishhook — with litehook, native, Frida, and Swift vtables available on request but never picked automatically. fishhook, litehook, and Dobby are compiled in and always present on their architectures, making them the fallback floors: Dobby is the floor on arm64/arm64e, fishhook the floor on armv7. Backends are not packaged separately: the single package `me.jjolano.fmwk.hookkit` works on every jailbreak. (This replaces the v1 Modulous plugin-bundle architecture.)
+The best backend available on the device is picked at runtime, in priority order: ElleKit > Cydia Substrate > Substitute > fishhook — with Dobby, litehook, native, Frida, and Swift vtables available on request but never picked automatically. fishhook and litehook are compiled in and always present, making fishhook the fallback floor on every arch; Dobby is compiled in on arm64/arm64e only, and is opt-in via category or capability selection. Backends are not packaged separately: the single package `me.jjolano.fmwk.hookkit` works on every jailbreak. (This replaces the v1 Modulous plugin-bundle architecture.)
 
 ### Selection
 
 Backends are selected by name, by priority list, or by capability:
 
-- `substitutorWithTypes:` names specific backends; the first available one wins, in the fixed table priority above. `native`, Frida, Swift, and litehook are **never picked automatically** — they only resolve when explicitly named (`substitutorWithTypes:`) or reached through a category.
+- `substitutorWithTypes:` names specific backends; the first available one wins, in the fixed table priority above. Dobby, `native`, Frida, Swift, and litehook are **never picked automatically** — they only resolve when explicitly named (`substitutorWithTypes:`) or reached through a category.
 - To override the priority order, pass an explicit list with `substitutorWithOrderedTypes:` — the first available entry wins:
 
 ```objc
@@ -26,17 +26,17 @@ HKSubstitutor *sub = [HKSubstitutor substitutorWithOrderedTypes:@[@(HK_LIB_SUBST
 
 - The readonly `activeStrategy` property (one of `HKStrategyDefault`/`HKStrategyRebind`/`HKStrategyInline`/`HKStrategyPrivateSymbol`) reports how the winning backend resolves and applies function hooks — a hooking technique (rebind or inline, or the vendor default), or a resolution mode (`HKStrategyPrivateSymbol`: the backend locates the private/DSC symbol first, then hooks it via rebinding). It is the resolution result, not a request. One vendor can serve several categories: litehook covers rebind, inline, and private-symbol lookups. Swift vtables have no category (`HK_CAT_NONE`) — it is a separate API, not a message/function/memory engine.
 - Resolution order: `orderedTypes` > `orderedCategories` > `types`/default. A requested-but-unavailable backend is **not** silently substituted: hook calls return `HK_ERR_NOT_SUPPORTED` and `activeType` is `HK_LIB_NONE`. Check `activeType` before relying on a backend.
-- The framework's default set differs from an explicit request: with no types set, only the *automatic* backends are eligible — ElleKit, Cydia Substrate, Substitute, Dobby, or fishhook, in that order, first available wins. The opt-in backends (native, Frida, Swift, litehook) are never eligible for the automatic pick, even when available; explicit `types` can name any of them.
+- The framework's default set differs from an explicit request: with no types set, only the *automatic* backends are eligible — ElleKit, Cydia Substrate, Substitute, or fishhook, in that order, first available wins. The opt-in backends (Dobby, native, Frida, Swift, litehook) are never eligible for the automatic pick, even when available; explicit `types` can name any of them.
 - `getSubstitutorTypeInfo:` returns per-backend metadata including a `selectable` flag for settings-style pickers: substrate, substitute, and swift are excluded from user-facing selection.
 
 ### Capability matrix
 
-| Backend         | Message | Function | Memory | Batching |
+| Backend         | Message | Function | Memory | Native batch° |
 |-----------------|---------|----------|--------|----------|
-| ElleKit         | yes     | yes†     | yes    | yes      |
+| ElleKit         | yes     | yes†     | yes    | no       |
 | Cydia Substrate | yes     | yes      | yes‡   | no       |
 | Substitute      | yes     | yes      | yes‡   | no       |
-| native          | yes     | yes†     | yes    | yes      |
+| native          | yes     | yes†     | yes    | no       |
 | Dobby           | no      | yes†     | yes    | no       |
 | Frida           | no      | yes†     | no     | yes      |
 | fishhook        | no      | yes¶     | no     | no       |
@@ -53,6 +53,8 @@ HKSubstitutor *sub = [HKSubstitutor substitutorWithOrderedTypes:@[@(HK_LIB_SUBST
 
 \* Swift vtable hooking is a separate API — `hookSwiftMethodInClass:withName:...` / `hookSwiftVtableSlotInClass:withIndex:...` — not the message/function columns (see the Swift caveat).
 
+° While batching is on, every supported hook kind is queued and nothing applies until `executeHooks` (queue-always); the column marks the backends that apply the drained batch at once through a native primitive (only Frida, atomically).
+
 ### native
 
 HookKit's own hooking engine, requiring no hooking library to be installed on the device. It implements inline function hooking with an ARM64 instruction relocator, memory patching, ObjC message hooking through the runtime, and symbol lookup that reads private symbols out of the dyld shared cache's local symbol table.
@@ -63,7 +65,7 @@ Constraints: arm64/arm64e only — on armv7 it reports unavailable, since those 
 
 ### Dobby
 
-Vendored static library hooking inline by address, so interior/private C functions are hookable (beyond fishhook's exported-symbols-only limit). arm64/arm64e only — on armv7 it reports unavailable. Inline patching needs relaxed codesigning (same constraint as native). Memory patching is supported; no ObjC message hooking, no batching (hooks apply immediately at hook time).
+Vendored static library hooking inline by address, so interior/private C functions are hookable (beyond fishhook's exported-symbols-only limit). Opt-in (`HK_LIB_DOBBY` or the `HK_CAT_FUNCTION_INLINE` category) — no longer part of the automatic pick. arm64/arm64e only — on armv7 it reports unavailable. Inline patching needs relaxed codesigning (same constraint as native). Memory patching is supported; no ObjC message hooking, no native batch primitive (while batching is on, hooks queue and drain one at a time at `executeHooks`).
 
 ### Frida
 
@@ -79,13 +81,13 @@ Rebinding by exported symbol name: private/interior addresses are not rebindable
 
 Opt-in (`HK_LIB_LITEHOOK`), never selected automatically, but compiled in and available on every arch. It is strategy-aware via the category system — one backend, three strategies:
 
-- default (`HKStrategyRebind`, `HK_CAT_FUNCTION_REBIND`): GOT/import slot rebinding by address (`litehook_rebind_symbol`), so exported and GOT-referenced C functions are hookable; `old_ptr` is the original function address, which is untouched (no original-call trampoline — same semantic as fishhook's `old_ptr`). A hook whose address no loaded image references through a GOT/import slot is reported as `HK_ERR` instead of a silent no-op.
-- `HK_CAT_FUNCTION_INLINE` (`HKStrategyInline`): prologue inline trampolines via `litehook_hook_function`. There is no original-call trampoline — the original body is gone once hooked, so `old_ptr` stays NULL.
-- `HK_CAT_PRIVATE_SYMBOL` (`HKStrategyPrivateSymbol`): DSC private-symbol resolution (`litehook_find_dsc_symbol`).
+- default (`HKStrategyRebind`, `HK_CAT_FUNCTION_REBIND`): GOT/import slot rebinding by address (`litehook_rebind_symbol`), so exported and GOT-referenced C functions are hookable; `old_ptr` is the original function address, which is untouched (no original-call trampoline — same semantic as fishhook's `old_ptr`). A hook whose address no loaded image references through a GOT/import slot is reported as `HK_ERR_NOT_SUPPORTED` instead of a silent no-op.
+- `HK_CAT_FUNCTION_INLINE` (`HKStrategyInline`): prologue inline trampolines via `litehook_hook_function`. There is no original-call trampoline — the original body is gone once hooked, so a requested `old_ptr` is refused with `HK_ERR_NOT_SUPPORTED` before anything is written (matching the descriptor's Unavailable original-publication policy); without an `old_ptr` request the hook installs.
+- `HK_CAT_PRIVATE_SYMBOL` (`HKStrategyPrivateSymbol`): private-symbol resolution — the vendored DSC lookup (`litehook_find_dsc_symbol`) is stubbed out, so lookups fall back to HookKit's native bounded parser (reads private symbols from the dyld shared cache's local symbol table).
 - Memory patching works on every supported arch (arm64e/arm64/armv7s/armv7, iOS 10+) — this is the only compiled-in backend that patches memory on armv7.
 - The inline (`HK_CAT_FUNCTION_INLINE`) and private-symbol/DSC (`HK_CAT_PRIVATE_SYMBOL`) strategies are arm64/arm64e only — on armv7/armv7s only the rebind strategy and memory patching remain.
 
-No ObjC message hooking, no batching. MIT-licensed, no runtime dependency beyond libsystem.
+No ObjC message hooking, no native batch primitive (while batching is on, hooks queue and drain one at a time at `executeHooks`). MIT-licensed, no runtime dependency beyond libsystem.
 
 ### auto-cover
 
@@ -115,7 +117,7 @@ The slot write is a single aligned pointer store (≈ atomic) with no code patch
 ```objc
 HKSubstitutor *sub = [HKSubstitutor defaultSubstitutor]; // or substitutorWithTypes:
 
-// Batching defers hooks until executeHooks (batching-capable backends only; others execute immediately).
+// Batching is queue-always: every supported hook kind queues; nothing applies until executeHooks.
 HKEnableBatching();
 
 void (*orig_malloc)(void *);
@@ -135,15 +137,11 @@ HKExecuteBatch();
 
 ## Semantics
 
-- Symbol names are Substrate-style: C symbols carry no leading underscore (`"malloc"`); C++ mangled names keep theirs. ElleKit accepts both forms; the Substrate/MS and fishhook backends pass names through unchanged.
-- Status codes: `HK_OK`, `HK_ERR`, `HK_ERR_NOT_SUPPORTED`, `HK_ERR_INVALID_ARGUMENT`, `HK_ERR_PARTIAL`. `HK_ERR_PARTIAL` from `executeHooks` or `findSymbolsInImage:` means some-but-not-all succeeded; per-operation success is visible in the outputs — `executeHooks` writes `old_ptr` only for the operations that succeeded, and `findSymbolsInImage:` reports misses as NULL entries.
-- `HK_ERR_NOT_SUPPORTED` means "not installed": the target is outside this technique's capability, nothing was written, and the caller's `old_ptr` is untouched — so callers may retry with another technique. Backends that cannot promise that use `HK_ERR` instead (a failed invocation may have applied). fishhook returns it when a symbol is exported but no loaded image references it, unregistering the rebinding so nothing applies to future image loads; substitute maps its capability-miss codes (`FUNC_TOO_SHORT` / `BAD_INSN_AT_START` / `CALLS_AT_START` / `JUMPS_TO_START` / `OUT_OF_RANGE` / `NO_SUCH_SELECTOR`) through `substitute_error_to_status`, and the GOT/PLT interpose fallback fires only for those five function codes, with a fresh out-cell; the native engine maps its `UNSUPPORTED` / `SHORT_FUNCTION` / `RELOCATE` failures the same way. Everything else — OOM, VM, `NOT_ON_MAIN_THREAD`, `UNEXPECTED_PC_ON_OTHER_THREAD`, unknown/future codes — is `HK_ERR`: the hook may already be applied, so it must never be retried.
-- Fail-closed prologue preflight: before any inline code patch, the litehook (20-byte overwrite), Dobby (16-byte), and native backends reject — with `HK_ERR_NOT_SUPPORTED` and nothing written — a target whose prologue is misaligned, a self-hook, a function that ends inside the overwrite window (an early `RET`/`RETAA`/`RETAB`/`BR`/`BRAAZ`/`BRABZ` or unconditional `B`), or a literal load / `ADR(ADRP)` in the window (Dobby/litehook; the native engine's own checks). Too-small functions and literal-load prologues are refused, not smashed. The checks read only the window and never write; they are check-then-act — another thread could mutate the window between scan and patch, an accepted ceiling, as only Substitute suspends threads. Hooks must still be installed at load time, before the target can run elsewhere.
-- Arch gates: litehook's inline technique is arm64/arm64e-only — its trampoline emits AArch64 opcodes — so `setStrategy:` refuses `HKStrategyInline` on 32-bit, `hookFunction:`'s inline branch refuses, and the registry's `HK_CAT_FUNCTION_INLINE` picker drops the litehook row on armv7. litehook rebind and memory-patch remain available on all archs.
-- `getLibErrno:` is an opaque backend-specific code — not a plain errno and not a normalized error enum, so do not compare values across backends: for ElleKit it can be a libhooker message-error enum (LBHookMessage's `LIBHOOKER_ERR`) or libhooker's errno (from `LHHookFunctions` / `LHPatchMemory`), for the Substrate/MS APIs it reflects errno observed at submit time (those entry points are void, so success is unverifiable), for native/Dobby/Frida it can be a mach/driver return, and private negative codes are native/Swift engine errors. A rebinding hook that applies to future image loads can report success while no image currently references the symbol (fishhook refuses that case with `HK_ERR_NOT_SUPPORTED`; litehook reports `HK_ERR`). The value is set by the last failing hook call, cleared on success, on argument errors, and on unsupported operations, and must be read immediately on the same thread.
-- Threading: configure first — settle `types` / `initLibraries` and the batching mode before any hook call; backend selection is one-shot, the first resolution that finds a backend wins and later calls are no-ops. Hooks install on exactly one thread, normally the main/load thread. Enqueueing may happen from multiple threads (the batch queue is thread-safe — enqueue may race `executeHooks`, which drains a snapshot under the same lock, so every queued hook runs exactly once), but only as long as exactly one thread calls `executeHooks` — concurrent `executeHooks` calls are not serialized. Not synchronized: last-error state — `getLibErrno:` reports the last hook call's per-backend detail; read it immediately, on the same thread that made the call, it is not safe cross-thread. The native Substitute API additionally requires the main thread, and the native engine requires it too for function and memory patching — it does not suspend peer threads, so off the main thread those return `HK_ERR_NOT_SUPPORTED` without patching.
-- Batch storage lifetime: while batching, enqueue-time `HK_OK` means "accepted into the queue", not "installed" — only `executeHooks` installs and writes `old_ptr`. The caller's `old_ptr` storage is borrowed: it must stay alive until `executeHooks` returns (it is never retained past it). Disabling batching while operations are queued leaves them queued — they still run at the next `executeHooks` — while new hook calls execute immediately. Batching backends may not preserve submission order across hook kinds (ElleKit partitions operations per kind — messages/functions/memory; a Frida transaction is an atomic publication of the batch, not a rollback on partial failure). Backends without batching ignore the queue: they apply hooks immediately even while batching is on.
-- Availability probing: results are cached per process at the first probe — the ElleKit/Substrate/Substitute/Frida probes cache only positive results (a failed probe is retried on a later call), while the Swift probe caches both success and failure.
+Normative semantics — the symbol-name convention, status codes, the `HK_ERR_NOT_SUPPORTED` contract, the fail-closed prologue preflight, arch gates, `getLibErrno:`, threading, batch storage lifetime, and availability probing — are specified in the `HKSubstitutor` interface comment in `Headers/HookKit/Compat.h`, which is the source of truth. This section keeps only the backend-operational behavior not covered there:
+
+- Publish-before-activation: originals are published into the caller's cell before a replacement becomes reachable — Cydia Substrate, Substitute, native, fishhook (rebind), litehook (rebind), and Frida all publish first. Backends that cannot guarantee this refuse a requested `old_ptr` with `HK_ERR_NOT_SUPPORTED` before anything is written: ElleKit (its hooking writes the original into the out-cell only after the patch lands) and litehook (its inline has no original-call trampoline at all).
+- Shared prologue preflight: inline-capable backends without a `preflightFunction:` of their own (ElleKit, Cydia Substrate, Substitute) are gated by a shared fixed-window prologue validator before dispatch — arm64/arm64e only; on ARMv7 the shared check is skipped, since Substrate and Substitute validate their own prologues there.
+- Duplicate inline hooks: inline function hooks go through a process-wide ownership guard with explicit states — a duplicate of a PENDING hook (same address, same replacement, queued or in flight) is refused at hook time with `HK_ERR`; a duplicate of a TAINTED hook (a previous attempt failed mid-flight) is a hard `HK_ERR`; a same-hook re-hook against an INSTALLED entry returns `HK_OK`, reusing the guard's saved original (`HK_ERR` when an original was requested but none exists). Hooking the same address with a different replacement is refused with `HK_ERR_NOT_SUPPORTED`.
 
 ## Building
 
@@ -168,7 +166,7 @@ Advantages:
 
 Disadvantages:
 
-- Library-specific functionality is not implemented uniformly: the Substrate-compatible backends (Cydia Substrate, Substitute) offer no batching, fishhook only hooks exported C symbols, Frida has no memory patching — check `activeType` and the capability matrix before relying on a capability.
+- Library-specific functionality is not implemented uniformly: the Substrate-compatible backends (Cydia Substrate, Substitute) offer no native batch primitive (their hooks still queue while batching is on), fishhook only hooks exported C symbols, Frida has no memory patching — check `activeType` and the capability matrix before relying on a capability.
 - Existing tweaks will need to be rewritten/recompiled to use HookKit.
 
 ## Credits

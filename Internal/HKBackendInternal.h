@@ -16,16 +16,65 @@ typedef NS_ENUM(int, HKHookKind) {
     HKHookKindMemory
 };
 
+// How a function hook is applied. Set by the facade when an operation is
+// resolved/enqueued; the backend executes accordingly and the facade uses it
+// for the inline-guard and original-publication decisions.
+typedef NS_ENUM(uint8_t, HKFunctionTechnique) {
+    HKFunctionTechniqueNone,
+    HKFunctionTechniqueRebind,
+    HKFunctionTechniqueInline
+};
+
+// When the original implementation becomes available relative to activation,
+// per function technique. BeforeActivation backends can publish a real
+// original into a caller's cell; AfterActivation/Unavailable backends must be
+// refused (or used without an original) when the caller requested one.
+// Runtime is resolved per call from the backend provider (see
+// hk_resolved_publication_policy) — used when the policy depends on a
+// detected provider ABI (the combined ElleKit/libhooker Inline entry).
+typedef NS_ENUM(uint8_t, HKOriginalPublicationPolicy) {
+    HKOriginalPublicationBeforeActivation,
+    HKOriginalPublicationAfterActivation,
+    HKOriginalPublicationUnavailable,
+    HKOriginalPublicationRuntime
+};
+
+// Facade-owned publication state for one operation's original. Backends never
+// touch this struct directly — they write through the cell returned by
+// hk_original_output_cell; the facade drives begin/publish/capture/finish.
+typedef struct {
+    void **callerCell;
+    void *savedCallerValue;
+    void *value;
+    BOOL requested;
+    BOOL capture;
+    BOOL published;
+} HKOriginalPublication;
+
+// Original-publication contract (implemented in HKSubstitutor.m):
+//   begin        - reset the publication state for a drain cycle
+//   output_cell  - the batch-owned cell the backend writes its original into
+//   publish      - publish an original to the caller's cell (when requested)
+//   capture      - record a live original (guard/backup) for later publish
+//   finish       - finalize: returns the operation status, applying the
+//                  publish-only-real-original invariant
+void hk_original_begin(HKOriginalPublication *publication);
+void **hk_original_output_cell(HKOriginalPublication *publication);
+void hk_original_publish(HKOriginalPublication *publication, void *original);
+void hk_original_capture(HKOriginalPublication *publication);
+hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_status_t status);
+
 // A deferred hook. Storage that the backend may retain (memory patch bytes,
-// the out-cell written by the backend) is owned here: origValue is the
-// batch-owned out-cell the backend writes at execute time, and that storage
-// lives for the FULL drain duration — the drained ops are retained until the
-// settle loop in executeHooks finishes, so the publish below never reads
-// storage that has died. callerOrig is a borrowed caller out-pointer: it is
-// dereferenced ONLY inside executeHooks, synchronously, to publish the
-// original from origValue while the drained ops (and the caller's storage,
-// per the batch contract: alive until executeHooks returns) are still valid,
-// and is never retained past executeHooks.
+// the output cell written at execute time) is owned here: the publication's
+// output cell (hk_original_output_cell) is batch-owned storage that lives for
+// the FULL drain duration — the drained ops are retained until the settle
+// loop in executeHooks finishes, so hk_original_publish never reads storage
+// that has died. status carries the operation's final result after the drain;
+// technique names the function technique the op was resolved to; original is
+// the embedded publication state driven by the hk_original_* helpers;
+// guardToken is the inline-guard generation the op reserved (0 = not
+// inline-guarded); backendErrno is the per-backend error detail when status
+// is a backend error.
 @interface HKHookOperation : NSObject {
 @public
     HKHookKind kind;
@@ -33,17 +82,14 @@ typedef NS_ENUM(int, HKHookKind) {
     SEL selector;
     void *function;
     void *replacement;
-    void *origValue;    // batch-owned out-cell the backend writes at execute time
-    void **callerOrig;  // borrowed caller out-pointer; copied once, then cleared
     void *target;
     NSData *data;       // owned copy of the memory patch bytes
     size_t size;
-    BOOL succeeded;
-    // Normalized inline-guard key (PAC-stripped, thumb-masked target address)
-    // for function hooks; 0 = not inline-guarded. Set at reserve time in
-    // hookFunction: so executeHooks can update the guard with the same key
-    // the reserve used, without re-deriving it.
-    uintptr_t guardAddr;
+    hookkit_status_t status;
+    HKFunctionTechnique technique;
+    HKOriginalPublication original;
+    uint64_t guardToken;
+    int backendErrno;
 }
 @end
 
@@ -53,14 +99,14 @@ typedef NS_ENUM(int, HKHookKind) {
 // activeStrategy is observable; the protocol's setStrategy: below is the
 // backend-facing channel that consumes it.
 @protocol HKSubstitutorBackend <NSObject>
-@property (nonatomic, readonly) BOOL batchingSupported;
 @property (nonatomic, readonly) int lastErrno;
 
 - (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr;
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr;
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size;
-- (hookkit_status_t)executeHooks:(NSArray<HKHookOperation *> *)hooks;
-- (BOOL)supportsHookKind:(HKHookKind)kind;
+// Batch apply: installs every hook in the array. No return value — each
+// operation carries its own final status (and backendErrno) after the drain.
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks;
 
 - (HKImageRef)openImage:(NSString *)path;
 - (void)closeImage:(HKImageRef)image;
@@ -76,7 +122,7 @@ typedef NS_ENUM(int, HKHookKind) {
 - (void)setStrategy:(HKStrategy)strategy;
 // Side-effect-free capability preflight (auto-cover routing). Optional: a
 // backend that does not implement it is presumed able to attempt any target
-// it supportsHookKind: (a preflight that only declines, never verifies —
+// in its descriptor kinds (a preflight that only declines, never verifies —
 // HK_OK means "no known veto", not "guaranteed safe"). Backends with real
 // prologue preflights (litehook/Dobby/native inline) implement it so the
 // auto-cover router can pick the first backend that accepts a target without
@@ -202,6 +248,16 @@ typedef NS_ENUM(int, HKHookKind) {
 
 #pragma mark - Shared helpers
 
+// Facade-owned wrapper around a backend image handle: the facade allocates
+// one per openImage: call, tags it with the owning backend, and unwraps the
+// raw handle before forwarding to that backend's find/close. The public
+// HKImageRef typedef in Compat.h stays an opaque pointer to this struct.
+struct HKImage {
+    uint32_t magic;
+    hookkit_lib_t ownerType;
+    void *rawHandle;
+};
+
 // Jailbreak-root path (identity on rooted; libroot's jbrootpath on
 // rootless; libroothide's jbroot on roothide). Defined in
 // Backends/HKBackendCommon.m.
@@ -241,6 +297,15 @@ BOOL substrate_discoverable(void);
 BOOL substitute_discoverable(void);
 BOOL frida_discoverable(void);
 
+// Detected-ABI original-publication policy for the combined ElleKit/libhooker
+// backend. Implemented in Backends/HKElleKitBackend.m, where the provider
+// classification lives: BeforeActivation for the real-libhooker ABI
+// (LHHookFunctions writes the original before the patch activates), 
+// AfterActivation for the ElleKit ABI (its patch writer runs first), and the
+// safest policy — Unavailable, fail closed — for an unclassified provider.
+// Consumed by hk_resolved_publication_policy.
+HKOriginalPublicationPolicy hk_ellekit_current_function_policy(void);
+
 #pragma mark - Registry interface
 
 // Backend table + category pickers, owned by HKBackendRegistry.m; the facade
@@ -257,11 +322,25 @@ typedef struct {
     BOOL selectable;    // appears in consumer settings-style pickers
     // no categories field: membership lives in hk_category_priorities only,
     // so the two can never diverge (see getAvailableCategories)
+    hookkit_cat_t kinds;                  // hook-kind mask this backend serves: HK_CAT_MESSAGE / HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE / HK_CAT_MEMORY
+    HKFunctionTechnique defaultTechnique; // technique applied when no picker names one
+    // Original-publication policy per function technique, indexed by
+    // HKFunctionTechnique (None/Rebind/Inline).
+    HKOriginalPublicationPolicy publicationPolicy[3];
+    BOOL nativeBatch;           // backend applies a drained batch natively (atomically where the engine allows)
+    BOOL sharedArm64Preflight;  // backend is gated by the shared arm64 prologue preflight
 } HKBackendDescriptor;
 
 typedef struct {
     hookkit_lib_t type;
     HKStrategy strategy;
+    hookkit_cat_t kinds;                  // hook-kind mask this picker row serves
+    HKFunctionTechnique technique;        // resolved technique for this picker row
+    // Original-publication policy per function technique, indexed by
+    // HKFunctionTechnique (None/Rebind/Inline).
+    HKOriginalPublicationPolicy publicationPolicy[3];
+    BOOL nativeBatch;           // resolved from the descriptor
+    BOOL sharedArm64Preflight;  // resolved from the descriptor
 } HKCategoryPicker;
 
 typedef struct {
@@ -274,5 +353,14 @@ extern const HKCategoryPriority hk_category_priorities[];
 extern const size_t hk_category_priority_count;
 
 const HKBackendDescriptor *hk_backends(size_t *outCount);
+
+// Resolves the effective original-publication policy for a backend +
+// technique: the descriptor's per-technique policy, except that
+// HKOriginalPublicationRuntime — the combined ElleKit/libhooker backend's
+// Inline entry, whose policy depends on the detected provider ABI — is
+// resolved at call time via hk_ellekit_current_function_policy. Unknown
+// backends fail closed to Unavailable. Implemented in HKBackendRegistry.m;
+// callable from the facade (HKSubstitutor.m).
+HKOriginalPublicationPolicy hk_resolved_publication_policy(hookkit_lib_t backendType, HKFunctionTechnique technique);
 
 #endif

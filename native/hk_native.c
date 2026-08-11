@@ -31,6 +31,65 @@ int hk_native_last_error(void) {
 
 #pragma mark - Memory
 
+// Overflow-checked, page-rounded bounds for [addr, addr+len): false when the
+// range is empty or wraps the address space; *start/*end come back
+// page-aligned. Single owner of the `+ page - 1` rounding, so no caller can
+// round a wrapped range into something that looks valid.
+static bool hk_range_bounds(const void *addr, size_t len, vm_address_t *start, vm_address_t *end) {
+    if(!addr || len == 0) {
+        return false;
+    }
+
+    vm_size_t page = (vm_size_t)getpagesize();
+    vm_address_t base = (vm_address_t)addr;
+    vm_address_t last = base + len;
+
+    if(last < base) {
+        return false;   // address overflow
+    }
+
+    *start = base & ~(page - 1);
+    vm_address_t rounded = last + (page - 1);
+
+    if(rounded < last) {
+        return false;   // rounding overflow: range touches the top of the address space
+    }
+
+    *end = rounded & ~(page - 1);
+    return true;
+}
+
+// True when every VM region covering [start, end) grants ALL of `required`
+// protections. Per-region, not uniform: mixed regions pass as long as each
+// grants the bits (the readable probe's documented contract). start/end are
+// page-aligned, caller-validated bounds.
+static bool hk_range_all_protected(vm_address_t start, vm_address_t end, vm_prot_t required) {
+    while(start < end) {
+        vm_address_t region = start;
+        vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+
+        kern_return_t kr = vm_region_64(mach_task_self(), &region, &region_size,
+                                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                                        &count, &object);
+
+        if(object != MACH_PORT_NULL) {
+            mach_port_deallocate(mach_task_self(), object);
+        }
+
+        if(kr != KERN_SUCCESS || region > start || region_size == 0
+           || (info.protection & required) != required) {
+            return false;
+        }
+
+        start = region + region_size;
+    }
+
+    return true;
+}
+
 // Current protection of the [start, end) byte range, provided it is uniform
 // across every VM region it crosses. A patch spanning regions with different
 // protections cannot restore them all to one value, so a mixed range fails
@@ -76,11 +135,17 @@ static bool hk_range_protection(vm_address_t start, vm_address_t end, vm_prot_t 
 // Write `size` bytes over `dst`, which may be read-only or read/execute-only.
 static kern_return_t hk_write(void *dst, const void *src, size_t size) {
     mach_port_t task = mach_task_self();
-    vm_size_t page = (vm_size_t)getpagesize();
-    vm_address_t start = (vm_address_t)dst & ~(page - 1);
-    vm_address_t end = ((vm_address_t)dst + size + page - 1) & ~(page - 1);
-    vm_size_t len = end - start;
+    vm_address_t start = 0;
+    vm_address_t end = 0;
     vm_prot_t restore = VM_PROT_NONE;
+
+    // Fail closed on arithmetic overflow: a wrapped range would protect (and
+    // memcpy) the wrong bytes.
+    if(!hk_range_bounds(dst, size, &start, &end)) {
+        return KERN_INVALID_ADDRESS;
+    }
+
+    vm_size_t len = end - start;
 
     // Fail closed. Guessing R-X here would leave a patched data region
     // unwritable to its owner; guessing R-W would leave code writable.
@@ -153,44 +218,30 @@ static kern_return_t hk_write(void *dst, const void *src, size_t size) {
 // the Swift metadata reader call this before dereferencing addresses that
 // came from untrusted metadata.
 bool hk_native_range_readable(const void *addr, size_t len) {
-    if(!addr || len == 0) {
+    vm_address_t start = 0;
+    vm_address_t end = 0;
+
+    if(!hk_range_bounds(addr, len, &start, &end)) {
         return false;
     }
 
-    vm_size_t page = (vm_size_t)getpagesize();
-    vm_address_t base = (vm_address_t)addr;
+    return hk_range_all_protected(start, end, VM_PROT_READ);
+}
 
-    if(base + len < base) {
-        return false;   // address overflow
+// Executable variant, for the code-patching paths: a function hook overwrites
+// CODE, so a readable-only mapping (a data blob) is not a patchable prologue
+// and must be refused instead of silently patched. Undeclared in hk_native.h
+// (whose public probe is deliberately readable-only — the Swift metadata
+// reader depends on that); the inline preflight declares it locally.
+HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len) {
+    vm_address_t start = 0;
+    vm_address_t end = 0;
+
+    if(!hk_range_bounds(addr, len, &start, &end)) {
+        return false;
     }
 
-    vm_address_t start = base & ~(page - 1);
-    vm_address_t end = ((base + len) + page - 1) & ~(page - 1);
-
-    while(start < end) {
-        vm_address_t region = start;
-        vm_size_t region_size = 0;
-        vm_region_basic_info_data_64_t info;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t object = MACH_PORT_NULL;
-
-        kern_return_t kr = vm_region_64(mach_task_self(), &region, &region_size,
-                                        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
-                                        &count, &object);
-
-        if(object != MACH_PORT_NULL) {
-            mach_port_deallocate(mach_task_self(), object);
-        }
-
-        if(kr != KERN_SUCCESS || region > start || region_size == 0
-           || !(info.protection & VM_PROT_READ)) {
-            return false;
-        }
-
-        start = region + region_size;
-    }
-
-    return true;
+    return hk_range_all_protected(start, end, VM_PROT_EXECUTE);
 }
 
 #pragma mark - Trampolines
@@ -301,6 +352,25 @@ int hk_native_preflight_function(void *target, void *replacement) {
         return HK_NATIVE_ERR_UNREADABLE;
     }
 
+    // A function hook overwrites CODE: a readable-only mapping (a data blob)
+    // is not a patchable prologue. Same code as the unreadable case — both
+    // are target-shape capability misses.
+    if(!hk_native_range_executable(raw_target, patch_bytes)) {
+        return HK_NATIVE_ERR_UNREADABLE;
+    }
+
+    // Mirror of the target checks: the replacement is branched to, so it must
+    // sit on an instruction boundary and live in an executable mapping too (a
+    // data blob cannot be jumped to). 4 bytes covers the branch-target
+    // instruction; the page-rounded probe spans whatever it straddles.
+    if(((uintptr_t)raw_replacement & 3u) != 0) {
+        return HK_NATIVE_ERR_UNSUPPORTED;
+    }
+
+    if(!hk_native_range_executable(raw_replacement, 4)) {
+        return HK_NATIVE_ERR_UNREADABLE;
+    }
+
     const uint32_t *src = (const uint32_t *)raw_target;
 
     // A terminator before the last instruction we would overwrite means the
@@ -365,6 +435,14 @@ bool hk_native_hook_function(void *target, void *replacement, void **out_orig) {
 
     pthread_mutex_unlock(&tramp.lock);
 
+    // C1: hand the sealed trampoline to the caller BEFORE the write — the
+    // original must be observable from the moment the patch lands, and a
+    // crash mid-write must not lose it. (The trampoline is already sealed and
+    // executable: tramp_commit ran above, before the target was touched.)
+    if(out_orig) {
+        *out_orig = hk_sign_code(slot);
+    }
+
     uint32_t patch[HK_A64_MAX_BRANCH_BYTES / 4];
     size_t emitted = hk_arm64_emit_branch(patch, target_addr, (uint64_t)(uintptr_t)raw_replacement);
     kern_return_t kr = hk_write(raw_target, patch, emitted);
@@ -372,10 +450,6 @@ bool hk_native_hook_function(void *target, void *replacement, void **out_orig) {
     if(kr != KERN_SUCCESS) {
         hk_errno = kr;
         return false;
-    }
-
-    if(out_orig) {
-        *out_orig = hk_sign_code(slot);
     }
 
     hk_errno = 0;
