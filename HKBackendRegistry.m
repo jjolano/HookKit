@@ -231,10 +231,11 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE,
             .defaultTechnique = HKFunctionTechniqueRebind,
-            // rebind_symbols_hook's publish callback fires before the first
-            // slot write; no inline path exists.
+            // Single-op: rebind_symbols_hook's publish callback fires before the
+            // first slot write. Batch: rebind_symbols_hook_batch's per-rebinding
+            // publish cells do the same for each op. No inline path exists.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable },
-            .nativeBatch = NO,   // no batch primitive; the facade queues and applies sequentially
+            .nativeBatch = YES,   // executeHooks: applies the whole batch in ONE image walk (rebind_symbols_hook_batch)
             .sharedArm64Preflight = NO,   // rebind: never touches the prologue
         };
         // Never automatic: Swift vtable hooks are a separate API (no

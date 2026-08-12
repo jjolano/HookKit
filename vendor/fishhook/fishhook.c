@@ -93,6 +93,16 @@ struct rebindings_entry {
   rebind_publish_fn publish;
   void *publish_context;
   bool published;
+  // Per-rebinding publish cells (rebind_symbols_hook_batch only): a parallel
+  // array of rebindings_nel void** cells. When present, the caller's original
+  // is written into publish_cells[j] at the same match site as
+  // rebindings[j].replaced — BEFORE the slot goes live — so a batch of N
+  // rebindings publishes each caller's original mid-walk. The entry-level
+  // `publish` callback fires only once per entry and cannot serve a batch.
+  // Owned by the entry (malloc'd copy); freed and NULLed after the initial
+  // scan, exactly like `publish`, so future image loads never touch a
+  // borrowed (now-invalid) caller cell.
+  void ***publish_cells;
 };
 
 // Serializes the global rebinding list against concurrent rebind_symbols
@@ -114,7 +124,8 @@ static bool add_image_callback_registered = false;
 
 static int prepend_rebindings(struct rebindings_entry **rebindings_head,
                               struct rebinding rebindings[],
-                              size_t nel) {
+                              size_t nel,
+                              void **publish_cells[]) {
   struct rebindings_entry *new_entry = (struct rebindings_entry *) malloc(sizeof(struct rebindings_entry));
   if (!new_entry) {
     return -1;
@@ -123,6 +134,16 @@ static int prepend_rebindings(struct rebindings_entry **rebindings_head,
   if (!new_entry->rebindings) {
     free(new_entry);
     return -1;
+  }
+  new_entry->publish_cells = NULL;
+  if (publish_cells) {
+    new_entry->publish_cells = (void ***) malloc(sizeof(void **) * nel);
+    if (!new_entry->publish_cells) {
+      free(new_entry->rebindings);
+      free(new_entry);
+      return -1;
+    }
+    memcpy(new_entry->publish_cells, publish_cells, sizeof(void **) * nel);
   }
   memcpy(new_entry->rebindings, rebindings, sizeof(struct rebinding) * nel);
   new_entry->rebindings_nel = nel;
@@ -298,6 +319,25 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
             *(cur->rebindings[j].replaced) = indirect_symbol_bindings[i];
 #endif
           }
+
+          // Batch publication (rebind_symbols_hook_batch): write the caller's
+          // original into its per-rebinding publish cell, BEFORE the slot is
+          // rewritten below, so the original is observable the instant the
+          // replacement goes live — the per-rebinding equivalent of the
+          // entry-level `publish` callback. Same anti-double-apply guard as
+          // the replaced write: skip when the slot already holds the
+          // replacement (a re-application would otherwise publish the
+          // replacement as the "original").
+          if (cur->publish_cells != NULL && cur->publish_cells[j] != NULL
+              && indirect_symbol_bindings[i] != cur->rebindings[j].replacement) {
+#if __has_feature(ptrauth_calls)
+            *(cur->publish_cells[j]) = ptrauth_sign_unauthenticated(
+                ptrauth_strip(indirect_symbol_bindings[i], ptrauth_key_asia),
+                ptrauth_key_asia, 0);
+#else
+            *(cur->publish_cells[j]) = indirect_symbol_bindings[i];
+#endif
+          }
 #if __has_feature(ptrauth_calls)
           void *replacement = cur->rebindings[j].replacement;
           if (section_needs_auth && replacement != NULL) {
@@ -430,12 +470,13 @@ static int rebind_symbols_common(struct rebinding rebindings[],
                                  struct rebind_stats *outStats,
                                  struct rebind_result *outResult,
                                  rebind_publish_fn publish,
-                                 void *publish_context) {
+                                 void *publish_context,
+                                 void **publish_cells[]) {
   int retval;
 
   pthread_mutex_lock(&rebindings_lock);
 
-  retval = prepend_rebindings(&_rebindings_head, rebindings, rebindings_nel);
+  retval = prepend_rebindings(&_rebindings_head, rebindings, rebindings_nel, publish_cells);
   if (retval < 0) {
     pthread_mutex_unlock(&rebindings_lock);
     return retval;
@@ -501,19 +542,26 @@ static int rebind_symbols_common(struct rebinding rebindings[],
   // have made _rebindings_head point at a different entry.
   entry->publish = NULL;
   entry->publish_context = NULL;
+  // Same for the batch publish cells: they are borrowed caller cells, valid
+  // only for this initial scan. Free the owned array and NULL it so future
+  // image loads (which re-apply the retained entry) never write a stale cell.
+  if (entry->publish_cells) {
+    free(entry->publish_cells);
+    entry->publish_cells = NULL;
+  }
 
   pthread_mutex_unlock(&rebindings_lock);
   return retval;
 }
 
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
-  return rebind_symbols_common(rebindings, rebindings_nel, NULL, NULL, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, NULL, NULL, NULL, NULL, NULL, NULL);
 }
 
 int rebind_symbols_checked(struct rebinding rebindings[],
                            size_t rebindings_nel,
                            size_t *outMatched) {
-  return rebind_symbols_common(rebindings, rebindings_nel, outMatched, NULL, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, outMatched, NULL, NULL, NULL, NULL, NULL);
 }
 
 int rebind_symbols_stats(struct rebinding rebindings[],
@@ -526,7 +574,7 @@ int rebind_symbols_stats(struct rebinding rebindings[],
     outStats->failed = 0;
     outStats->restore_failed = 0;
   }
-  return rebind_symbols_common(rebindings, rebindings_nel, NULL, outStats, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, NULL, outStats, NULL, NULL, NULL, NULL);
 }
 
 int rebind_symbols_hook(struct rebinding rebindings[],
@@ -543,7 +591,28 @@ int rebind_symbols_hook(struct rebinding rebindings[],
     result->restore_failed = 0;
   }
 
-  return rebind_symbols_common(rebindings, count, NULL, NULL, result, publish, context);
+  return rebind_symbols_common(rebindings, count, NULL, NULL, result, publish, context, NULL);
+}
+
+int rebind_symbols_hook_batch(struct rebinding rebindings[],
+                              void **publish_cells[],
+                              size_t count,
+                              struct rebind_result *result) {
+  // Batch of N rebindings applied in ONE image walk (O(images + N) instead of
+  // the O(images) per call that looping rebind_symbols_hook costs). Each
+  // rebindings[j].replaced receives the original for retention across future
+  // image loads; each publish_cells[j] (a borrowed caller cell) receives it
+  // mid-walk, before that symbol's slot goes live — the per-rebinding
+  // equivalent of rebind_symbols_hook's single publish callback, which fires
+  // only once per entry and so cannot serve a batch. publish_cells[j] may be
+  // NULL for a rebinding that wants no live publication.
+  if (result) {
+    result->matched = 0;
+    result->failed = 0;
+    result->restore_failed = 0;
+  }
+
+  return rebind_symbols_common(rebindings, count, NULL, NULL, result, NULL, NULL, publish_cells);
 }
 
 static int rebind_symbols_image_common(void *header,
@@ -552,7 +621,7 @@ static int rebind_symbols_image_common(void *header,
                                        size_t rebindings_nel,
                                        struct rebind_stats *outStats) {
     struct rebindings_entry *rebindings_head = NULL;
-    int retval = prepend_rebindings(&rebindings_head, rebindings, rebindings_nel);
+    int retval = prepend_rebindings(&rebindings_head, rebindings, rebindings_nel, NULL);
     rebind_symbols_for_image(rebindings_head, (const struct mach_header *) header, slide);
     if (outStats && rebindings_head) {
       outStats->matched = (uint32_t)rebindings_head->matched;
@@ -618,6 +687,9 @@ int rebind_symbols_unbind(struct rebinding rebindings[],
       if (same) {
         *link = entry->next;
         free(entry->rebindings);
+        // Normally NULL here (rebind_symbols_common frees it after the initial
+        // scan); free defensively in case an entry is unbound before then.
+        free(entry->publish_cells);
         free(entry);
         removed = 0;
         continue;

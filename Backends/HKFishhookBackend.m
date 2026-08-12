@@ -194,24 +194,132 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     return HK_ERR_NOT_SUPPORTED;
 }
 
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // No native batch primitive (descriptor nativeBatch=NO): the facade
-    // drains per-op via executeOperation:onBackend: and never calls this.
-    // For protocol conformance, apply each op sequentially through the same
-    // publication cycle and finalize its status/backendErrno.
+// Per-op fallback (OOM of the batch scratch arrays): apply each op through the
+// single-op path. The facade's native-batch drain owns begin/publish/finish,
+// so this must NOT call them — it only rebinds and sets hook->status, writing
+// the original into the op's output cell (hookFunction: does that via its
+// publish callback).
+- (void)executeHooksSequential:(NSArray<HKHookOperation *> *)hooks {
     for(HKHookOperation *hook in hooks) {
-        hk_original_begin(&hook->original);
-
         void **cell = hk_original_output_cell(&hook->original);
         hookkit_status_t result = [self hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell];
-
-        hk_original_publish(&hook->original, cell ? *cell : NULL);
-        result = hk_original_finish(&hook->original, result);
         hook->status = result;
-
         if(result != HK_OK) {
             hook->backendErrno = _lastErrno;
         }
     }
+}
+
+- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+    // Native batch (descriptor nativeBatch=YES): apply every rebindable op in
+    // ONE image walk via rebind_symbols_hook_batch, instead of one ~O(images)
+    // walk per op. The facade has already run hk_original_begin for each op
+    // (NULLing its output cell) and will run hk_original_publish/finish after
+    // this returns, so here we only rebind and set hook->status; each op's
+    // original lands in its output cell mid-walk through the per-rebinding
+    // publish cell.
+    NSUInteger n = hooks.count;
+    if(n == 0) {
+        return;
+    }
+
+    struct rebinding *rebindings = calloc(n, sizeof(struct rebinding));
+    void ***publish_cells = calloc(n, sizeof(void **));
+    // ObjC objects held in retained arrays (ARC): a C pointer array would not
+    // retain them, and the newly-created rebindings must survive from here
+    // through the post-walk distribution below.
+    NSMutableArray<HKFishhookRebinding *> *ownedList = [NSMutableArray arrayWithCapacity:n];
+    NSMutableArray<HKHookOperation *> *mapList = [NSMutableArray arrayWithCapacity:n];
+
+    if(!rebindings || !publish_cells) {
+        // OOM building the batch: fall back to the per-op path (still correct,
+        // just O(images) per op).
+        free(rebindings); free(publish_cells);
+        [self executeHooksSequential:hooks];
+        return;
+    }
+
+    size_t k = 0;
+    for(HKHookOperation *hook in hooks) {
+        void *function = hook->function;
+#if __has_feature(ptrauth_calls)
+        function = ptrauth_strip(function, ptrauth_key_asia);
+#endif
+        Dl_info info;
+        if(!(dladdr(function, &info) && info.dli_sname && info.dli_saddr == function)) {
+            // fishhook rebinds by exported symbol name; private/interior
+            // addresses are not rebindable.
+            hook->status = HK_ERR_NOT_SUPPORTED;
+            hook->backendErrno = 0;
+            continue;
+        }
+
+        HKFishhookRebinding *ob = [HKFishhookRebinding new];
+        const char *name = info.dli_sname;
+        if(name && name[0] == '_') name++;
+        ob->name = strdup(name);
+        ob->origCell = calloc(1, sizeof(void *));
+        if(!ob->name || !ob->origCell) {
+            free(ob->name);
+            free(ob->origCell);
+            ob->name = NULL;
+            ob->origCell = NULL;
+            hook->status = HK_ERR;
+            hook->backendErrno = ENOMEM;
+            continue;
+        }
+
+        rebindings[k].name = ob->name;
+        rebindings[k].replacement = hook->replacement;
+        rebindings[k].replaced = ob->origCell;              // retained cell (future image loads)
+        publish_cells[k] = hk_original_output_cell(&hook->original);  // borrowed caller cell (this scan)
+        [ownedList addObject:ob];
+        [mapList addObject:hook];
+        k++;
+    }
+
+    if(k > 0) {
+        struct rebind_result result = { 0, 0, 0 };
+        int rc = rebind_symbols_hook_batch(rebindings, publish_cells, k, &result);
+
+        if(rc != 0) {
+            // prepend failed (OOM): nothing was registered or retained.
+            for(size_t j = 0; j < k; j++) {
+                HKFishhookRebinding *ob = ownedList[j];
+                free(ob->name);
+                free(ob->origCell);
+                ob->name = NULL;
+                ob->origCell = NULL;
+                mapList[j]->status = HK_ERR;
+                mapList[j]->backendErrno = errno;
+            }
+        } else {
+            // The whole batch is one retained fishhook entry (all k rebindings,
+            // matched and no-op alike), so every origCell must stay alive for
+            // process life — keep every owned in the store. Per-op outcome is
+            // read from its origCell: written ⇒ at least one slot was rewritten
+            // (live); still NULL ⇒ the symbol is referenced by no loaded image
+            // (a silent no-op, reported NOT_SUPPORTED). No-op rebindings sit in
+            // the shared entry harmlessly (they never match a future image).
+            @synchronized(fishhookRebindingStore()) {
+                [fishhookRebindingStore() addObjectsFromArray:ownedList];
+            }
+            for(size_t j = 0; j < k; j++) {
+                HKHookOperation *hook = mapList[j];
+                if(*(ownedList[j]->origCell) != NULL) {
+                    hook->status = HK_OK;
+                } else {
+                    hook->status = HK_ERR_NOT_SUPPORTED;
+                    hook->backendErrno = ENOENT;
+                    if(publish_cells[j]) {
+                        *(publish_cells[j]) = NULL;
+                    }
+                }
+            }
+        }
+    }
+
+    free(rebindings);
+    free(publish_cells);
 }
 @end
