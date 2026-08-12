@@ -142,6 +142,25 @@ int rebind_symbols_hook(struct rebinding rebindings[],
                         void *context);
 
 /*
+ * Batch equivalent of rebind_symbols_hook: applies `count` rebindings in ONE
+ * image walk instead of one walk per call (O(images + count) vs O(images) per
+ * call). Solves the C1 ordering problem per-rebinding: publish_cells[j] (a
+ * borrowed caller cell, or NULL) receives rebindings[j]'s original — resigned
+ * on arm64e — at that symbol's first writable matching slot, BEFORE the
+ * replacement is written, so every caller's original is observable the instant
+ * its replacement goes live. rebindings[j].replaced still receives the original
+ * for retention across future image loads; publish_cells is borrowed for the
+ * initial scan only (freed/cleared afterward, never touched on later image
+ * loads). result may be NULL. This is what rebind_symbols_hook cannot do for
+ * N>1: its single publish callback fires once per entry, not once per rebinding.
+ */
+FISHHOOK_VISIBILITY
+int rebind_symbols_hook_batch(struct rebinding rebindings[],
+                              void **publish_cells[],
+                              size_t count,
+                              struct rebind_result *result);
+
+/*
  * Rebinds as above, but only in the specified image. The header should point
  * to the mach-o header, the slide should be the slide offset. Others as above.
  */
