@@ -303,12 +303,19 @@ BOOL substitute_discoverable(void) {
     // original being written into the out cell (some builds also signal
     // failure through errno). C1: hand the caller's cell straight to the
     // vendor — no local staging, no copy-after-activation — so the original
-    // lands in the caller-visible cell as the patch is applied. The
-    // publish-only-non-NULL invariant is preserved by the facade: a call
-    // that produced no original leaves the cell NULL (begin NULLed it), this
-    // reports NOT_SUPPORTED, and finish restores the saved value.
+    // lands in the caller-visible cell as the patch is applied. When no
+    // cell was requested (hk_original_output_cell returns NULL), stage
+    // locally: the vendor tolerates a NULL result (its own 2-arg overload
+    // passes one), but success would then be unobservable, so the probe
+    // cell keeps the outcome honest — the value is discarded, nothing is
+    // published to a caller that didn't ask. The publish-only-non-NULL
+    // invariant is preserved by the facade: a call that produced no
+    // original leaves the cell NULL, this reports NOT_SUPPORTED, and finish
+    // restores the saved value.
     errno = 0;
-    msHookFunction(function, replacement, old_ptr);
+    void *probe = NULL;
+    void **out = old_ptr ? old_ptr : &probe;
+    msHookFunction(function, replacement, out);
     _lastErrno = errno;
 
     if(errno) {
@@ -316,7 +323,7 @@ BOOL substitute_discoverable(void) {
         return HK_ERR;
     }
 
-    if(!old_ptr || !*old_ptr) {
+    if(!*out) {
         // No errno but no original either: the function was not hooked (too
         // short / bad shape / no writable prologue) — nothing was written,
         // so callers may switch technique.

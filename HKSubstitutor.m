@@ -196,7 +196,12 @@ static uintptr_t hk_inline_guard_key(void *function) {
 // begin/output_cell/publish/capture/finish drive one operation's
 // HKOriginalPublication through a drain cycle. The backend never touches the
 // struct directly — it writes through the cell hk_original_output_cell
-// returns, and the facade drives the rest.
+// returns, and the facade drives the rest. output_cell returns the caller's
+// cell when an original was REQUESTED, NULL otherwise: a no-original hook
+// enters the vendor's NULL-oldptr mode (libhooker's documented smaller-hook
+// path — see vendor/libhooker/libhooker.h), so backends must skip their
+// out-write on a NULL cell and the facade publishes nothing to a caller
+// that didn't ask.
 void hk_original_begin(HKOriginalPublication *publication) {
     // requested is NOT reset here: it is fixed at operation construction —
     // the op's original.requested is initialized before the backend call
@@ -224,8 +229,15 @@ void hk_original_begin(HKOriginalPublication *publication) {
 
 void **hk_original_output_cell(HKOriginalPublication *publication) {
     // Requested + caller cell: the vendor API writes straight into the
-    // caller's cell. Otherwise: internal staging storage never published.
-    return (publication->requested && publication->callerCell) ? publication->callerCell : &publication->value;
+    // caller's cell. Otherwise: NULL — the vendor's NULL-oldptr mode, the
+    // documented path for no-original hooks (libhooker's libhooker.h:
+    // "Setting oldptr to null will allow libhooker to hook smaller
+    // functions"). Caller-visible semantics are unchanged: nothing is
+    // published to a caller that didn't ask, so there is no staging cell to
+    // hand out. Backends must treat a NULL return as "no original
+    // requested" and skip their out-write (vendors whose out-slot doubles
+    // as a success signal stage locally — see the backends).
+    return (publication->requested && publication->callerCell) ? publication->callerCell : NULL;
 }
 
 void hk_original_publish(HKOriginalPublication *publication, void *original) {
@@ -1066,14 +1078,15 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     // Immediate path: the same publication cycle a drained function op runs
     // (see executeOperation:) — hk_original_begin saves and NULLs the
     // caller's cell, the backend writes the original through
-    // hk_original_output_cell (the caller's ACTUAL cell when requested, never
-    // a facade-owned staging cell copied afterward), publish records it, and
-    // finish applies the only-real-original invariant. The caller's cell
-    // therefore holds the original BEFORE the replacement becomes reachable —
-    // there is no copy-after-activation in the facade. The raw backend status
-    // goes straight through finish, which converts an OK-with-no-original to
-    // HK_ERR only when the caller REQUESTED one (a litehook-inline install
-    // with no original is success when nothing was requested).
+    // hk_original_output_cell (the caller's ACTUAL cell when requested, NULL
+    // when not — the vendor's NULL-oldptr mode, which may permit smaller
+    // hooks), publish records it, and finish applies the only-real-original
+    // invariant. The caller's cell therefore holds the original BEFORE the
+    // replacement becomes reachable — there is no copy-after-activation in
+    // the facade. The raw backend status goes straight through finish, which
+    // converts an OK-with-no-original to HK_ERR only when the caller
+    // REQUESTED one (a litehook-inline install with no original is success
+    // when nothing was requested).
     HKOriginalPublication publication = { .callerCell = old_ptr, .requested = (old_ptr != NULL) };
     hk_original_begin(&publication);
     void **cell = hk_original_output_cell(&publication);

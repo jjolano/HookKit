@@ -256,8 +256,14 @@ BOOL frida_discoverable(void) {
     // straight to it — no local staging, no copy-after-activation. On
     // failure gum reports the error without publishing an original, and the
     // facade's publish-only-non-NULL invariant catches any vendor that
-    // claims success without producing one.
-    int result = fn_hkgum_hook_function(function, replacement, old_ptr);
+    // claims success without producing one. The vendored frida-gum.h does
+    // not document the out-param's NULL tolerance, so when no original was
+    // requested (hk_original_output_cell returned NULL) stage locally —
+    // same pattern as the drained path below; the value is discarded, and
+    // success is judged from the return code either way.
+    void *probe = NULL;
+    void **out = old_ptr ? old_ptr : &probe;
+    int result = fn_hkgum_hook_function(function, replacement, out);
     _lastErrno = result;
 
     return result == 0 ? HK_OK : HK_ERR;
