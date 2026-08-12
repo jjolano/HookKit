@@ -176,7 +176,9 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * trampoline emits AArch64 opcodes — so setStrategy: refuses HKStrategyInline
  * on 32-bit, hookFunction:'s inline branch refuses, and the registry's
  * HK_CAT_FUNCTION_INLINE picker drops the litehook row on armv7. litehook
- * rebind and memory-patch remain available on all archs.
+ * rebind and memory-patch remain available on all archs. litehook rebind
+ * excludes the image that defines the replacement (calls from that image are
+ * not rebound — see README's litehook caveat).
  *
  * Per-backend caveats — fishhook symbol-only rebinding; native/Dobby/Frida
  * codesigning, arch and load-time constraints; Swift vtable scope and calling
