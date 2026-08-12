@@ -59,11 +59,37 @@ static bool hk_range_bounds(const void *addr, size_t len, vm_address_t *start, v
     return true;
 }
 
+// One-region memo for the probe walks. A single inline hook probes the same
+// code region 6-12 times (basic checks, window scan, the engine's own
+// preflight re-probing the same addresses), and each probe is a vm_region_64
+// trap plus a port deallocate — the dominant per-hook cost on the inline
+// paths. A probe fully inside the memoized region with the needed bits
+// granted skips the trap entirely; a walk refreshes the memo. The memo is
+// written after the LAST field the fast path reads, so a concurrent reader
+// that misses it just falls through to the walk.
+// ponytail: advisory, single entry — a region unmapped and re-queried between
+// probes returns stale "protected". The probes gate a dereference that
+// happens microseconds later on live code; a concurrent unmap of the target
+// in that window is already a race the walk itself does not close. An
+// address→region map is the upgrade if probe traffic ever outgrows one entry.
+static struct {
+    vm_address_t base;
+    vm_address_t end;        // base + size
+    vm_prot_t protection;
+    bool valid;
+} hk_memo_region;
+
 // True when every VM region covering [start, end) grants ALL of `required`
 // protections. Per-region, not uniform: mixed regions pass as long as each
 // grants the bits (the readable probe's documented contract). start/end are
 // page-aligned, caller-validated bounds.
 static bool hk_range_all_protected(vm_address_t start, vm_address_t end, vm_prot_t required) {
+    if(hk_memo_region.valid
+       && start >= hk_memo_region.base && end <= hk_memo_region.end
+       && (hk_memo_region.protection & required) == required) {
+        return true;
+    }
+
     while(start < end) {
         vm_address_t region = start;
         vm_size_t region_size = 0;
@@ -81,7 +107,18 @@ static bool hk_range_all_protected(vm_address_t start, vm_address_t end, vm_prot
 
         if(kr != KERN_SUCCESS || region > start || region_size == 0
            || (info.protection & required) != required) {
+            // Observed a mapping change (unmapped region, or a region that
+            // lacks the bits): drop any memoized region so it is never served.
+            hk_memo_region.valid = false;
             return false;
+        }
+
+        // Single region covers the whole range: memoize it for the next probe.
+        if(region + region_size >= end) {
+            hk_memo_region.base = region;
+            hk_memo_region.end = region + region_size;
+            hk_memo_region.protection = info.protection;
+            hk_memo_region.valid = true;
         }
 
         start = region + region_size;
