@@ -379,6 +379,19 @@ HKOriginalPublicationPolicy hk_ellekit_current_function_policy(void) {
                 // which Shadow's Hook_Memory group hooks) and must not hit a
                 // NULL original.
                 void **cell = hk_original_output_cell(&hook->original);
+
+                if(!cell) {
+                    // No original requested: output_cell returns NULL (the
+                    // NULL-oldptr mode is the function-hook path — see
+                    // hookFunction:). LBHookMessage's out slot doubles as
+                    // the success signal here, so stage locally: the probe
+                    // value is discarded (the drain publishes nothing for a
+                    // non-requested op), but a NULL slot would make every
+                    // message hook read as selector-not-found.
+                    void *probe = NULL;
+                    cell = &probe;
+                }
+
                 fn_LBHookMessage(hook->objcClass, hook->selector, hook->replacement, (void *)cell);
 
                 if(*cell) {

@@ -59,6 +59,12 @@ typedef struct {
 static void hk_fishhook_publish_original(void *context, void *original) {
     HKFishhookPublishContext *ctx = (HKFishhookPublishContext *)context;
 
+    // NULL cell = no original requested: hk_original_output_cell returns
+    // NULL (the vendor's NULL-oldptr mode) instead of staging storage, so
+    // the callback skips the write — the vendor still publishes to the
+    // caller only when requested, which is the contract. fishhook's own
+    // rebinding->replaced cell (owned->origCell) keeps capturing the
+    // original for future image loads either way.
     if(ctx->cell) {
         *ctx->cell = original;
     }

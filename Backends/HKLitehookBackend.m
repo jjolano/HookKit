@@ -102,8 +102,10 @@
     // replacement never observes a NULL original (the facade's begin already
     // NULLed the caller's cell, so without this write a reentrant call
     // mid-scan would read NULL). In the drained path old_ptr is
-    // hk_original_output_cell(&op->original), so this write reaches the
-    // caller immediately and is idempotent with the drain's re-publish; in
+    // hk_original_output_cell(&op->original): the caller's cell when one was
+    // requested, NULL otherwise — the write below is skipped for a NULL cell
+    // (no original was asked for, so nothing needs publishing), and the
+    // drain's re-publish is idempotent with the write when it did land; in
     // the immediate path old_ptr is the facade's owned cell, discarded
     // unless the call succeeds.
     if(old_ptr) {
