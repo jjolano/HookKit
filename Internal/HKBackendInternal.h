@@ -328,7 +328,7 @@ typedef struct {
     // HKFunctionTechnique (None/Rebind/Inline).
     HKOriginalPublicationPolicy publicationPolicy[3];
     BOOL nativeBatch;           // backend applies a drained batch natively (atomically where the engine allows)
-    BOOL sharedArm64Preflight;  // backend is gated by the shared arm64 prologue preflight
+    BOOL sharedArm64Preflight;  // backend additionally gated by the shared fixed-window scan (basic checks always run)
 } HKBackendDescriptor;
 
 typedef struct {

@@ -1,6 +1,9 @@
-// Shared fixed-window ARM64 prologue validator for the Dobby and litehook
-// inline backends — see HKInlinePreflight.h. Both backends call this from
-// their hook paths and their public preflightFunction: routes with the same
+// Shared ARM64 prologue preflight for the inline backends — see
+// HKInlinePreflight.h. Two layers: hk_inline_preflight_basic carries the
+// backend-INDEPENDENT checks that gate every inline-capable dispatch;
+// hk_inline_preflight adds the fixed-window scans that only the Dobby and
+// litehook relocators need. Both backends call the full validator from their
+// hook paths and their public preflightFunction: routes with the same
 // overwrite size, so preflight agrees exactly with execution.
 #import "HKInlinePreflight.h"
 
@@ -18,20 +21,17 @@
 // preflight inspects CODE, so it needs the stronger check.
 HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len);
 
-hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
+// Backend-INDEPENDENT inline preflight: the checks every inline-capable
+// dispatch must pass before any engine is reached (see
+// hk_shared_inline_preflight_ok), and the front of hk_inline_preflight for
+// the fixed-window backends. The checks below read only the first instruction
+// of each address and never write, so a reject leaves the target untouched.
+hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, int *outErrno) {
     if(outErrno) {
         *outErrno = 0;
     }
 
 #if defined(__arm64__) || defined(__aarch64__)
-    // Fail closed before the vendor hook: Dobby's relocator neither rejects
-    // short functions (it reads its overwrite window without recognizing
-    // early exits, smashing whatever follows) nor handles literal loads (it
-    // UNIMPLEMENTED()s on some LDR-literal encodings and mishandles SIMD
-    // literal loads); litehook copies the window to the trampoline verbatim,
-    // smashing the pool or address the instruction points at. The checks
-    // below read only the window and never write, so a reject leaves the
-    // target untouched.
 #if __has_feature(ptrauth_calls)
     // Strip PAC so the raw address is what the relocator will inspect
     // (arm64e). Replacement is stripped too so the self-hook check below
@@ -64,11 +64,61 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    // The window scan below dereferences the prologue; a bogus non-NULL
-    // address must fail cleanly instead of faulting. (The Mach VM probe is
-    // arm64-only, and so are the inline backends that use this preflight.)
-    // The mapping must be executable too: the window is code — a
-    // readable-only mapping (a data blob) is not a patchable prologue.
+    // The target's entry instruction is inspected by the engine's relocator;
+    // a bogus non-NULL address must fail cleanly instead of faulting. (The
+    // Mach VM probe is arm64-only, and so are the inline backends that use
+    // this preflight.) The mapping must be executable too: the entry is code
+    // — a readable-only mapping (a data blob) is not a patchable function.
+    // 4 bytes covers the entry instruction (the page-rounded probe spans
+    // whatever it straddles); the fixed-window backends extend the probe over
+    // their full overwrite window in hk_inline_preflight.
+    if(!hk_native_range_readable(function, 4)
+       || !hk_native_range_executable(function, 4)) {
+        if(outErrno) {
+            *outErrno = EFAULT;
+        }
+
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    return HK_OK;
+#else
+    // Not arm64/arm64e: no AArch64 decoder is compiled in here. Pass through
+    // — the MS providers (Substrate, Substitute) validate their own Thumb
+    // prologues, and the fixed-window inline backends are arm64-only.
+    (void)function;
+    (void)replacement;
+    return HK_OK;
+#endif
+}
+
+hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
+    // The fixed-window rules below apply on top of the generic checks: the
+    // window scanners dereference the prologue, and the generic checks make
+    // sure a bogus address fails cleanly first.
+    hookkit_status_t status = hk_inline_preflight_basic(function, replacement, outErrno);
+
+    if(status != HK_OK) {
+        return status;
+    }
+
+#if defined(__arm64__) || defined(__aarch64__)
+    // Fail closed before the vendor hook: Dobby's relocator neither rejects
+    // short functions (it reads its overwrite window without recognizing
+    // early exits, smashing whatever follows) nor handles literal loads (it
+    // UNIMPLEMENTED()s on some LDR-literal encodings and mishandles SIMD
+    // literal loads); litehook copies the window to the trampoline verbatim,
+    // smashing the pool or address the instruction points at. The checks
+    // below read only the window and never write, so a reject leaves the
+    // target untouched. The strong engines (ElleKit, Substrate, Substitute,
+    // Frida) have their own production relocators and are deliberately NOT
+    // gated here — they dispatch through hk_inline_preflight_basic only.
+
+    // The window scans below dereference the prologue over `window` bytes; a
+    // bogus non-NULL address whose window straddles the end of a mapping must
+    // fail cleanly instead of faulting. The mapping must be executable too:
+    // the window is code — a readable-only mapping (a data blob) is not a
+    // patchable prologue.
     if(!hk_native_range_readable(function, window)
        || !hk_native_range_executable(function, window)) {
         if(outErrno) {
@@ -110,8 +160,6 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
     // Not arm64/arm64e: no AArch64 decoder is compiled in here. Pass through
     // — the MS providers (Substrate, Substitute) validate their own Thumb
     // prologues, and the fixed-window inline backends are arm64-only.
-    (void)function;
-    (void)replacement;
     (void)window;
     return HK_OK;
 #endif

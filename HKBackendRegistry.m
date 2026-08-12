@@ -128,7 +128,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // apply immediately mid-batch), so it is not an atomic drain —
             // the facade falls back to sequential publication.
             .nativeBatch = NO,
-            .sharedArm64Preflight = YES,   // prologue writer, no vendor preflight
+            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         // Substrate/Substitute memory: MSHookMemory / SubHookMemory are
         // resolved at probe time but NOT required for the probe (a build
@@ -147,7 +147,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
             .nativeBatch = NO,
-            .sharedArm64Preflight = YES,   // prologue writer, no vendor preflight
+            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         table[2] = (HKBackendDescriptor){
             .type = HK_LIB_SUBSTITUTE,
@@ -161,7 +161,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
             .nativeBatch = NO,
-            .sharedArm64Preflight = YES,   // prologue writer, no vendor preflight
+            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         // Never automatic: HookKit's own engine is opt-in so that devices with
         // a battle-tested library installed keep using it.
@@ -219,7 +219,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // before end_transaction activates the batch.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
             .nativeBatch = YES,   // one transaction around the drained batch, published atomically
-            .sharedArm64Preflight = YES,   // prologue writer, no vendor preflight
+            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         table[6] = (HKBackendDescriptor){
             .type = HK_LIB_FISHHOOK,
@@ -330,9 +330,9 @@ const HKCategoryPriority hk_category_priorities[] = {
     // do not go through the function preflight), publicationPolicy mirrors
     // the owning backend's per-technique policy, and nativeBatch /
     // sharedArm64Preflight are resolved from the descriptor.
-    { HK_CAT_MESSAGE,         { {HK_LIB_ELLEKIT, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationAfterActivation}, NO, YES},
-                                {HK_LIB_SUBSTRATE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
-                                {HK_LIB_SUBSTITUTE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
+    { HK_CAT_MESSAGE,         { {HK_LIB_ELLEKIT, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationAfterActivation}, NO, NO},
+                                {HK_LIB_SUBSTRATE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
+                                {HK_LIB_SUBSTITUTE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
                                 {HK_LIB_NATIVE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES} }, 4 },
     { HK_CAT_FUNCTION_REBIND, { {HK_LIB_FISHHOOK, HKStrategyRebind, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, NO},
                                 {HK_LIB_LITEHOOK, HKStrategyRebind, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, YES} }, 2 },
@@ -341,9 +341,9 @@ const HKCategoryPriority hk_category_priorities[] = {
     // arm64/arm64e-only. On 32-bit archs ElleKit, Dobby and Frida still cover
     // the category, and Dobby/Frida report unavailable at runtime, so no
     // resolution can select HKStrategyInline there.
-    { HK_CAT_FUNCTION_INLINE, { {HK_LIB_ELLEKIT, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, YES},
+    { HK_CAT_FUNCTION_INLINE, { {HK_LIB_ELLEKIT, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
                                 {HK_LIB_DOBBY, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
-                                {HK_LIB_FRIDA, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, YES, YES},
+                                {HK_LIB_FRIDA, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, YES, NO},
 #if defined(__arm64__) || defined(__arm64e__)
                                 // litehook inline: no original trampoline, so
                                 // the Inline policy is Unavailable — a caller
@@ -364,9 +364,9 @@ const HKCategoryPriority hk_category_priorities[] = {
     // Private-symbol rows resolve to the backend's own function-hook routine
     // after the DSC lookup: the providers hook the found address inline
     // (HKFunctionTechniqueInline), litehook falls through to its rebind path.
-    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, YES},
-                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
-                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
+    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
+                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
+                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
                                 {HK_LIB_LITEHOOK, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, YES} }, 4 },
 #else
     // litehook's DSC private-symbol lookup hardcodes 64-bit structures
@@ -374,9 +374,9 @@ const HKCategoryPriority hk_category_priorities[] = {
     // archs the private-symbol category drops the litehook picker — ElleKit,
     // Substrate and Substitute still cover it. Explicit litehook rebind and
     // memory use stays available on 32-bit; only this category picker is out.
-    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, YES},
-                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
-                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES} }, 3 },
+    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
+                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
+                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO} }, 3 },
 #endif
 };
 const size_t hk_category_priority_count = sizeof(hk_category_priorities) / sizeof(hk_category_priorities[0]);
