@@ -52,11 +52,20 @@ static BOOL hk_backend_discoverable(hookkit_lib_t type) {
     }
 }
 
-// Conservative shared prologue check for inline-capable backends that bring
-// no preflightFunction: of their own (the MS-compatible providers: ElleKit,
-// Substrate, Substitute). Runs the shared fixed-window validator with the
-// LARGEST overwrite window any inline backend uses (litehook's 20 bytes), so
-// a target that passes here is safe for every smaller (16-byte) window too.
+// Shared prologue check for inline-capable backends that bring no
+// preflightFunction: of their own (the MS-compatible providers: ElleKit,
+// Substrate, Substitute). Two layers, matching Internal/HKInlinePreflight.h:
+// the backend-INDEPENDENT basic checks (PAC strip, alignment, self-hook,
+// readable+executable replacement and target entry) run on EVERY inline
+// dispatch — a misaligned, self-hooked, unmapped or non-executable target
+// must fail before any engine is reached, whatever its relocator (M1) — and
+// only for a backend whose descriptor sets sharedArm64Preflight (the
+// fixed-window relocators: Dobby, litehook) does the full fixed-window
+// validator additionally run, with the LARGEST overwrite window any inline
+// backend uses (litehook's 20 bytes), so a target that passes here is safe
+// for every smaller (16-byte) window too. The strong engines (ElleKit,
+// Substrate, Substitute, Frida) bring their own production relocators, which
+// decide instruction eligibility themselves: they are basic-checked only.
 // Returns YES when the backend may be dispatched, NO to refuse the hook.
 // Descriptor-gated (C2/M7): the check only runs on arm64/arm64e — on ARMv7
 // Substrate/Substitute validate their own prologues — and only for the
@@ -77,11 +86,22 @@ static BOOL hk_shared_inline_preflight_ok(id<HKSubstitutorBackend> backend, HKFu
         return YES;
     }
 
+    // M1: the generic checks gate EVERY inline-capable dispatch, flagged or
+    // not — an engine's own relocator is only ever handed a mapped,
+    // executable, aligned, non-self target. Side-effect-free.
+    if(hk_inline_preflight_basic(function, replacement, NULL) != HK_OK) {
+        return NO;
+    }
+
     size_t count = 0;
     const HKBackendDescriptor *table = hk_backends(&count);
 
     for(size_t i = 0; i < count; i++) {
         if([backend isKindOfClass:table[i].backendClass]) {
+            // Flagged backends are the fixed-window relocators (Dobby,
+            // litehook): they additionally get the full window scan. The
+            // strong engines are basic-checked only — their own relocators
+            // decide instruction eligibility.
             return table[i].sharedArm64Preflight
                 ? (hk_inline_preflight(function, replacement, HK_INLINE_PREFLIGHT_LITEHOOK_WINDOW, NULL) == HK_OK)
                 : YES;
@@ -731,12 +751,15 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
         }
 
         if(![candidate respondsToSelector:@selector(preflightFunction:withReplacement:)]) {
-            // No vendor veto channel: enforce the shared conservative
-            // prologue check for inline-capable backends (the MS providers:
-            // ElleKit, Substrate, Substitute), so a target no inline backend
-            // could safely overwrite is DECLINED here — the walk continues to
-            // the next picker instead of dispatching unguarded. Non-inline
-            // backends without a preflight (rebind paths) accept.
+            // No vendor veto channel: enforce the shared prologue check for
+            // inline-capable backends (the MS providers: ElleKit, Substrate,
+            // Substitute) — the generic checks (misaligned, self-hook,
+            // unmapped, non-executable) plus, for the flagged fixed-window
+            // backends, the window scan. A target that fails them is DECLINED
+            // here — the walk continues to the next picker instead of
+            // dispatching unguarded. The MS providers' own relocators decide
+            // instruction eligibility. Non-inline backends without a
+            // preflight (rebind paths) accept.
             if(!hk_shared_inline_preflight_ok(candidate, picker.technique, function, replacement)) {
                 return NO;
             }
@@ -926,17 +949,18 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         }
     }
 
-    // Shared conservative prologue check: an inline-capable backend without a
+    // Shared prologue check: an inline-capable backend without a
     // preflightFunction: of its own (ElleKit/Substrate/Substitute) is only
-    // dispatched when the shared fixed-window validator accepts the target —
-    // the same checks the Dobby/litehook/native backends run themselves. The
-    // check is descriptor-gated (see hk_shared_inline_preflight_ok: arch +
-    // technique + sharedArm64Preflight), so rebind paths and non-flagged
-    // backends skip it. This covers every inline-capable dispatch path —
-    // auto-cover (already declined in the router, re-checked here), explicit
-    // inline, and the batched enqueue — and refuses BEFORE any guard
-    // reservation or write, so a rejected target never reaches a backend
-    // unguarded.
+    // dispatched when the shared validator accepts the target — the generic
+    // checks on every inline dispatch, plus the fixed-window scan for the
+    // flagged relocators (Dobby, litehook), the same checks those backends
+    // run themselves. The check is descriptor-gated (see
+    // hk_shared_inline_preflight_ok: arch + technique + sharedArm64Preflight),
+    // so rebind paths skip it and the strong engines are basic-checked only.
+    // This covers every inline-capable dispatch path — auto-cover (already
+    // declined in the router, re-checked here), explicit inline, and the
+    // batched enqueue — and refuses BEFORE any guard reservation or write,
+    // so a rejected target never reaches a backend unguarded.
     if(!hk_shared_inline_preflight_ok(routeBackend, technique, function, replacement)) {
         [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
         return HK_ERR_NOT_SUPPORTED;
