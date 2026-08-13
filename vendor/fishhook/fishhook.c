@@ -36,6 +36,7 @@
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
+#include <unistd.h>
 
 #if __has_include(<ptrauth.h>)
 #include <ptrauth.h>
@@ -223,36 +224,24 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
   bool section_needs_auth = strcmp(section->sectname, "__auth_got") == 0;
 #endif
 
-  // H5: never leak VM_PROT_COPY|RW. Record the original protection of the VM
-  // region covering the section, make the section writable, write, and
-  // restore the original protection on every path out of this function. If
-  // the region cannot be queried, or the section crosses into a neighbour
-  // region (whose protection would be a guess), fail closed: no slot of this
-  // section is written, and every matching slot is counted as failed so the
-  // caller sees the partial rebind.
+  // H5: record the original protection of the VM region covering the section,
+  // make the section writable, write, and restore it on every path out of
+  // this function. VM protection is page-granular, so a GOT section can share
+  // its boundary page with writable data from a neighbouring section. Restore
+  // only pages wholly covered by the GOT section after a successful write;
+  // otherwise restore the full section range. If the region cannot be queried,
+  // or the section crosses into a neighbour region (whose protection would be
+  // a guess), fail closed: no slot of the section is written, and every
+  // matching slot is counted as failed so the caller sees the partial rebind.
   vm_prot_t original_protection = VM_PROT_NONE;
   vm_address_t region_addr = 0;
   vm_size_t region_size = 0;
   bool writable = false;
-  if (get_protection(indirect_symbol_bindings, &original_protection, NULL,
-                     &region_addr, &region_size) == 0 &&
-      (uintptr_t)indirect_symbol_bindings + section->size <= (uintptr_t)region_addr + region_size) {
-    /**
-     * 1. Moved the vm protection modifying codes to here to reduce the
-     *    changing scope.
-     * 2. Adding VM_PROT_WRITE mode unconditionally because vm_region
-     *    API on some iOS/Mac reports mismatch vm protection attributes.
-     * -- Lianfu Hao Jun 16th, 2021
-     *
-     * Once we failed to change the vm protection, we
-     * MUST NOT continue the following write actions!
-     * iOS 15 has corrected the const segments prot.
-     * -- Lionfore Hao Jun 11th, 2021
-     **/
-    writable = vm_protect(mach_task_self(), (uintptr_t)indirect_symbol_bindings,
-                          section->size, 0,
-                          VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS;
-  }
+  bool section_matched = false;
+  bool protection_valid = get_protection(indirect_symbol_bindings, &original_protection, NULL,
+                                         &region_addr, &region_size) == 0 &&
+      (uintptr_t)indirect_symbol_bindings + section->size <= (uintptr_t)region_addr + region_size;
+  bool protection_attempted = false;
 
   // Snapshot the chain-head entry's match tally before this section's scan:
   // a restore failure below is only attributable to the owning call if its
@@ -274,13 +263,35 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
       for (uint j = 0; j < cur->rebindings_nel; j++) {
         if (symbol_name_longer_than_1 && strcmp(&symbol_name[1], cur->rebindings[j].name) == 0) {
           if (!writable) {
+            if (!protection_attempted) {
+              protection_attempted = true;
+              if (protection_valid) {
+                /**
+                 * 1. Add VM_PROT_WRITE unconditionally because vm_region
+                 *    API on some iOS/Mac reports mismatch vm protection
+                 *    attributes.
+                 * 2. Once vm_protect fails, do not write any matching slot.
+                 * -- Lianfu Hao Jun 16th, 2021
+                 * -- Lionfore Hao Jun 11th, 2021
+                 */
+                writable = vm_protect(mach_task_self(),
+                                      (uintptr_t)indirect_symbol_bindings,
+                                      section->size, 0,
+                                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS;
+              }
+            }
+
             // The slot matched but the section's pages could not be made
             // writable: skip the write (never write into a region that was
             // not unprotected) and report the failure so callers can detect
             // a partial rebind.
-            cur->failed += 1;
-            goto symbol_loop;
+            if (!writable) {
+              cur->failed += 1;
+              goto symbol_loop;
+            }
           }
+
+          section_matched = true;
 
           // C1: the caller's original must be observable no later than the
           // first replacement slot that goes live. Publish it BEFORE the
@@ -360,17 +371,35 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
   symbol_loop:;
   }
 
-  // Restore the section's original protection — VM_PROT_COPY|RW must never
-  // leak onto pages that were read-only before the rebind.
+  // Restore the section's original protection. A successful rebind on a
+  // read-only section intentionally leaves boundary pages writable when they
+  // also contain data outside the GOT section: restoring those pages would
+  // recreate the shared-cache corruption fixed here. Interior pages are safe
+  // because they are wholly owned by the GOT section.
   if (writable) {
-    kern_return_t restore_err = vm_protect(mach_task_self(), (uintptr_t)indirect_symbol_bindings,
-                                           section->size, 0, original_protection);
-    if (restore_err != KERN_SUCCESS && rebindings && rebindings->matched != head_matched_before) {
-      // The writes succeeded but the pages stay writable: report a
-      // hard/partial result instead of masking it as success. The entry is
-      // retained — the mutation already happened and future-image state is
-      // unchanged.
-      rebindings->restore_failed = true;
+    uintptr_t restore_addr = (uintptr_t)indirect_symbol_bindings;
+    vm_size_t restore_size = section->size;
+    if (section_matched && !(original_protection & VM_PROT_WRITE)) {
+      vm_size_t page_size = (vm_size_t)getpagesize();
+      uintptr_t section_end = restore_addr + section->size;
+      restore_addr = (restore_addr + page_size - 1) & ~(page_size - 1);
+      uintptr_t restore_end = section_end & ~(page_size - 1);
+      restore_size = restore_end > restore_addr ? restore_end - restore_addr : 0;
+
+      // ponytail: boundary pages stay writable on 16K-page devices; dedicate
+      // GOT pages or use a dyld fixup API if hardening requires sealing them.
+    }
+    if (restore_size != 0) {
+      kern_return_t restore_err = vm_protect(mach_task_self(), restore_addr,
+                                             restore_size, 0, original_protection);
+      if (restore_err != KERN_SUCCESS && rebindings &&
+          rebindings->matched != head_matched_before) {
+        // The writes succeeded but the pages stay writable: report a
+        // hard/partial result instead of masking it as success. The entry is
+        // retained — the mutation already happened and future-image state is
+        // unchanged.
+        rebindings->restore_failed = true;
+      }
     }
   }
 }
