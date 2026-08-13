@@ -57,10 +57,9 @@ struct rebinding {
 struct rebind_stats {
   uint32_t matched;
   uint32_t failed;
-  // Set (1) when at least one section's original page protection could not
-  // be restored after its slots were written: those pages may remain
-  // writable, so matched > 0 && restore_failed is a hard/partial result,
-  // not a clean success.
+  // Set (1) when protection for a page wholly covered by a rebound section
+  // could not be restored. Boundary pages that share data with neighbouring
+  // sections may intentionally remain writable.
   uint32_t restore_failed;
 };
 
@@ -72,9 +71,8 @@ struct rebind_stats {
 struct rebind_result {
   size_t matched;
   size_t failed;
-  // Set (1) when at least one section's original page protection could not
-  // be restored after its slots were written (see
-  // struct rebind_stats.restore_failed).
+  // Set (1) when protection for a page wholly covered by a rebound section
+  // could not be restored (see struct rebind_stats.restore_failed).
   size_t restore_failed;
 };
 
@@ -200,4 +198,3 @@ int rebind_symbols_unbind(struct rebinding rebindings[],
 #endif //__cplusplus
 
 #endif //fishhook_h
-
