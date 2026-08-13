@@ -182,7 +182,10 @@
             // parser is a NULL stub, so this degrades to the dlsym scan in
             // super (private-symbol strategy is arm64/arm64e only anyway).
             if(!result) {
-                hk_image *handle = hk_native_open_image(image_name);
+                // Scan variant: no dlopen/dlclose per image — the dlsym
+                // fallback handle has nothing unique to add on this path
+                // (super's dlsym scan runs after this walk anyway).
+                hk_image *handle = hk_native_open_image_scan(image_name);
 
                 if(handle) {
                     result = hk_native_find_symbol(handle, plain);

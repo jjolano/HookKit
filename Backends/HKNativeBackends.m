@@ -201,7 +201,10 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
     }
 
     return hk_search_loaded_images(^void *(const char *image_name) {
-        hk_image *handle = hk_native_open_image(image_name);
+        // Scan variant: no dlopen/dlclose per image — dlsym(RTLD_DEFAULT)
+        // already missed above, so the handle's dlsym fallback has nothing
+        // unique to add and the per-image dlopen was the scan's dominant cost.
+        hk_image *handle = hk_native_open_image_scan(image_name);
 
         if(!handle) {
             return NULL;
