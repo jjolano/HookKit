@@ -85,27 +85,33 @@ hookkit_status_t hk_batch_status(int okCount, int total) {
 - (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName {
     const char *symbol = [symbolName UTF8String];
 
+    // dlsym takes the C name; callers may pass the Mach-O symbol-table name
+    // (leading underscore, e.g. "_signal"). Strip one leading underscore so a
+    // mangled name resolves on dlsym's fast path — otherwise every "_name"
+    // lookup misses dlsym AND the O(images) walk below (same wrong name),
+    // silently returning NULL: ~160ms wasted per miss and the hook never
+    // installs. Unmangled names ("signal") are unaffected. Same convention as
+    // HKFishhookBackend's dli_sname handling.
+    if(symbol && symbol[0] == '_') {
+        symbol++;
+    }
+
     if(image) {
         return dlsym((void *)image, symbol);
     }
 
-    // image == NULL: search the default scope, then all loaded dyld images
-    void *found = dlsym(RTLD_DEFAULT, symbol);
-
-    if(found) {
-        return found;
-    }
-
-    return hk_search_loaded_images(^void *(const char *image_name) {
-        void *handle = dlopen(image_name, RTLD_LAZY | RTLD_NOLOAD);
-
-        if(!handle) {
-            return NULL;
-        }
-
-        void *result = dlsym(handle, symbol);
-        dlclose(handle);
-        return result;
-    });
+    // image == NULL: the default scope already covers every globally-visible
+    // image, so one dlsym answers for any exported symbol. The old fallback
+    // walked ALL ~600 loaded images doing dlopen(RTLD_NOLOAD)+dlsym+dlclose
+    // each — but that only re-searches images RTLD_DEFAULT already covered and
+    // STILL cannot find a non-exported (private) symbol, so on a miss it burned
+    // ~160ms per call to fail anyway (Shadow's __signal_nobind/__sigaction
+    // ctor lookups: ~320ms of pure loss at launch, on top of the underscore
+    // miss fixed above). Its one unique case is a symbol exported solely by an
+    // RTLD_LOCAL image; a caller needing that resolves the handle and uses
+    // findSymbolInImage:<handle>.
+    // ponytail: dropped the O(images) fallback; add findSymbolInImage:<handle>
+    // at the call site if an RTLD_LOCAL-only symbol ever needs resolving.
+    return dlsym(RTLD_DEFAULT, symbol);
 }
 @end
