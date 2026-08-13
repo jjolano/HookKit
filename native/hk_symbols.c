@@ -115,8 +115,25 @@ struct hk_cache_symbols {
     const uint8_t *entries;
     uint32_t entries_count;
     size_t entry_stride;            // 12 (uint32 dylibOffset) or 16 (uint64)
+    // Sorted (dylibOffset, entryIndex) index over `entries`, built once so
+    // bind_cache_symbols is O(log entries) instead of a linear scan per
+    // image. The NULL-image private-symbol scan opens every loaded image, so
+    // the linear scan was ~5000 comparisons × ~600 images per lookup.
+    struct hk_cache_entry_index *entry_index;
+    uint32_t entry_index_count;
     bool valid;
 };
+
+struct hk_cache_entry_index {
+    uint64_t dylib_offset;
+    uint32_t entry_index;
+};
+
+static int entry_index_cmp(const void *a, const void *b) {
+    uint64_t da = ((const struct hk_cache_entry_index *)a)->dylib_offset;
+    uint64_t db = ((const struct hk_cache_entry_index *)b)->dylib_offset;
+    return da < db ? -1 : da > db ? 1 : 0;
+}
 
 static uint64_t entry_dylib_offset(const uint8_t *entry, size_t stride) {
     if(stride == 16) {
@@ -273,6 +290,21 @@ static const struct hk_cache_symbols *cache_symbols(void) {
             }
 
             if(parse_cache_symbols((const uint8_t *)map, (size_t)st.st_size, &symbols)) {
+                // Index the entries once (process lifetime, like the map):
+                // bind_cache_symbols binary-searches it. The table is static
+                // while the process lives — the cache file never changes.
+                symbols.entry_index = malloc((size_t)symbols.entries_count * sizeof(struct hk_cache_entry_index));
+
+                if(symbols.entry_index) {
+                    for(uint32_t i = 0; i < symbols.entries_count; i++) {
+                        symbols.entry_index[i].dylib_offset = entry_dylib_offset(symbols.entries + ((size_t)i * symbols.entry_stride), symbols.entry_stride);
+                        symbols.entry_index[i].entry_index = i;
+                    }
+
+                    qsort(symbols.entry_index, symbols.entries_count, sizeof(struct hk_cache_entry_index), entry_index_cmp);
+                    symbols.entry_index_count = symbols.entries_count;
+                }
+
                 return;
             }
 
@@ -309,11 +341,41 @@ static bool cache_image_offset(const void *header, uint64_t *out_offset) {
     return true;
 }
 
+static bool bind_entry(const struct hk_cache_symbols *symbols, const uint8_t *entry, struct hk_image *image) {
+    image->nlist = symbols->nlist + entry_nlist_start(entry, symbols->entry_stride);
+    image->nlist_count = entry_nlist_count(entry, symbols->entry_stride);
+    image->strings = symbols->strings;
+    image->strings_size = symbols->strings_size;
+    return true;
+}
+
 static bool bind_cache_symbols(const void *header, struct hk_image *image) {
     const struct hk_cache_symbols *symbols = cache_symbols();
     uint64_t dylib_offset = 0;
 
     if(!symbols || !cache_image_offset(header, &dylib_offset)) {
+        return false;
+    }
+
+    if(symbols->entry_index) {
+        // Binary search the sorted index; the linear scan is the OOM fallback.
+        size_t lo = 0;
+        size_t hi = symbols->entry_index_count;
+
+        while(lo < hi) {
+            size_t mid = (lo + hi) / 2;
+
+            if(symbols->entry_index[mid].dylib_offset < dylib_offset) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+
+        if(lo < symbols->entry_index_count && symbols->entry_index[lo].dylib_offset == dylib_offset) {
+            return bind_entry(symbols, symbols->entries + ((size_t)symbols->entry_index[lo].entry_index * symbols->entry_stride), image);
+        }
+
         return false;
     }
 
@@ -324,11 +386,7 @@ static bool bind_cache_symbols(const void *header, struct hk_image *image) {
             continue;
         }
 
-        image->nlist = symbols->nlist + entry_nlist_start(entry, symbols->entry_stride);
-        image->nlist_count = entry_nlist_count(entry, symbols->entry_stride);
-        image->strings = symbols->strings;
-        image->strings_size = symbols->strings_size;
-        return true;
+        return bind_entry(symbols, entry, image);
     }
 
     return false;
@@ -476,7 +534,14 @@ static uint32_t *collect_section_flags(const struct mach_header_64 *header, uint
 
 #pragma mark - Public API
 
-hk_image *hk_native_open_image(const char *path) {
+// Common open core. `want_dlopen` controls the dlsym fallback handle: the
+// handle-based API keeps it (find_symbol falls back to dlsym for exported
+// symbols when the symtab is missing), while the NULL-image scan path skips
+// it — dlsym(RTLD_DEFAULT) already missed before the scan runs, so the
+// handle's only unique case (a symbol exported solely by an RTLD_LOCAL
+// image) is out of scope there, and dlopen+dlclose per image is the scan's
+// dominant cost (~600 images per lookup).
+static hk_image *open_image_common(const char *path, bool want_dlopen) {
     if(!path || !*path) {
         return NULL;
     }
@@ -497,7 +562,11 @@ hk_image *hk_native_open_image(const char *path) {
     }
 
     image->slide = slide;
-    image->dl_handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+
+    if(want_dlopen) {
+        image->dl_handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+    }
+
     image->sect_flags = collect_section_flags(header, &image->sect_count);
 
     if(!bind_cache_symbols(header, image)) {
@@ -507,6 +576,15 @@ hk_image *hk_native_open_image(const char *path) {
     // Even with no symbol table the handle is useful: dlsym still resolves
     // exported symbols.
     return (hk_image *)image;
+}
+
+hk_image *hk_native_open_image(const char *path) {
+    return open_image_common(path, true);
+}
+
+// Scan-path variant: no dlopen/dlclose per image (see open_image_common).
+HK_INTERNAL hk_image *hk_native_open_image_scan(const char *path) {
+    return open_image_common(path, false);
 }
 
 void hk_native_close_image(hk_image *image) {
@@ -582,6 +660,11 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
 #else   // !arm64
 
 hk_image *hk_native_open_image(const char *path) {
+    (void)path;
+    return NULL;
+}
+
+hk_image *hk_native_open_image_scan(const char *path) {
     (void)path;
     return NULL;
 }
