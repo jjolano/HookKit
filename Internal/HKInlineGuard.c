@@ -1,7 +1,6 @@
 #include "HKInlineGuard.h"
 
 #include <pthread.h>
-#include <stdio.h>
 
 // Fixed-size entry table under one mutex; linear scan. The guard exists to
 // prevent double-patching of one prologue, which is a live-hook-count concern:
@@ -80,7 +79,6 @@ hk_guard_result_t hk_inline_guard_reserve(uintptr_t address, void *replacement, 
             goto unlock;
         }
 
-        printf("[HKInlineGuard] note: chaining inline hook on %p via backend type %d\n", (void *)address, backendType);
         entry->prev_replacement = entry->replacement;
         entry->replacement = replacement;
         entry->state = HK_GUARD_PENDING;
