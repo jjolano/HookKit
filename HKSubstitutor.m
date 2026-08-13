@@ -337,6 +337,7 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 - (hookkit_lib_t)backendType;
 - (BOOL)enqueueKind:(HKHookKind)kind status:(hookkit_status_t *)outStatus build:(void (^)(HKHookOperation *hook))build;
 - (hookkit_status_t)executeOperation:(HKHookOperation *)hook onBackend:(id<HKSubstitutorBackend>)resultBackend;
+- (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend;
 - (BOOL)backendHasNativeBatch:(id<HKSubstitutorBackend>)candidate;
 - (HKFunctionTechnique)resolvedTechniqueForBackend:(id<HKSubstitutorBackend>)candidate;
 @end
@@ -918,10 +919,14 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     id<HKSubstitutorBackend> routeBackend = backend;
     HKFunctionTechnique technique = HKFunctionTechniqueNone;
 
-    if(autoCoverCategories && !batching) {
+    if(autoCoverCategories) {
         // H8: original-requesting hooks route policy-aware — the router skips
         // candidates whose resolved policy cannot publish an original before
         // activation, so a backend that could only refuse is never picked.
+        // Runs whether or not batching: the batched path records the routed
+        // backend on the op (build block below) so executeHooks can group and
+        // native-batch each backend's ops instead of one immediate single-op
+        // install (a full image walk) per hook.
         routeBackend = [self hk_backendForAutoCoverFunction:function replacement:replacement requestOriginal:(old_ptr != NULL) technique:&technique];
 
         if(!routeBackend) {
@@ -1071,6 +1076,10 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         hook->original.requested = (old_ptr != NULL);
         hook->guardToken = guardGeneration;   // 0 = not inline-guarded
         hook->technique = technique;   // ACTUAL resolved technique (see above)
+        // Auto-cover only: record the per-hook routed backend so executeHooks
+        // drains grouped-by-backend. nil for pinned substitutors keeps their
+        // single-backend fast path.
+        hook->routedBackend = autoCoverCategories ? routeBackend : nil;
     }]) {
         return status;
     }
@@ -1533,6 +1542,32 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
     return result;
 }
 
+// Drain one group of enqueued ops through a single backend (the pinned backend
+// for a normal substitutor, or one router-picked backend for an auto-cover one).
+// Native-batch when the backend supports it — begin every publication up front,
+// hand the group to the backend, publish/finalize per op — else run each op
+// through the single-op helper. Extracted from executeHooks so the grouped
+// auto-cover path and the single-backend fast path share one implementation.
+- (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend {
+    if([self backendHasNativeBatch:groupBackend]) {
+        for(HKHookOperation *hook in hooks) {
+            hk_original_begin(&hook->original);
+        }
+
+        [groupBackend executeHooks:hooks];
+
+        for(HKHookOperation *hook in hooks) {
+            void **cell = hk_original_output_cell(&hook->original);
+            hk_original_publish(&hook->original, cell ? *cell : NULL);
+            hook->status = hk_original_finish(&hook->original, hook->status);
+        }
+    } else {
+        for(HKHookOperation *hook in hooks) {
+            [self executeOperation:hook onBackend:groupBackend];
+        }
+    }
+}
+
 - (hookkit_status_t)executeHooks {
     NSArray<HKHookOperation *> *hooks;
 
@@ -1553,27 +1588,54 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    if([self backendHasNativeBatch:backend]) {
-        // Native batch path: begin every publication up front, hand the whole
-        // drained snapshot to the backend (it fills each op's status /
-        // backendErrno and writes each original through the output cell), then
-        // publish and finalize per op.
-        for(HKHookOperation *hook in hooks) {
-            hk_original_begin(&hook->original);
+    // Dispatch each op to the backend it will actually install on, one native
+    // batch per backend where supported.
+    BOOL anyRouted = NO;
+    for(HKHookOperation *hook in hooks) {
+        if(hook->routedBackend) {
+            anyRouted = YES;
+            break;
         }
+    }
 
-        [backend executeHooks:hooks];
-
-        for(HKHookOperation *hook in hooks) {
-            void **cell = hk_original_output_cell(&hook->original);
-            hk_original_publish(&hook->original, cell ? *cell : NULL);
-            hook->status = hk_original_finish(&hook->original, hook->status);
-        }
+    if(!anyRouted) {
+        // Fast path — every op shares the pinned backend (all non-auto-cover
+        // substitutors): drain the whole snapshot in one group, exactly as the
+        // single-backend path always did.
+        [self drainGroup:hooks onBackend:backend];
     } else {
-        // Sequential path: no native batch primitive — run each op through the
-        // single-op helper (begin → backend call → publish → finish).
+        // Auto-cover: each op carries the backend the per-hook router picked.
+        // Group by backend CLASS — hk_walk_categories news a FRESH instance per
+        // hook, so identity comparison would never coalesce; the backends are
+        // per-hook stateless (they drive the global fishhook list / libhooker),
+        // so one representative instance of a class drives its whole group's
+        // native batch. Order preserved within each group; original-requesting
+        // identity hooks that fell back to rebind coalesce into ONE image walk.
+        NSMutableArray<id<HKSubstitutorBackend>> *reps = [NSMutableArray new];
+        NSMutableArray<NSMutableArray<HKHookOperation *> *> *groups = [NSMutableArray new];
+
         for(HKHookOperation *hook in hooks) {
-            [self executeOperation:hook onBackend:backend];
+            id<HKSubstitutorBackend> groupBackend = hook->routedBackend ?: backend;
+            NSUInteger idx = NSNotFound;
+
+            for(NSUInteger j = 0; j < reps.count; j++) {
+                if([reps[j] class] == [groupBackend class]) {
+                    idx = j;
+                    break;
+                }
+            }
+
+            if(idx == NSNotFound) {
+                [reps addObject:groupBackend];
+                [groups addObject:[NSMutableArray new]];
+                idx = reps.count - 1;
+            }
+
+            [groups[idx] addObject:hook];
+        }
+
+        for(NSUInteger i = 0; i < reps.count; i++) {
+            [self drainGroup:groups[i] onBackend:reps[i]];
         }
     }
 

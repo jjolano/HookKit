@@ -75,6 +75,8 @@ hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_
 // guardToken is the inline-guard generation the op reserved (0 = not
 // inline-guarded); backendErrno is the per-backend error detail when status
 // is a backend error.
+@protocol HKSubstitutorBackend;   // routedBackend below; full decl further down
+
 @interface HKHookOperation : NSObject {
 @public
     HKHookKind kind;
@@ -90,6 +92,13 @@ hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_
     HKOriginalPublication original;
     uint64_t guardToken;
     int backendErrno;
+    // Per-op routed backend for an AUTO-COVER substitutor: the backend the
+    // per-hook router picked at enqueue (hookFunction: batched routing). nil
+    // for every pinned substitutor — executeHooks then keeps its single-backend
+    // fast path. When set, executeHooks groups ops by this backend's CLASS so
+    // each backend's ops drain in ONE native batch (hk_walk_categories news a
+    // fresh instance per hook, so group by class, not identity).
+    id<HKSubstitutorBackend> routedBackend;
 }
 @end
 
