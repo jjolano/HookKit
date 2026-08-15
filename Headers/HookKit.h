@@ -31,8 +31,8 @@ typedef const struct HKImage* HKImageRef;
  * callers use substitutorWithCategory: to select the first available backend
  * in that category's priority order, without naming a specific library.
  *
- *   MESSAGE          — ObjC message hooking (class_addMethod / MSHookMessageEx /
- *                      LBHookMessage / substitute_hook_objc_message)
+ *   MESSAGE          — ObjC message hooking through the Objective-C runtime;
+ *                      facade-native and independent of backend selection
  *   FUNCTION_REBIND  — C function rebinding by exported symbol name (fishhook
  *                      / litehook)
  *   FUNCTION_INLINE  — C function inline hooking by address (ElleKit / Dobby
@@ -46,7 +46,7 @@ typedef const struct HKImage* HKImageRef;
  *                      which backends serve hookMemory:.
  *
  * Flags are powers of two and may be OR'd for getAvailableCategories (which
- * reports the four category bits, never HK_CAT_MEMORY).
+ * always includes HK_CAT_MESSAGE and never HK_CAT_MEMORY).
  */
 typedef enum {
     HK_CAT_NONE             = 0,
@@ -96,6 +96,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * engine requires it too for function and memory patching — it does not
  * suspend peer threads, so off the main thread those return
  * HK_ERR_NOT_SUPPORTED without patching.
+ * Image handles are ordinary owned handles: use them on one thread, close
+ * each exactly once, and never use one after closeImage: returns.
  *
  * Batch storage lifetime: while batching, enqueue-time HK_OK means "accepted
  * into the queue", not "installed" — only executeHooks installs and writes
@@ -127,8 +129,7 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  *
  * Error reporting: getLibErrno: is an OPAQUE backend-specific code, not a
  * normalized error enum — do not rely on cross-backend meaning. For ElleKit it
- * can be a libhooker message-error enum (LBHookMessage's LIBHOOKER_ERR) or
- * libhooker's errno (from LHHookFunctions / LHPatchMemory), for the
+ * can be libhooker's errno (from LHHookFunctions / LHPatchMemory), for the
  * Substrate/MS APIs it reflects errno
  * observed at submit time (those entry points are void, so success is
  * unverifiable), for native/Dobby/Frida it can be a mach/driver return, and
@@ -194,7 +195,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 
 // The pinned backend used by explicit instances and by image/symbol APIs on
 // automatic instances (HK_LIB_NONE if none is available). Automatic function
-// and memory hooks may select another backend per operation.
+// and memory hooks may select another backend per operation. Message-category
+// instances report HK_LIB_NONE because message hooking is facade-native.
 @property (readonly, nonatomic) hookkit_lib_t activeType;
 
 // The pinned backend's strategy (HKStrategyDefault when resolution did not
@@ -214,11 +216,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // receive an array for more details.
 + (hookkit_lib_t)getAvailableSubstitutorTypes;
 
-// Returns the OR of all category flags for which at least one backend is
-// discoverable on the current device (same side-effect-free discovery as
-// getAvailableSubstitutorTypes — never an engine load). Callers can use this
-// to probe which categories are usable before requesting a backend by
-// category; a positive result does not verify that the engine activates.
+// Returns HK_CAT_MESSAGE plus every backend-selected category for which at
+// least one backend is discoverable. Discovery never activates an engine.
 + (hookkit_cat_t)getAvailableCategories;
 
 // Returns an array of dictionaries containing information on given substitutor types, as supported by the running version of HookKit.
@@ -234,11 +233,10 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 + (instancetype)substitutorWithOrderedTypes:(NSArray<NSNumber *> *)types;
 
 // Creates an instance of HKSubstitutor for the given backend categories, tried
-// in the given priority order — the first category that resolves to an
-// available backend wins, selecting that category's own built-in picker
-// priority. Each element is an NSNumber wrapping a hookkit_cat_t. HK_CAT_NONE
-// entries are skipped; an empty array yields no backend (activeType ==
-// HK_LIB_NONE).
+// in the given priority order — HK_CAT_MESSAGE resolves directly in the
+// facade; another category selects its first available built-in picker. Each
+// element is an NSNumber wrapping a hookkit_cat_t. HK_CAT_NONE entries are
+// skipped; an empty array yields no backend (activeType == HK_LIB_NONE).
 + (instancetype)substitutorWithOrderedCategories:(NSArray<NSNumber *> *)categories;
 
 // Auto-cover routing mode: creates an instance of HKSubstitutor that routes each
@@ -269,6 +267,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // an instance with no backend (activeType == HK_LIB_NONE) if no backend in
 // the category is available. Convenience for substitutorWithOrderedCategories:
 // with a single entry; HK_CAT_NONE is skipped and yields no backend.
+// HK_CAT_MESSAGE is facade-native: its instance has activeType == HK_LIB_NONE
+// and supports message hooks without loading an adapter.
 + (instancetype)substitutorWithCategory:(hookkit_cat_t)category;
 
 // Creates the process-wide automatic substitutor. Message hooks use the ObjC
@@ -280,7 +280,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // For the three batchable methods below: without batching, the return value is
 // final. With batching, HK_OK means queued; executeHooks reports installation.
 //
-// Hook method for Objective-C runtime methods. Class-method-only selectors are
+// Facade-native Objective-C runtime hook; never dispatches through the selected
+// backend. Class-method-only selectors are
 // dispatched through the metaclass (object_getClass()), so class methods hook
 // correctly on every backend; instance methods pass the class as-is.
 - (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr;
@@ -320,10 +321,11 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // scope are identical to hookSwiftMethodInClass:withName:.
 - (hookkit_status_t)hookSwiftVtableSlotInClass:(Class)objcClass withIndex:(NSUInteger)index withReplacement:(void *)replacement outOldPtr:(void **)old_ptr;
 
-// Returns an opaque pointer to an image for use with findSymbol(s)InImage methods, or NULL if unsuccessful.
+// Returns an owned opaque image handle, or NULL. Handles are single-threaded,
+// must be closed exactly once, and are invalid after closeImage:.
 - (HKImageRef)openImage:(NSString *)path;
 
-// Closes the image handle from openImage.
+// Closes the image handle from openImage. The handle is invalid afterwards.
 - (void)closeImage:(HKImageRef)image;
 
 // Locates private symbols within a given image, and outputs results to outSymbols (missing symbols are NULL entries). image == NULL is supported if the hooking library implements MSFindSymbol. Returns HK_OK if all symbols were found, HK_ERR_PARTIAL if some, HK_ERR if none.

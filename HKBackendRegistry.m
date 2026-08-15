@@ -95,12 +95,11 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
     static dispatch_once_t onceToken = 0;
 
     dispatch_once(&onceToken, ^{
-        // kinds is a hook-kind mask (message/function/memory) encoded in the
-        // category bits: HK_CAT_MESSAGE for the message kind,
+        // kinds is the adapter hook-kind mask encoded in category bits:
         // HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE for the function
         // kind (the technique fields disambiguate which), HK_CAT_MEMORY for
         // memory patching. publicationPolicy is indexed by
-        // HKFunctionTechnique: None (message ops) / Rebind / Inline.
+        // HKFunctionTechnique: None / Rebind / Inline.
         // Unavailable means the backend has no such technique at all (fail
         // closed: no original can ever be published under it).
         table[0] = (HKBackendDescriptor){
@@ -109,28 +108,21 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"ellekit",
             .name = @"ElleKit",
             .available = libhooker_available,
+            .discoverable = libhooker_discoverable,
             .automatic = YES,
             .selectable = YES,
-            .kinds = HK_CAT_MESSAGE | HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
+            .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
             // H8: the Inline policy depends on the DETECTED provider ABI —
             // real libhooker's LHHookFunctions writes the original BEFORE the
             // patch activates (verified upstream), while ElleKit's patch
             // writer runs first and the original lands in the out cell
-            // afterwards (the batch path in HKElleKitBackend.m documents the
-            // NULL-original window a mid-batch re-entrant call can hit, which
-            // is why the output cell must be the caller's cell at apply time).
+            // afterwards.
             // HKOriginalPublicationRuntime defers to
             // hk_resolved_publication_policy, which reads the runtime ABI
             // classification (hk_ellekit_current_function_policy); an
             // unclassified provider fails closed to Unavailable.
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime },
-            // Real libhooker returns only an aggregate applied count, while
-            // ElleKit applies entries sequentially under different return
-            // semantics. Neither gives honest per-op outcomes after a partial
-            // batch, so the facade drains one operation at a time.
-            .nativeBatch = NO,
-            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         // Substrate/Substitute memory: MSHookMemory / SubHookMemory are
         // resolved at probe time but NOT required for the probe (a build
@@ -143,13 +135,12 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"substrate",
             .name = @"Cydia Substrate",
             .available = substrate_available,
+            .discoverable = substrate_discoverable,
             .automatic = YES,
             .selectable = NO,
-            .kinds = HK_CAT_MESSAGE | HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
+            .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
-            .nativeBatch = NO,
-            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         table[2] = (HKBackendDescriptor){
             .type = HK_LIB_SUBSTITUTE,
@@ -157,13 +148,12 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"substitute",
             .name = @"Substitute",
             .available = substitute_available,
+            .discoverable = substitute_discoverable,
             .automatic = YES,
             .selectable = NO,
-            .kinds = HK_CAT_MESSAGE | HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
+            .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
-            .nativeBatch = NO,
-            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         // Not eligible for the legacy pinned default; capability/operation
         // routing may still reach it.
@@ -173,16 +163,14 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"native",
             .name = @"HookKit",
             .available = native_available,
+            .discoverable = native_available,
             .automatic = NO,
             .selectable = YES,
-            .kinds = HK_CAT_MESSAGE | HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
+            .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
             .defaultTechnique = HKFunctionTechniqueInline,
             // Trampoline is sealed (relocated + written) before hk_write
-            // activates the patch; message path writes the original IMP via
-            // class_replaceMethod at apply time.
+            // activates the patch.
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
-            .nativeBatch = NO,   // executeHooks drains per-op sequentially
-            .sharedArm64Preflight = YES,
         };
         // Not eligible for the legacy pinned default. The implicit function
         // router may reach Dobby through FUNCTION_INLINE.
@@ -192,6 +180,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"dobby",
             .name = @"Dobby",
             .available = dobby_available,
+            .discoverable = dobby_available,
             .automatic = NO,
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
@@ -201,8 +190,6 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // routing->Active() commits the trampoline (instruction-verified
             // in both slices, 2026-08-11) — safe for a requested original.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
-            .nativeBatch = NO,
-            .sharedArm64Preflight = YES,
         };
         // Not eligible for the legacy pinned default; category routing reaches
         // it only after the lighter inline candidates decline.
@@ -212,6 +199,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"frida",
             .name = @"Frida",
             .available = frida_available,
+            .discoverable = frida_discoverable,
             .automatic = NO,
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE,
@@ -219,8 +207,6 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // Originals are staged inside the gum transaction and published
             // before end_transaction activates the batch.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation },
-            .nativeBatch = YES,   // one transaction around the drained batch, published atomically
-            .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
         table[6] = (HKBackendDescriptor){
             .type = HK_LIB_FISHHOOK,
@@ -228,6 +214,7 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"fishhook",
             .name = @"fishhook",
             .available = fishhook_available,
+            .discoverable = fishhook_available,
             .automatic = YES,
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE,
@@ -236,8 +223,6 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // first slot write. Batch: rebind_symbols_hook_batch's per-rebinding
             // publish cells do the same for each op. No inline path exists.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable },
-            .nativeBatch = YES,   // executeHooks: applies the whole batch in ONE image walk (rebind_symbols_hook_batch)
-            .sharedArm64Preflight = NO,   // rebind: never touches the prologue
         };
         // Never automatic: Swift vtable hooks are a separate API (no
         // message/function overlap) and only make sense when the caller has a
@@ -248,25 +233,25 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .identifier = @"swift",
             .name = @"Swift vtables",
             .available = swift_available,
+            .discoverable = swift_available,
             .automatic = NO,
             .selectable = NO,
             .kinds = HK_CAT_NONE,   // vtable metadata only; none of the three hook kinds
             .defaultTechnique = HKFunctionTechniqueNone,
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable },
-            .nativeBatch = NO,
-            .sharedArm64Preflight = NO,   // vtable metadata, never a prologue writer
         };
         // Not eligible for the legacy pinned default. Operation routing uses
         // it as the compiled-in fallback for rebind and memory coverage.
         // Judgment call: the memory bit is set — litehook_hook_memory is a
-        // real, KERN_SUCCESS-checked patch path (supportsHookKind: lists
-        // HKHookKindMemory), so the descriptor must say so truthfully.
+        // real, KERN_SUCCESS-checked patch path, so the descriptor must say
+        // so truthfully.
         table[8] = (HKBackendDescriptor){
             .type = HK_LIB_LITEHOOK,
             .backendClass = [HKLitehookBackend class],
             .identifier = @"litehook",
             .name = @"litehook",
             .available = litehook_available,
+            .discoverable = litehook_available,
             .automatic = NO,
             .selectable = YES,
             .kinds = HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE | HK_CAT_MEMORY,
@@ -276,13 +261,37 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // Rebind: the original IS the untouched function body. Inline:
             // no original trampoline — the backend itself refuses old_ptr.
             .publicationPolicy = { HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable },
-            .nativeBatch = NO,
-            .sharedArm64Preflight = YES,   // inline strategy writes the prologue
         };
     });
 
     *outCount = sizeof(table) / sizeof(table[0]);
     return table;
+}
+
+const HKBackendDescriptor *hk_backend_descriptor_for_type(hookkit_lib_t type) {
+    size_t count = 0;
+    const HKBackendDescriptor *table = hk_backends(&count);
+
+    for(size_t i = 0; i < count; i++) {
+        if(table[i].type == type) {
+            return &table[i];
+        }
+    }
+
+    return NULL;
+}
+
+const HKBackendDescriptor *hk_backend_descriptor_for_backend(id<HKSubstitutorBackend> backend) {
+    size_t count = 0;
+    const HKBackendDescriptor *table = hk_backends(&count);
+
+    for(size_t i = 0; backend && i < count; i++) {
+        if([backend isKindOfClass:table[i].backendClass]) {
+            return &table[i];
+        }
+    }
+
+    return NULL;
 }
 
 #pragma mark - Original-publication policy resolution
@@ -296,17 +305,13 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
 // detection lives). Every other entry resolves to its descriptor value as-is.
 // Unknown backends fail closed to Unavailable (nothing can ever be published).
 HKOriginalPublicationPolicy hk_resolved_publication_policy(hookkit_lib_t backendType, HKFunctionTechnique technique) {
-    size_t count = 0;
-    const HKBackendDescriptor *table = hk_backends(&count);
+    const HKBackendDescriptor *descriptor = hk_backend_descriptor_for_type(backendType);
 
-    for(size_t i = 0; i < count; i++) {
-        if(table[i].type == backendType) {
-            HKOriginalPublicationPolicy policy = table[i].publicationPolicy[(int)technique];
-
-            return policy == HKOriginalPublicationRuntime
-                ? hk_ellekit_current_function_policy()
-                : policy;
-        }
+    if(descriptor) {
+        HKOriginalPublicationPolicy policy = descriptor->publicationPolicy[(int)technique];
+        return policy == HKOriginalPublicationRuntime
+            ? hk_ellekit_current_function_policy()
+            : policy;
     }
 
     return HKOriginalPublicationUnavailable;
@@ -320,36 +325,24 @@ HKOriginalPublicationPolicy hk_resolved_publication_policy(hookkit_lib_t backend
 // implements setStrategy:; backends without it use their vendor default
 // technique. The order matches the main hk_backends table priority within
 // each category.
-// Single source of truth for category membership: getAvailableCategories
-// derives availability from this table alone, and HKBackendDescriptor carries
-// no category bits, so the two views cannot diverge.
+// Message hooking is facade-native and therefore has no picker row. This table
+// is the single source of truth for backend-selected categories.
 const HKCategoryPriority hk_category_priorities[] = {
-    // Each picker row carries the descriptor-resolved publication facts:
-    // kinds is the hook-kind mask the row serves (HK_CAT_MESSAGE for message
-    // rows; both function bits for function rows), technique is the technique
-    // the row's strategy resolves to (None for message rows — message hooks
-    // do not go through the function preflight), publicationPolicy mirrors
-    // the owning backend's per-technique policy, and nativeBatch /
-    // sharedArm64Preflight are resolved from the descriptor.
-    { HK_CAT_MESSAGE,         { {HK_LIB_ELLEKIT, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationAfterActivation}, NO, NO},
-                                {HK_LIB_SUBSTRATE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
-                                {HK_LIB_SUBSTITUTE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
-                                {HK_LIB_NATIVE, HKStrategyDefault, HK_CAT_MESSAGE, HKFunctionTechniqueNone, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES} }, 4 },
-    { HK_CAT_FUNCTION_REBIND, { {HK_LIB_FISHHOOK, HKStrategyRebind, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, NO},
-                                {HK_LIB_LITEHOOK, HKStrategyRebind, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, YES} }, 2 },
+    { HK_CAT_FUNCTION_REBIND, { {HK_LIB_FISHHOOK, HKStrategyRebind, HKFunctionTechniqueRebind},
+                                {HK_LIB_LITEHOOK, HKStrategyRebind, HKFunctionTechniqueRebind} }, 2 },
     // Prologue inline trampolines are AArch64-only: litehook, Dobby and Frida
     // emit AArch64 instructions unconditionally, so litehook's picker is
     // arm64/arm64e-only. On 32-bit archs ElleKit, Dobby and Frida still cover
     // the category, and Dobby/Frida report unavailable at runtime, so no
     // resolution can select HKStrategyInline there.
-    { HK_CAT_FUNCTION_INLINE, { {HK_LIB_ELLEKIT, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
-                                {HK_LIB_DOBBY, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, YES},
-                                {HK_LIB_FRIDA, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, YES, NO},
+    { HK_CAT_FUNCTION_INLINE, { {HK_LIB_ELLEKIT, HKStrategyInline, HKFunctionTechniqueInline},
+                                {HK_LIB_DOBBY, HKStrategyInline, HKFunctionTechniqueInline},
+                                {HK_LIB_FRIDA, HKStrategyInline, HKFunctionTechniqueInline},
 #if defined(__arm64__) || defined(__arm64e__)
                                 // litehook inline: no original trampoline, so
                                 // the Inline policy is Unavailable — a caller
                                 // that requested an original must be refused.
-                                {HK_LIB_LITEHOOK, HKStrategyInline, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, YES} },
+                                {HK_LIB_LITEHOOK, HKStrategyInline, HKFunctionTechniqueInline} },
                                4 },
 #else
                                 // litehook's inline trampoline emits AArch64
@@ -365,19 +358,19 @@ const HKCategoryPriority hk_category_priorities[] = {
     // Private-symbol rows resolve to the backend's own function-hook routine
     // after the DSC lookup: the providers hook the found address inline
     // (HKFunctionTechniqueInline), litehook falls through to its rebind path.
-    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
-                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
-                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
-                                {HK_LIB_LITEHOOK, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueRebind, {HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable}, NO, YES} }, 4 },
+    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HKFunctionTechniqueInline},
+                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HKFunctionTechniqueInline},
+                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HKFunctionTechniqueInline},
+                                {HK_LIB_LITEHOOK, HKStrategyPrivateSymbol, HKFunctionTechniqueRebind} }, 4 },
 #else
     // litehook's DSC private-symbol lookup hardcodes 64-bit structures
     // (mach_header_64 / LC_SEGMENT_64 / section_64 / nlist_64), so on 32-bit
     // archs the private-symbol category drops the litehook picker — ElleKit,
     // Substrate and Substitute still cover it. Explicit litehook rebind and
     // memory use stays available on 32-bit; only this category picker is out.
-    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime}, NO, NO},
-                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO},
-                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE, HKFunctionTechniqueInline, {HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationBeforeActivation}, NO, NO} }, 3 },
+    { HK_CAT_PRIVATE_SYMBOL,  { {HK_LIB_ELLEKIT, HKStrategyPrivateSymbol, HKFunctionTechniqueInline},
+                                {HK_LIB_SUBSTRATE, HKStrategyPrivateSymbol, HKFunctionTechniqueInline},
+                                {HK_LIB_SUBSTITUTE, HKStrategyPrivateSymbol, HKFunctionTechniqueInline} }, 3 },
 #endif
 };
 const size_t hk_category_priority_count = sizeof(hk_category_priorities) / sizeof(hk_category_priorities[0]);

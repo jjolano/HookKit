@@ -7,31 +7,22 @@
 #import <string.h>
 
 #import "vendor/libhooker/libhooker.h"
-#import "vendor/libhooker/libblackjack.h"
 
 #pragma mark - libhooker (ElleKit) runtime resolution
 
 // libhooker is dlopen'd at runtime so that HookKit loads cleanly without ElleKit installed.
 // fishhook is compiled in and always available.
 static void *libhooker_handle = NULL;
-static void *libblackjack_handle = NULL;
 // The libhooker ABI is NOT uniform across providers. The vendored header
 // (libhooker.h, coolstar's real libhooker for unc0ver/Taurine) declares
-// LBHookMessage returning enum LIBHOOKER_ERR and LHHookFunctions/
-// LHPatchMemory returning an APPLIED COUNT. ElleKit (Dopamine/palera1n)
-// exports the same symbols with a VOID LBHookMessage (success = the out
-// pointer being written) and 0-on-success for the other two. Reading one
-// provider's return under the other's semantics makes every hook look
-// failed, the caller's original IMP gets suppressed, and v1-era tweaks
-// whose %orig reads that slot crash with a NULL call (Shadow 3.7.6's
-// %hook SpringBoard -applicationDidFinishLaunching: sent SpringBoard into
-// safe mode exactly this way).
+// LHHookFunctions/LHPatchMemory returning an applied count. ElleKit exposes
+// the same symbols with zero-on-success semantics.
 //
 // The provider is classified by an observable EXPORT, never by image
 // filename (H8): ElleKit exposes its own EKHookFunction entry point
 // alongside the libhooker-compat surface, and real libhooker never does —
 // marker present means the ElleKit zero-on-success ABI; marker absent with
-// the complete official symbol set (vendored libhooker.h + libblackjack.h)
+// the complete official libhooker symbol set
 // means the count-returning libhooker ABI. Anything else fails CLOSED: no
 // hook is ever attempted, because a misclassification could apply a hook
 // and then suppress its original.
@@ -42,7 +33,6 @@ typedef NS_ENUM(uint8_t, HKEKABI) {
 };
 
 static HKEKABI libhooker_abi = HKEKABIUnknown;
-static void (*fn_LBHookMessage)(Class, SEL, void *, void *) = NULL;
 static int (*fn_LHHookFunctions)(const struct LHFunctionHook *, int) = NULL;
 static int (*fn_LHPatchMemory)(const struct LHMemoryPatch *, int) = NULL;
 static struct libhooker_image *(*fn_LHOpenImage)(const char *) = NULL;
@@ -50,7 +40,7 @@ static void (*fn_LHCloseImage)(struct libhooker_image *) = NULL;
 static bool (*fn_LHFindSymbols)(struct libhooker_image *, const char **, void **, size_t) = NULL;
 
 // Defined below probe_libhooker, which calls it during ABI detection.
-static BOOL provider_exports_official_set(void *hookerHandle, void *messageHandle);
+static BOOL provider_exports_official_set(void *hookerHandle);
 
 // Only successful probes are cached: if dlopen fails, a later call retries
 // (the engine may appear after HookKit loads).
@@ -67,26 +57,6 @@ static BOOL probe_libhooker(void) {
         return NO;
     }
 
-    // ElleKit packages one image behind libhooker/libblackjack symlinks;
-    // official libhooker builds them as separate dylibs. Prefer a combined
-    // export, then load libblackjack only when LBHookMessage is absent.
-    void *messageHandle = hookerHandle;
-    void *blackjackHandle = NULL;
-    void (*LBHookMessage)(Class, SEL, void *, void *) = (void (*)(Class, SEL, void *, void *))dlsym(messageHandle, "LBHookMessage");
-
-    if(!LBHookMessage) {
-        NSString *blackjackPath = HKJBPath(@"/usr/lib/libblackjack.dylib");
-
-        if(blackjackPath) {
-            blackjackHandle = dlopen([blackjackPath fileSystemRepresentation], RTLD_LAZY);
-        }
-
-        if(blackjackHandle) {
-            messageHandle = blackjackHandle;
-            LBHookMessage = (void (*)(Class, SEL, void *, void *))dlsym(messageHandle, "LBHookMessage");
-        }
-    }
-
     // Resolve into locals first: the globals are published only after the
     // ENTIRE required symbol set is present, so an incomplete library can
     // never leave half-populated function pointers behind.
@@ -99,12 +69,8 @@ static BOOL probe_libhooker(void) {
     // ABI-incomplete: drop the handle and stay uncached so a later probe
     // genuinely retries (the engine may gain the full ABI after HookKit
     // loads). Nothing was published.
-    if(!(LBHookMessage && LHHookFunctions && LHPatchMemory
+    if(!(LHHookFunctions && LHPatchMemory
             && LHOpenImage && LHCloseImage && LHFindSymbols)) {
-        if(blackjackHandle) {
-            dlclose(blackjackHandle);
-        }
-
         dlclose(hookerHandle);
         return NO;
     }
@@ -112,24 +78,18 @@ static BOOL probe_libhooker(void) {
     // Provider ABI detection (H8): classify by observable exports, never by
     // image filename. Probe only this provider's handles: RTLD_DEFAULT could
     // find an unrelated ElleKit image when real libhooker is also installed.
-    if(dlsym(hookerHandle, "EKHookFunction") || dlsym(messageHandle, "EKHookFunction")) {
-        // ElleKit: void LBHookMessage, 0-on-success LHHookFunctions/LHPatchMemory.
+    if(dlsym(hookerHandle, "EKHookFunction")) {
+        // ElleKit: 0-on-success LHHookFunctions/LHPatchMemory.
         libhooker_abi = HKEKABIElleKit;
-    } else if(provider_exports_official_set(hookerHandle, messageHandle)) {
+    } else if(provider_exports_official_set(hookerHandle)) {
         // Real libhooker (unc0ver/Taurine): applied-count returns + errno.
         libhooker_abi = HKEKABILibhooker;
     } else {
-        if(blackjackHandle) {
-            dlclose(blackjackHandle);
-        }
-
         dlclose(hookerHandle);
         return NO;
     }
 
     libhooker_handle = hookerHandle;
-    libblackjack_handle = blackjackHandle;
-    fn_LBHookMessage = LBHookMessage;
     fn_LHHookFunctions = LHHookFunctions;
     fn_LHPatchMemory = LHPatchMemory;
     fn_LHOpenImage = LHOpenImage;
@@ -139,17 +99,9 @@ static BOOL probe_libhooker(void) {
     return YES;
 }
 
-// The complete official libhooker symbol set, per the vendored headers
-// (libhooker.h + libblackjack.h): LBHookMessage, LHHookFunctions,
-// LHPatchMemory, LHOpenImage, LHCloseImage, LHFindSymbols, LHStrError,
-// LHExecMemory. Official builds split LBHookMessage into libblackjack and the
-// LH* symbols into libhooker. The whole set present — with the EKHookFunction
-// marker absent — identifies real libhooker's count-returning ABI.
-static BOOL provider_exports_official_set(void *hookerHandle, void *messageHandle) {
-    if(!dlsym(messageHandle, "LBHookMessage")) {
-        return NO;
-    }
-
+// Official libhooker exports used to distinguish its count-returning ABI from
+// an unknown compatibility provider when the ElleKit marker is absent.
+static BOOL provider_exports_official_set(void *hookerHandle) {
     static const char *const officialSymbols[] = {
         "LHHookFunctions", "LHPatchMemory",
         "LHOpenImage", "LHCloseImage", "LHFindSymbols",
@@ -214,14 +166,12 @@ BOOL libhooker_available(void) {
 // after HookKit loads (mirroring the activation probe's retry contract).
 BOOL libhooker_discoverable(void) {
     NSString *hookerPath = HKJBPath(@"/usr/lib/libhooker.dylib");
-    NSString *blackjackPath = HKJBPath(@"/usr/lib/libblackjack.dylib");
 
-    if(!hookerPath || !blackjackPath) {
+    if(!hookerPath) {
         return NO;
     }
 
-    return dlopen_preflight([hookerPath fileSystemRepresentation])
-        && dlopen_preflight([blackjackPath fileSystemRepresentation]);
+    return dlopen_preflight([hookerPath fileSystemRepresentation]);
 }
 
 // Runtime original-publication policy for the combined ElleKit/libhooker
@@ -264,43 +214,6 @@ HKOriginalPublicationPolicy hk_ellekit_current_function_policy(void) {
     if(libhooker_abi == HKEKABIUnknown) {
         _lastErrno = ENOTSUP;
         return HK_ERR_NOT_SUPPORTED;
-    }
-
-    return HK_OK;
-}
-
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    hookkit_status_t refused = [self refuseIfUnknownABI];
-
-    if(refused != HK_OK) {
-        return refused;
-    }
-
-    // LBHookMessage's ABI is provider-dependent:
-    //  - ElleKit: void — success is the original being written into the out
-    //    cell; nothing written means the selector exists on neither the class
-    //    nor the metaclass (ElleKit messageHook's guard).
-    //  - real libhooker: int — LIBHOOKER_OK (0) on success,
-    //    LIBHOOKER_ERR_SELECTOR_NOT_FOUND (1) when the selector is absent.
-    // Both write the original on success, so the out cell is the common
-    // success signal; check it before any return-value reading. Reading the
-    // void return as an error enum was the ABI mismatch: the garbage value
-    // (typically the original's low bits) was treated as failure, the
-    // caller's original stayed suppressed, and v1-era tweaks calling %orig
-    // through the NULL slot crashed (Shadow 3.7.6's %hook SpringBoard was
-    // exactly this).
-    void *cell = NULL;
-    fn_LBHookMessage(objcClass, selector, replacement, (void *)&cell);
-
-    if(!cell) {
-        _lastErrno = LIBHOOKER_ERR_SELECTOR_NOT_FOUND;
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
-    _lastErrno = 0;
-
-    if(old_ptr) {
-        *old_ptr = cell;
     }
 
     return HK_OK;
@@ -363,210 +276,6 @@ HKOriginalPublicationPolicy hk_ellekit_current_function_policy(void) {
 
     _lastErrno = result;
     return result == LIBHOOKER_OK ? HK_OK : HK_ERR;
-}
-
-// Batch apply contract (protocol): void — each operation carries its own
-// final status (and backendErrno) after the drain, and each original is
-// written through hk_original_output_cell so it lands in the caller's cell
-// (when requested) the moment the vendor API writes it — at-apply-time
-// visibility for mid-batch re-entrancy.
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // Fail closed: an unclassifiable provider never receives a hook.
-    if(libhooker_abi == HKEKABIUnknown) {
-        _lastErrno = ENOTSUP;
-
-        for(HKHookOperation *hook in hooks) {
-            hook->status = HK_ERR_NOT_SUPPORTED;
-            hook->backendErrno = ENOTSUP;
-        }
-
-        return;
-    }
-
-    // First-failure detail across the whole batch: message ops report the
-    // LIBHOOKER_ERR enum, the count-based APIs report errno (cleared just
-    // before each call so a short count without an errno write cannot leak a
-    // stale thread-local value). Set once, on the FIRST failure; a later
-    // success never erases an earlier failure's detail.
-    int detail = 0;
-
-    NSMutableData *functionHooks = [NSMutableData new];
-    NSMutableData *memoryHooks = [NSMutableData new];
-    NSMutableArray<HKHookOperation *> *functionOps = [NSMutableArray new];
-    NSMutableArray<HKHookOperation *> *memoryOps = [NSMutableArray new];
-
-    for(HKHookOperation *hook in hooks) {
-        switch(hook->kind) {
-            case HKHookKindMessage: {
-                // LBHookMessage: the out cell is the common success signal on
-                // BOTH ABIs (ElleKit's void return has no status to read; the
-                // libhooker enum return is redundant with the cell) — nothing
-                // written means the selector exists on neither the class nor
-                // the metaclass. The output cell doubles as the caller's %orig
-                // cell when one was requested, so the original is visible at
-                // apply time: a later op in this same batch can re-enter this
-                // hook (ElleKit's patch writer calls vm_region_recurse_64,
-                // which Shadow's Hook_Memory group hooks) and must not hit a
-                // NULL original.
-                void **cell = hk_original_output_cell(&hook->original);
-
-                if(!cell) {
-                    // No original requested: output_cell returns NULL (the
-                    // NULL-oldptr mode is the function-hook path — see
-                    // hookFunction:). LBHookMessage's out slot doubles as
-                    // the success signal here, so stage locally: the probe
-                    // value is discarded (the drain publishes nothing for a
-                    // non-requested op), but a NULL slot would make every
-                    // message hook read as selector-not-found.
-                    void *probe = NULL;
-                    cell = &probe;
-                }
-
-                fn_LBHookMessage(hook->objcClass, hook->selector, hook->replacement, (void *)cell);
-
-                if(*cell) {
-                    hook->status = HK_OK;
-                } else {
-                    hook->status = HK_ERR_NOT_SUPPORTED;
-                    hook->backendErrno = LIBHOOKER_ERR_SELECTOR_NOT_FOUND;
-
-                    if(!detail) {
-                        detail = LIBHOOKER_ERR_SELECTOR_NOT_FOUND;
-                    }
-                }
-
-                break;
-            }
-
-            case HKHookKindFunction: {
-                // The output cell is the out-pointer: the vendor writes the
-                // original into the caller's cell (when requested) the moment
-                // the hook applies, so a mid-batch re-entrant call into this
-                // replacement sees a real original.
-                struct LHFunctionHook lh = {
-                    hook->function, hook->replacement, hk_original_output_cell(&hook->original), NULL
-                };
-
-                [functionHooks appendBytes:&lh length:sizeof(struct LHFunctionHook)];
-                [functionOps addObject:hook];
-                break;
-            }
-
-            case HKHookKindMemory: {
-                struct LHMemoryPatch lh = {
-                    hook->target, [hook->data bytes], hook->size, 0
-                };
-
-                [memoryHooks appendBytes:&lh length:sizeof(struct LHMemoryPatch)];
-                [memoryOps addObject:hook];
-                break;
-            }
-        }
-    }
-
-    if([functionHooks length]) {
-        int count = (int)([functionHooks length] / sizeof(struct LHFunctionHook));
-        errno = 0;
-        int result = fn_LHHookFunctions([functionHooks mutableBytes], count);
-
-        if(libhooker_abi == HKEKABILibhooker) {
-            // Real libhooker: result is the number of hooks applied; errno is
-            // the failure detail. Clamp the provider's claim before using it
-            // as an index bound: an over-count would index past functionOps
-            // and a negative claim would corrupt the success tally.
-            int applied = result < 0 ? 0 : (result > count ? count : result);
-
-            if(applied < count) {
-                NSLog(@"[HKElleKit] warning: batch LHHookFunctions retval less than expected (%d/%d)", result, count);
-            }
-
-            for(int i = 0; i < applied; i++) {
-                functionOps[i]->status = HK_OK;
-            }
-
-            for(int i = applied; i < count; i++) {
-                // Not applied: nothing was written for this op. NOT_SUPPORTED
-                // (releases the guard; the facade restores the caller's cell)
-                // with errno detail when the provider recorded one.
-                functionOps[i]->status = HK_ERR_NOT_SUPPORTED;
-                functionOps[i]->backendErrno = errno;
-
-                if(!detail) {
-                    detail = errno;
-                }
-            }
-        } else {
-            // ElleKit: LIBHOOKER_OK (0) on success; non-zero is the failure
-            // detail itself, not a partial count. A 0 return means every op
-            // succeeded (ElleKit iterates all entries and writes each orig);
-            // a non-zero return is a hard error — the batch may be partially
-            // applied, so the guards must taint rather than release.
-            if(result != LIBHOOKER_OK) {
-                NSLog(@"[HKElleKit] warning: batch LHHookFunctions failed (%d)", result);
-            }
-
-            for(HKHookOperation *op in functionOps) {
-                if(result == LIBHOOKER_OK) {
-                    op->status = HK_OK;
-                } else {
-                    op->status = HK_ERR;
-                    op->backendErrno = result;
-
-                    if(!detail) {
-                        detail = result;
-                    }
-                }
-            }
-        }
-    }
-
-    if([memoryHooks length]) {
-        int count = (int)([memoryHooks length] / sizeof(struct LHMemoryPatch));
-        errno = 0;
-        int result = fn_LHPatchMemory([memoryHooks mutableBytes], count);
-
-        if(libhooker_abi == HKEKABILibhooker) {
-            // Real libhooker: result is the number of patches applied; clamp
-            // the claim before using it as an index bound, as above.
-            int applied = result < 0 ? 0 : (result > count ? count : result);
-
-            if(applied < count) {
-                NSLog(@"[HKElleKit] warning: batch LHPatchMemory retval less than expected (%d/%d)", result, count);
-            }
-
-            for(int i = 0; i < applied; i++) {
-                memoryOps[i]->status = HK_OK;
-            }
-
-            for(int i = applied; i < count; i++) {
-                memoryOps[i]->status = HK_ERR_NOT_SUPPORTED;
-                memoryOps[i]->backendErrno = errno;
-
-                if(!detail) {
-                    detail = errno;
-                }
-            }
-        } else {
-            if(result != LIBHOOKER_OK) {
-                NSLog(@"[HKElleKit] warning: batch LHPatchMemory failed (%d)", result);
-            }
-
-            for(HKHookOperation *op in memoryOps) {
-                if(result == LIBHOOKER_OK) {
-                    op->status = HK_OK;
-                } else {
-                    op->status = HK_ERR;
-                    op->backendErrno = result;
-
-                    if(!detail) {
-                        detail = result;
-                    }
-                }
-            }
-        }
-    }
-
-    _lastErrno = detail;
 }
 
 - (HKImageRef)openImage:(NSString *)path {

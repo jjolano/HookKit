@@ -5,7 +5,6 @@
 
 #import <objc/runtime.h>
 #include <stdlib.h>
-#include <pthread.h>
 
 #import "native/hk_swift.h"
 
@@ -13,67 +12,33 @@
 // engine's name-based lookup (declared in native/hk_swift.h).
 hk_swift_demangle_fn hk_swift_demangle = NULL;
 
-// Side-effect-free discovery for one backend, used by the availability-
-// introspection entry points: the dlopen-based jailbreak providers (ElleKit,
-// Substrate, Substitute, Frida) report through their preflight-only
-// *_discoverable() variants (dlopen_preflight never maps the image and never
-// runs its constructors, gum_init_embedded included). The remaining backends
-// (fishhook, litehook, native, dobby — compile-time/arch checks; swift — a
-// plain system dylib dlsym, never a jailbreak provider) have side-effect-free
-// available() probes, so they are reported through those. The real dlopen
-// happens only on the actual hook path (initLibraries / defaultBackend /
-// auto-cover), which keeps using the full available() probes.
-static BOOL hk_backend_discoverable(hookkit_lib_t type) {
-    switch(type) {
-        case HK_LIB_ELLEKIT:
-            return libhooker_discoverable();
-
-        case HK_LIB_SUBSTRATE:
-            return substrate_discoverable();
-
-        case HK_LIB_SUBSTITUTE:
-            return substitute_discoverable();
-
-        case HK_LIB_FRIDA:
-            return frida_discoverable();
-
-        default: {
-            size_t count = 0;
-            const HKBackendDescriptor *table = hk_backends(&count);
-
-            for(size_t i = 0; i < count; i++) {
-                if(table[i].type == type) {
-                    return table[i].available();
-                }
-            }
-
-            return NO;
-        }
-    }
+// Facade-private deferred state. Only the five function-batch fields inherited
+// from HKFunctionBatchItem cross the backend seam.
+@interface HKHookOperation : HKFunctionBatchItem {
+@public
+    HKHookKind kind;
+    Class objcClass;
+    SEL selector;
+    void *target;
+    NSData *data;
+    size_t size;
+    HKFunctionTechnique technique;
+    uint64_t guardToken;
+    id<HKSubstitutorBackend> routedBackend;
+    BOOL routeAtDrain;
+    NSUInteger routeCursor;
+    BOOL automaticRoute;
 }
+@end
+
+@implementation HKHookOperation
+@end
 
 // Shared prologue check for inline-capable backends that bring no
-// preflightFunction: of their own (the MS-compatible providers: ElleKit,
-// Substrate, Substitute). Two layers, matching Internal/HKInlinePreflight.h:
-// the backend-INDEPENDENT basic checks (PAC strip, alignment, self-hook,
-// readable+executable replacement and target entry) run on EVERY inline
-// dispatch — a misaligned, self-hooked, unmapped or non-executable target
-// must fail before any engine is reached, whatever its relocator (M1) — and
-// only for a backend whose descriptor sets sharedArm64Preflight (the
-// fixed-window relocators: Dobby, litehook) does the full fixed-window
-// validator additionally run, with the LARGEST overwrite window any inline
-// backend uses (litehook's 20 bytes), so a target that passes here is safe
-// for every smaller (16-byte) window too. The strong engines (ElleKit,
-// Substrate, Substitute, Frida) bring their own production relocators, which
-// decide instruction eligibility themselves: they are basic-checked only.
-// Returns YES when the backend may be dispatched, NO to refuse the hook.
-// Descriptor-gated (C2/M7): the check only runs on arm64/arm64e — on ARMv7
-// Substrate/Substitute validate their own prologues — and only for the
-// inline technique of a backend whose descriptor sets sharedArm64Preflight
-// (rebind never touches the prologue; backends without the flag skip).
-// Backends that implement preflightFunction: guarantee their own checks
-// (their hook paths run the same validator), so they are never double-checked
-// here.
+// preflightFunction: of their own. Every other inline adapter gets the common
+// PAC/alignment/self-hook/readable/executable checks before dispatch. Adapters
+// with a fixed overwrite window run their stronger validator in their own
+// preflight/hook method, so they are not double-checked here.
 static BOOL hk_shared_inline_preflight_ok(id<HKSubstitutorBackend> backend, HKFunctionTechnique technique, void *function, void *replacement) {
 #if !defined(__arm64__) && !defined(__arm64e__)
     return YES;
@@ -93,23 +58,6 @@ static BOOL hk_shared_inline_preflight_ok(id<HKSubstitutorBackend> backend, HKFu
         return NO;
     }
 
-    size_t count = 0;
-    const HKBackendDescriptor *table = hk_backends(&count);
-
-    for(size_t i = 0; i < count; i++) {
-        if([backend isKindOfClass:table[i].backendClass]) {
-            // Flagged backends are the fixed-window relocators (Dobby,
-            // litehook): they additionally get the full window scan. The
-            // strong engines are basic-checked only — their own relocators
-            // decide instruction eligibility.
-            return table[i].sharedArm64Preflight
-                ? (hk_inline_preflight(function, replacement, HK_INLINE_PREFLIGHT_LITEHOOK_WINDOW, NULL) == HK_OK)
-                : YES;
-        }
-    }
-
-    // Unknown backend: no shared preflight to enforce (matches the old
-    // default — only known inline writers were ever checked).
     return YES;
 #endif
 }
@@ -192,98 +140,6 @@ static uintptr_t hk_inline_guard_key(void *function) {
 #endif
 }
 
-#pragma mark - Original publication
-
-// Original-publication contract (declared in Internal/HKBackendInternal.h):
-// begin/output_cell/publish/capture/finish drive one operation's
-// HKOriginalPublication through a drain cycle. The backend never touches the
-// struct directly — it writes through the cell hk_original_output_cell
-// returns, and the facade drives the rest. output_cell returns the caller's
-// cell when an original was REQUESTED, NULL otherwise: a no-original hook
-// enters the vendor's NULL-oldptr mode (libhooker's documented smaller-hook
-// path — see vendor/libhooker/libhooker.h), so backends must skip their
-// out-write on a NULL cell and the facade publishes nothing to a caller
-// that didn't ask.
-void hk_original_begin(HKOriginalPublication *publication) {
-    // requested is NOT reset here: it is fixed at operation construction —
-    // the op's original.requested is initialized before the backend call
-    // (enqueue build blocks / the immediate-path initializers) and must
-    // survive begin so hk_original_output_cell routes the backend's write
-    // into the caller's cell for the whole drain cycle.
-    if(!publication->callerCell) {
-        // No caller cell: nothing to save or NULL-out, just clear the state.
-        publication->savedCallerValue = NULL;
-        publication->value = NULL;
-        publication->capture = NO;
-        publication->published = NO;
-        return;
-    }
-
-    // Save the caller's ACTUAL cell value, then NULL it so the caller never
-    // observes a stale original mid-drain. The cell is borrowed (facade
-    // contract: valid until executeHooks returns).
-    publication->savedCallerValue = *publication->callerCell;
-    *publication->callerCell = NULL;
-    publication->value = NULL;
-    publication->capture = NO;
-    publication->published = NO;
-}
-
-void **hk_original_output_cell(HKOriginalPublication *publication) {
-    // Requested + caller cell: the vendor API writes straight into the
-    // caller's cell. Otherwise: NULL — the vendor's NULL-oldptr mode, the
-    // documented path for no-original hooks (libhooker's libhooker.h:
-    // "Setting oldptr to null will allow libhooker to hook smaller
-    // functions"). Caller-visible semantics are unchanged: nothing is
-    // published to a caller that didn't ask, so there is no staging cell to
-    // hand out. Backends must treat a NULL return as "no original
-    // requested" and skip their out-write (vendors whose out-slot doubles
-    // as a success signal stage locally — see the backends).
-    return (publication->requested && publication->callerCell) ? publication->callerCell : NULL;
-}
-
-void hk_original_publish(HKOriginalPublication *publication, void *original) {
-    publication->value = original;
-
-    if(publication->requested && publication->callerCell) {
-        *publication->callerCell = original;
-    }
-
-    // published means an ACTUAL original exists; a NULL write is not one
-    // (finish's publish-original-before-success invariant relies on this).
-    if(original) {
-        publication->published = YES;
-    }
-}
-
-void hk_original_capture(HKOriginalPublication *publication) {
-    // A live original is recorded, but publication to the caller is deferred
-    // (guard/backup path). Satisfies finish's invariant like published does.
-    publication->capture = YES;
-}
-
-hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_status_t status) {
-    if(status == HK_ERR_NOT_SUPPORTED) {
-        // Backend wrote nothing: undo the begin-NULL so the caller's cell
-        // keeps its pre-hook value. Return the status unchanged.
-        if(publication->callerCell) {
-            *publication->callerCell = publication->savedCallerValue;
-        }
-
-        return status;
-    }
-
-    if(status == HK_OK && publication->requested && !publication->published && !publication->capture) {
-        // The backend claimed success but never produced an original:
-        // publish-original-before-success invariant violated.
-        return HK_ERR;
-    }
-
-    // HK_OK with a real original, or a hard error — unchanged (any
-    // already-published original stays: activation may have happened).
-    return status;
-}
-
 // Central message-hook implementation (C1/L1): resolves the current —
 // possibly inherited — IMP for a selector and replaces it via the ObjC
 // runtime directly, with the original PUBLISHED before the replace lands.
@@ -341,7 +197,6 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 - (hookkit_status_t)executeOperation:(HKHookOperation *)hook onBackend:(id<HKSubstitutorBackend>)resultBackend;
 - (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend;
 - (void)drainRoutedHooks:(NSArray<HKHookOperation *> *)hooks;
-- (BOOL)backendHasNativeBatch:(id<HKSubstitutorBackend>)candidate;
 - (HKFunctionTechnique)resolvedTechniqueForBackend:(id<HKSubstitutorBackend>)candidate;
 - (BOOL)routeFunctionOperation:(HKHookOperation *)hook;
 - (BOOL)routeMemoryOperation:(HKHookOperation *)hook;
@@ -357,8 +212,9 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
     NSArray<NSNumber *> *orderedTypes;
     // Priority-ordered list of hookkit_cat_t (NSNumber), from
     // substitutorWithOrderedCategories: (substitutorWithCategory: feeds a
-    // single-element list). Tried in order; the first category that resolves
-    // to an available backend wins. Non-nil-but-empty means no backend.
+    // single-element list). Tried in order; HK_CAT_MESSAGE needs no backend,
+    // while the other categories stop at the first available picker.
+    // Non-nil-but-empty means no backend.
     NSArray<NSNumber *> *orderedCategories;
     // Auto-cover routing mode: same shape as orderedCategories, but the
     // backend is chosen PER-HOOK by preflight instead of once at init. The
@@ -455,21 +311,38 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
             }
         }
     } else if(orderedCategories) {
-        // Category fallback list: try each category's (backend, strategy)
-        // pickers in order; the first category with an available backend wins
-        // (its own picker priority decides which). Availability is checked
+        // Category fallback list: messages resolve in the facade; otherwise
+        // try each category's (backend, strategy) pickers in order and stop at
+        // the first available one (its own picker priority decides which).
+        // Availability is checked
         // directly (not the automatic flag), so opt-in backends like Native
         // and Frida are still reachable when they are the only option in a
         // category. Shared iterator: same NSNumber validation as every other
         // category-driven path.
         types = HK_LIB_NONE;
 
-        backend = hk_walk_categories(orderedCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor) {
-            (void) cursor;
-            resolvedStrategy = picker.strategy;
-            types |= [self typeForBackend:candidate];
-            return YES;
-        });
+        for(NSNumber *num in orderedCategories) {
+            if(![num isKindOfClass:[NSNumber class]]) {
+                NSLog(@"[HookKit] warning: %s in category list is not an NSNumber; skipped", class_getName([num class]));
+                continue;
+            }
+
+            hookkit_cat_t want = (hookkit_cat_t)num.unsignedIntegerValue;
+            if(want & HK_CAT_MESSAGE) {
+                break;
+            }
+
+            backend = hk_walk_categories(@[num], ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor) {
+                (void) cursor;
+                resolvedStrategy = picker.strategy;
+                types |= [self typeForBackend:candidate];
+                return YES;
+            });
+
+            if(backend) {
+                break;
+            }
+        }
     } else if(autoCoverCategories) {
         // Auto-cover mode: no single function backend is authoritative. Pin
         // the first available category backend for image/symbol APIs and
@@ -512,32 +385,8 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 }
 
 - (hookkit_lib_t)typeForBackend:(id<HKSubstitutorBackend>)candidate {
-    size_t count = 0;
-    const HKBackendDescriptor *table = hk_backends(&count);
-
-    for(size_t i = 0; i < count; i++) {
-        if([candidate isKindOfClass:table[i].backendClass]) {
-            return table[i].type;
-        }
-    }
-
-    return HK_LIB_NONE;
-}
-
-// Whether the backend applies a drained batch natively (registry descriptor).
-// Backends without a native batch primitive are run per-op, sequentially, via
-// executeOperation:onBackend:.
-- (BOOL)backendHasNativeBatch:(id<HKSubstitutorBackend>)candidate {
-    size_t count = 0;
-    const HKBackendDescriptor *table = hk_backends(&count);
-
-    for(size_t i = 0; i < count; i++) {
-        if([candidate isKindOfClass:table[i].backendClass]) {
-            return table[i].nativeBatch;
-        }
-    }
-
-    return NO;
+    const HKBackendDescriptor *descriptor = hk_backend_descriptor_for_backend(candidate);
+    return descriptor ? descriptor->type : HK_LIB_NONE;
 }
 
 // The technique a function op resolves to: the active strategy when it names
@@ -553,16 +402,8 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
             return HKFunctionTechniqueInline;
 
         default: {
-            size_t count = 0;
-            const HKBackendDescriptor *table = hk_backends(&count);
-
-            for(size_t i = 0; i < count; i++) {
-                if([candidate isKindOfClass:table[i].backendClass]) {
-                    return table[i].defaultTechnique;
-                }
-            }
-
-            return HKFunctionTechniqueNone;
+            const HKBackendDescriptor *descriptor = hk_backend_descriptor_for_backend(candidate);
+            return descriptor ? descriptor->defaultTechnique : HKFunctionTechniqueNone;
         }
     }
 }
@@ -613,14 +454,14 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 
     for(size_t i = 0; i < count; i++) {
         // Introspection must not ACTIVATE engines: only side-effect-free
-        // discovery is consulted here (see hk_backend_discoverable) — never
+        // discovery is consulted here (the descriptor's discoverable probe) — never
         // the available() probes, which dlopen providers and run their
         // constructors (gum_init_embedded can execute inside the host
         // process). Backends without a discoverable variant are reported
         // unavailable on the safe path; the real dlopen happens only on the
         // actual hook path (initLibraries, defaultBackend, auto-cover),
         // which keeps using the full available() probes.
-        if(hk_backend_discoverable(table[i].type)) {
+        if(table[i].discoverable()) {
             types |= table[i].type;
         }
     }
@@ -629,15 +470,16 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 }
 
 + (hookkit_cat_t)getAvailableCategories {
-    hookkit_cat_t cats = HK_CAT_NONE;
+    // Objective-C runtime message hooking is facade-native and always
+    // available; the registry table below covers adapter-selected categories.
+    hookkit_cat_t cats = HK_CAT_MESSAGE;
     size_t count = 0;
     const HKBackendDescriptor *table = hk_backends(&count);
 
-    // hk_category_priorities is the single source of truth for category
-    // membership: a category is available when any of its pickers maps to an
+    // A backend-selected category is available when any picker maps to an
     // available backend — the same lookup initLibraries performs. Same
     // discovery-vs-activation rule as getAvailableSubstitutorTypes: only
-    // side-effect-free discovery is consulted (see hk_backend_discoverable),
+    // side-effect-free descriptor discovery is consulted,
     // never the available() probes that dlopen and initialize providers.
     for(size_t c = 0; c < hk_category_priority_count; c++) {
         for(size_t o = 0; o < hk_category_priorities[c].count; o++) {
@@ -646,7 +488,7 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
                     continue;
                 }
 
-                if(hk_backend_discoverable(table[i].type)) {
+                if(table[i].discoverable()) {
                     cats |= hk_category_priorities[c].category;
                     break;
                 }
@@ -666,7 +508,7 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
     // points: side-effect-free discovery only — the available() probes dlopen
     // providers and must not run from a "get info" query.
     for(size_t i = 0; i < count; i++) {
-        if((types & table[i].type) && hk_backend_discoverable(table[i].type)) {
+        if((types & table[i].type) && table[i].discoverable()) {
             [result addObject:@{
                 @"id" : table[i].identifier,
                 @"name" : table[i].name,
@@ -817,24 +659,22 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 }
 
 // Descriptor capability gate (H2/M7): whether the backend's registry kinds
-// mask serves `kind`. The descriptor is the single source of truth for the
-// message/function/memory kinds. Unknown backends fail closed.
+// mask serves `kind`. Messages bypass this gate because they are facade-owned;
+// the descriptor is the single source of truth for function/memory support.
+// Unknown backends fail closed.
 static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHookKind kind) {
-    size_t count = 0;
-    const HKBackendDescriptor *table = hk_backends(&count);
+    const HKBackendDescriptor *descriptor = hk_backend_descriptor_for_backend(backend);
 
-    for(size_t i = 0; i < count; i++) {
-        if([backend isKindOfClass:table[i].backendClass]) {
-            switch(kind) {
-                case HKHookKindMessage:
-                    return (table[i].kinds & HK_CAT_MESSAGE) != 0;
+    if(descriptor) {
+        switch(kind) {
+            case HKHookKindMessage:
+                return YES;
 
-                case HKHookKindFunction:
-                    return (table[i].kinds & (HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE)) != 0;
+            case HKHookKindFunction:
+                return (descriptor->kinds & (HK_CAT_FUNCTION_REBIND | HK_CAT_FUNCTION_INLINE)) != 0;
 
-                case HKHookKindMemory:
-                    return (table[i].kinds & HK_CAT_MEMORY) != 0;
-            }
+            case HKHookKindMemory:
+                return (descriptor->kinds & HK_CAT_MEMORY) != 0;
         }
     }
 
@@ -850,7 +690,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         NSUInteger nextCursor = hook->routeCursor;
         id<HKSubstitutorBackend> candidate = [self hk_backendForAutoCoverFunction:hook->function
                                                                       replacement:hook->replacement
-                                                                  requestOriginal:hook->original.requested
+                                                                  requestOriginal:(hook->original.callerCell != NULL)
                                                                 startingAtCursor:hook->routeCursor
                                                                        nextCursor:&nextCursor
                                                                         technique:&technique];
@@ -899,7 +739,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
                 return NO;
 
             case HK_GUARD_DUP_INSTALLED:
-                if(!hook->original.requested) {
+                if(!hook->original.callerCell) {
                     hook->status = HK_OK;
                 } else if(guardOrig) {
                     *hook->original.callerCell = guardOrig;
@@ -961,10 +801,12 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
 // this: hookMemory: copies the patch bytes in `build`, and dataWithBytes:NULL
 // would crash before a guard in here could reject it.
 - (BOOL)enqueueKind:(HKHookKind)kind status:(hookkit_status_t *)outStatus build:(void (^)(HKHookOperation *hook))build {
-    if(!backend) {
+    BOOL facadeMessage = kind == HKHookKindMessage;
+    BOOL automaticMemory = kind == HKHookKindMemory && automaticSelection;
+
+    if(!backend && !facadeMessage) {
         *outStatus = HK_ERR_NOT_SUPPORTED;
-    } else if(!hk_descriptor_kind_supported(backend, kind) &&
-              !(automaticSelection && (kind == HKHookKindMessage || kind == HKHookKindMemory))) {
+    } else if(!facadeMessage && !automaticMemory && !hk_descriptor_kind_supported(backend, kind)) {
         *outStatus = HK_ERR_NOT_SUPPORTED;
     } else if(!batching) {
         return NO;
@@ -1006,7 +848,6 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         hook->selector = selector;
         hook->replacement = replacement;
         hook->original.callerCell = old_ptr;
-        hook->original.requested = (old_ptr != NULL);
     }]) {
         return status;
     }
@@ -1015,7 +856,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     // the original is published into the caller's cell BEFORE the
     // class_replaceMethod swap lands (C1), so the caller observes it from the
     // moment activation happens.
-    HKOriginalPublication publication = { .callerCell = old_ptr, .requested = (old_ptr != NULL) };
+    HKOriginalPublication publication = { .callerCell = old_ptr };
     hk_original_begin(&publication);
     hookkit_status_t result = hk_apply_message_hook(dispatchClass, selector, replacement, &publication);
     result = hk_original_finish(&publication, result);
@@ -1038,7 +879,6 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         hook->function = function;
         hook->replacement = replacement;
         hook->original.callerCell = old_ptr;
-        hook->original.requested = (old_ptr != NULL);
         hook->automaticRoute = YES;
         hook->routeAtDrain = batching && autoCoverCategories.count == 1 &&
             [autoCoverCategories.firstObject isKindOfClass:[NSNumber class]] &&
@@ -1078,7 +918,8 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     id<HKSubstitutorBackend> routeBackend = backend;
     HKFunctionTechnique technique = [self resolvedTechniqueForBackend:routeBackend];
 
-    if(!hk_descriptor_kind_supported(routeBackend, HKHookKindFunction)) {
+    if(!hk_descriptor_kind_supported(routeBackend, HKHookKindFunction) ||
+       ![routeBackend respondsToSelector:@selector(hookFunction:withReplacement:outOldPtr:)]) {
         [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
         return HK_ERR_NOT_SUPPORTED;
     }
@@ -1137,7 +978,6 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         hook->function = function;
         hook->replacement = replacement;
         hook->original.callerCell = old_ptr;
-        hook->original.requested = (old_ptr != NULL);
         hook->guardToken = guardGeneration;   // 0 = not inline-guarded
         hook->technique = technique;   // ACTUAL resolved technique (see above)
     }]) {
@@ -1156,7 +996,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     // converts an OK-with-no-original to HK_ERR only when the caller
     // REQUESTED one (a litehook-inline install with no original is success
     // when nothing was requested).
-    HKOriginalPublication publication = { .callerCell = old_ptr, .requested = (old_ptr != NULL) };
+    HKOriginalPublication publication = { .callerCell = old_ptr };
     hk_original_begin(&publication);
     void **cell = hk_original_output_cell(&publication);
     hookkit_status_t result = [routeBackend hookFunction:function withReplacement:replacement outOldPtr:cell];
@@ -1227,7 +1067,9 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         return status;
     }
 
-    hookkit_status_t result = [backend hookMemory:target withData:data size:size];
+    hookkit_status_t result = [backend respondsToSelector:@selector(hookMemory:withData:size:)]
+        ? [backend hookMemory:target withData:data size:size]
+        : HK_ERR_NOT_SUPPORTED;
     [self noteHookResult:result];
     return result;
 }
@@ -1255,7 +1097,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     // backend writes the original through hk_original_output_cell (the
     // caller's ACTUAL cell when requested), so the caller's cell holds it
     // BEFORE the vtable slot becomes reachable; no copy-after-activation.
-    HKOriginalPublication publication = { .callerCell = old_ptr, .requested = (old_ptr != NULL) };
+    HKOriginalPublication publication = { .callerCell = old_ptr };
     hk_original_begin(&publication);
     void **cell = hk_original_output_cell(&publication);
     hookkit_status_t result = [backend hookSwiftMethodInClass:objcClass withName:name withReplacement:replacement outOldPtr:cell];
@@ -1286,7 +1128,7 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     // backend writes the original through hk_original_output_cell (the
     // caller's ACTUAL cell when requested), so the caller's cell holds it
     // BEFORE the vtable slot becomes reachable; no copy-after-activation.
-    HKOriginalPublication publication = { .callerCell = old_ptr, .requested = (old_ptr != NULL) };
+    HKOriginalPublication publication = { .callerCell = old_ptr };
     hk_original_begin(&publication);
     void **cell = hk_original_output_cell(&publication);
     hookkit_status_t result = [backend hookSwiftVtableSlotInClass:objcClass withIndex:index withReplacement:replacement outOldPtr:cell];
@@ -1297,114 +1139,13 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     return result;
 }
 
-// Magic tagging the facade-owned HKImage wrappers (struct HKImage, declared
-// in Internal/HKBackendInternal.h): distinguishes a LIVE wrapper from a
-// tombstoned (closed) one, and — zeroed at close — makes closeImage:
-// idempotent. Foreign or garbage handles never reach this check: they are
-// rejected by registry membership first (see below).
 static const uint32_t HKImageWrapperMagic = 0x484B494D;   // 'HKIM'
 
-// Live-wrapper registry (M4): every struct HKImage the facade allocates is
-// registered by POINTER IDENTITY before it is returned and stays registered
-// for the process lifetime. All handle validation is membership-in-registry
-// FIRST — the caller-supplied pointer is never dereferenced until it has been
-// proven to be one of ours, so a closed, foreign or garbage handle is
-// rejected without touching (possibly freed) memory. The magic/ownerType
-// fields are a secondary assertion INSIDE the registry validation (safe to
-// read: membership already proved the allocation is ours and alive). A mutex
-// guards the registry: openImage:/findSymbolInImage:/closeImage: may run on
-// different threads.
-static pthread_mutex_t hk_image_registry_lock = PTHREAD_MUTEX_INITIALIZER;
-static CFMutableArrayRef hk_live_images = NULL;
-
-static CFMutableArrayRef hk_image_registry(void) {
-    static dispatch_once_t onceToken = 0;
-
-    dispatch_once(&onceToken, ^{
-        // NULL callbacks: raw pointers, no retain/release.
-        hk_live_images = CFArrayCreateMutable(kCFAllocatorDefault, 0, NULL);
-    });
-
-    return hk_live_images;
-}
-
-static BOOL hk_image_registered(struct HKImage *wrapper) {
-    CFArrayRef registry = hk_image_registry();
-    pthread_mutex_lock(&hk_image_registry_lock);
-    BOOL found = CFArrayContainsValue(registry, CFRangeMake(0, CFArrayGetCount(registry)), wrapper);
-    pthread_mutex_unlock(&hk_image_registry_lock);
-    return found;
-}
-
-static void hk_image_register(struct HKImage *wrapper) {
-    CFMutableArrayRef registry = hk_image_registry();
-    pthread_mutex_lock(&hk_image_registry_lock);
-    CFArrayAppendValue(registry, wrapper);
-    pthread_mutex_unlock(&hk_image_registry_lock);
-}
-
-// Per-wrapper lock table (M4 concurrency): one pthread_mutex_t per live
-// wrapper, serializing each wrapper's validation AND backend raw-handle use.
-// Entries are append-only — created at openImage: before the wrapper becomes
-// visible, never removed — so a pointer fetched here stays valid for the
-// process lifetime (ponytail: leak-not-UAF — one heap mutex per opened image,
-// mirroring the tombstoned wrapper that is itself never freed; freeing an
-// entry would reopen the close-vs-find race under concurrency).
-static pthread_mutex_t hk_image_lock_table_lock = PTHREAD_MUTEX_INITIALIZER;
-static CFMutableDictionaryRef hk_image_locks = NULL;
-
-static CFMutableDictionaryRef hk_image_lock_table(void) {
-    static dispatch_once_t onceToken = 0;
-
-    dispatch_once(&onceToken, ^{
-        // NULL callbacks: raw pointer keys (wrapper addresses) and values
-        // (heap mutexes), no retain/release.
-        hk_image_locks = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, NULL, NULL);
-    });
-
-    return hk_image_locks;
-}
-
-static pthread_mutex_t *hk_image_lock_for(struct HKImage *wrapper) {
-    pthread_mutex_lock(&hk_image_lock_table_lock);
-    pthread_mutex_t *lock = (pthread_mutex_t *)CFDictionaryGetValue(hk_image_lock_table(), wrapper);
-    pthread_mutex_unlock(&hk_image_lock_table_lock);
-    return lock;
-}
-
-// Validate a NON-NULL public image handle and return its per-wrapper mutex,
-// HELD (locked); the caller does its backend raw-handle use and unlocks.
-// Distinguishes the cases (M4):
-//   live facade wrapper     -> non-NULL, locked — the owning backend's raw
-//                              handle is stable for the duration (a
-//                              concurrent closeImage: blocks on the lock)
-//   anything else (foreign, closed/tombstoned, garbage) -> NULL — rejected by
-//                              registry membership without dereferencing, and
-//                              NEVER falling through to the global lookup.
-//                              The magic/ownerType liveness check is re-run
-//                              UNDER the wrapper lock, so a close that landed
-//                              between membership and lock acquisition is
-//                              still caught. (The NULL/global case has no
-//                              wrapper; callers handle it before this.)
-static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t ownerType) {
-    if(!hk_image_registered(wrapper)) {
-        return NULL;   // not one of ours: closed, foreign or garbage
-    }
-
-    pthread_mutex_t *lock = hk_image_lock_for(wrapper);
-
-    pthread_mutex_lock(lock);
-
-    if(wrapper->magic != HKImageWrapperMagic || wrapper->ownerType != ownerType) {
-        pthread_mutex_unlock(lock);
-        return NULL;   // tombstoned (already closed) or cross-backend wrapper
-    }
-
-    return lock;
-}
-
 - (HKImageRef)openImage:(NSString *)path {
-    if(![path isKindOfClass:[NSString class]] || !backend) {
+    if(![path isKindOfClass:[NSString class]] || !backend ||
+       ![backend respondsToSelector:@selector(openImage:)] ||
+       ![backend respondsToSelector:@selector(closeImage:)] ||
+       ![backend respondsToSelector:@selector(findSymbolInImage:symbolName:)]) {
         return NULL;
     }
 
@@ -1414,90 +1155,34 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         return NULL;
     }
 
-    // Facade-owned wrapper: tags the handle with the owning backend so
-    // find/close can validate it (cross-backend use fails cleanly instead of
-    // handing one engine's handle to another).
     struct HKImage *wrapper = calloc(1, sizeof(struct HKImage));
 
     if(!wrapper) {
-        // M4: the raw backend handle must not leak when the wrapper
-        // allocation fails.
-        [backend closeImage:rawHandle];
+        if([backend respondsToSelector:@selector(closeImage:)]) {
+            [backend closeImage:rawHandle];
+        }
         return NULL;
     }
-
-    // Per-wrapper lock, heap-allocated and NEVER freed (ponytail: leak-not-UAF
-    // — a reader that already holds the wrapper pointer must always find a
-    // valid mutex for it; the tombstoned wrapper already lives for the
-    // process lifetime). Entered in the table BEFORE registration, so any
-    // thread that can see the wrapper can acquire its lock.
-    pthread_mutex_t *wrapperLock = malloc(sizeof(pthread_mutex_t));
-
-    if(!wrapperLock) {
-        [backend closeImage:rawHandle];
-        free(wrapper);
-        return NULL;
-    }
-
-    if(pthread_mutex_init(wrapperLock, NULL) != 0) {
-        free(wrapperLock);
-        [backend closeImage:rawHandle];
-        free(wrapper);
-        return NULL;
-    }
-
-    pthread_mutex_lock(&hk_image_lock_table_lock);
-    CFDictionaryAddValue(hk_image_lock_table(), wrapper, wrapperLock);
-    pthread_mutex_unlock(&hk_image_lock_table_lock);
 
     wrapper->magic = HKImageWrapperMagic;
     wrapper->ownerType = [self typeForBackend:backend];
     wrapper->rawHandle = rawHandle;
-    // Live (validatable) from the moment it is handed out: registered before
-    // the pointer becomes visible to the caller.
-    hk_image_register(wrapper);
     return (HKImageRef)wrapper;
 }
 
 - (void)closeImage:(HKImageRef)image {
-    if(!backend || !image) {
+    if(!backend || !image || ![backend respondsToSelector:@selector(closeImage:)]) {
         return;
     }
 
     struct HKImage *wrapper = (struct HKImage *)image;
 
-    // M4: registry membership by pointer identity FIRST — a foreign or
-    // garbage handle is ignored without ever dereferencing it.
-    if(!hk_image_registered(wrapper)) {
+    if(wrapper->magic != HKImageWrapperMagic || wrapper->ownerType != [self typeForBackend:backend]) {
         return;
     }
 
-    // Liveness is re-checked UNDER the wrapper lock: concurrent closes
-    // serialize here, so only the first observes a live wrapper and closes
-    // the raw handle; the second finds the tombstone and no-ops.
-    pthread_mutex_t *lock = hk_image_lock_for(wrapper);
-
-    pthread_mutex_lock(lock);
-
-    if(wrapper->magic != HKImageWrapperMagic || wrapper->ownerType != [self typeForBackend:backend]) {
-        pthread_mutex_unlock(lock);
-        return;   // already closed (tombstoned) or cross-backend: no-op
-    }
-
-    void *rawHandle = wrapper->rawHandle;
-    // Tombstone while STILL LOCKED, before the raw handle is closed: a
-    // concurrent find either locked first (finished its backend use before
-    // the close) or locks after and is rejected by the tombstone — a find can
-    // never resolve a raw handle that is about to be (or has been) closed.
-    wrapper->magic = 0;
-    [backend closeImage:rawHandle];
-    pthread_mutex_unlock(lock);
-    // The wrapper is NEVER freed — it stays registered, so any later use of
-    // the stale pointer (close or find) is rejected by membership/magic
-    // without a double-close UAF.
-    // ponytail: leak-not-UAF — one 24-byte wrapper per opened image for the
-    // process lifetime; freeing after registry removal would reopen the
-    // close-vs-find race under concurrency.
+    [backend closeImage:wrapper->rawHandle];
+    free(wrapper);
 }
 
 - (hookkit_status_t)findSymbolsInImage:(HKImageRef)image symbolNames:(NSArray<NSString *> *)symbolNames outSymbols:(NSArray<NSValue *> **)outSymbols {
@@ -1519,20 +1204,11 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         }
     }
 
-    // M4: the image handle is validated up front — a non-NULL image must be
-    // a live facade wrapper owned by the active backend. A foreign, closed
-    // or garbage handle rejects the WHOLE call with HK_ERR_INVALID_ARGUMENT
-    // before any lookup (a NULL image keeps the global-lookup contract and
-    // is resolved per symbol below — each lookup through findSymbolInImage:
-    // holds the wrapper lock through its own validation + backend use).
     if(backend && image) {
-        pthread_mutex_t *lock = hk_image_acquire((struct HKImage *)image, [self typeForBackend:backend]);
-
-        if(!lock) {
+        struct HKImage *wrapper = (struct HKImage *)image;
+        if(wrapper->magic != HKImageWrapperMagic || wrapper->ownerType != [self typeForBackend:backend]) {
             return HK_ERR_INVALID_ARGUMENT;
         }
-
-        pthread_mutex_unlock(lock);
     }
 
     NSMutableArray *outSyms = [NSMutableArray new];
@@ -1562,32 +1238,20 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         return NULL;
     }
 
-    if(!backend) {
+    if(!backend || ![backend respondsToSelector:@selector(findSymbolInImage:symbolName:)]) {
         return NULL;
     }
 
-    // M4: NULL is the documented global (main-image) lookup and is forwarded
-    // to the backend as NULL (no wrapper, no lock); ANY other handle must be
-    // a live facade wrapper of the active backend — the wrapper lock is held
-    // through validation AND the backend raw-handle call, so a concurrent
-    // closeImage: cannot close the handle mid-use or double-close it. A
-    // handle that fails validation (foreign, closed/tombstoned, garbage) is
-    // rejected WITHOUT a lookup — it must never fall through to the global
-    // path by unwrapping to NULL.
     if(!image) {
         return [backend findSymbolInImage:NULL symbolName:symbolName];
     }
 
     struct HKImage *wrapper = (struct HKImage *)image;
-    pthread_mutex_t *lock = hk_image_acquire(wrapper, [self typeForBackend:backend]);
-
-    if(!lock) {
+    if(wrapper->magic != HKImageWrapperMagic || wrapper->ownerType != [self typeForBackend:backend]) {
         return NULL;
     }
 
-    void *symbol = [backend findSymbolInImage:wrapper->rawHandle symbolName:symbolName];
-    pthread_mutex_unlock(lock);
-    return symbol;
+    return [backend findSymbolInImage:wrapper->rawHandle symbolName:symbolName];
 }
 
 // Single-op sequential execution for backends without a native batch
@@ -1614,11 +1278,15 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
             break;
 
         case HKHookKindFunction:
-            result = [resultBackend hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell];
+            result = [resultBackend respondsToSelector:@selector(hookFunction:withReplacement:outOldPtr:)]
+                ? [resultBackend hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell]
+                : HK_ERR_NOT_SUPPORTED;
             break;
 
         case HKHookKindMemory:
-            result = [resultBackend hookMemory:hook->target withData:[hook->data bytes] size:hook->size];
+            result = [resultBackend respondsToSelector:@selector(hookMemory:withData:size:)]
+                ? [resultBackend hookMemory:hook->target withData:[hook->data bytes] size:hook->size]
+                : HK_ERR_NOT_SUPPORTED;
             break;
     }
 
@@ -1643,13 +1311,13 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
 // auto-cover path and the single-backend fast path share one implementation.
 - (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend {
     if(hooks.count && ((HKHookOperation *)hooks.firstObject)->kind == HKHookKindFunction &&
-       [self backendHasNativeBatch:groupBackend]) {
+       [groupBackend respondsToSelector:@selector(executeFunctionHooks:)]) {
         for(HKHookOperation *hook in hooks) {
             hook->backendErrno = 0;
             hk_original_begin(&hook->original);
         }
 
-        [groupBackend executeHooks:hooks];
+        [groupBackend executeFunctionHooks:(NSArray<HKFunctionBatchItem *> *)hooks];
 
         for(HKHookOperation *hook in hooks) {
             void **cell = hk_original_output_cell(&hook->original);
@@ -1712,13 +1380,6 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         [batchHooks removeAllObjects];
     }
 
-    if(!backend) {
-        // Nothing can be queued without a backend (enqueueKind refuses), so
-        // this is unreachable in practice; fail closed anyway.
-        [self noteHookResult:HK_ERR_NOT_SUPPORTED];
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
     // Rebind-only routes resolve against the image set at drain rather than
     // enqueue. Other automatic routes already carry their first candidate.
     NSMutableArray<HKHookOperation *> *dispatchHooks = [NSMutableArray arrayWithCapacity:hooks.count];
@@ -1732,7 +1393,7 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         [dispatchHooks addObject:hook];
     }
 
-    if(!automaticSelection && !autoCoverCategories) {
+    if((!automaticSelection && !autoCoverCategories) || !backend) {
         [self drainGroup:dispatchHooks onBackend:backend];
     } else {
         [self drainRoutedHooks:dispatchHooks];

@@ -19,33 +19,6 @@
     return _lastErrno;
 }
 
-// Pure libobjc: no patching, no privileged memory, works wherever HookKit runs.
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-
-    Method method = class_getInstanceMethod(objcClass, selector);
-
-    if(!method) {
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
-    IMP inherited = method_getImplementation(method);
-
-    // class_getInstanceMethod walks superclasses, so the method may not belong
-    // to this class. class_replaceMethod atomically adds it here (for an
-    // inherited/absent method) or replaces it (for an owned one) on THIS class
-    // only — never touching the superclass — and reports the implementation
-    // we would otherwise have inherited. Works for metaclasses too, so class
-    // methods hook through the same path.
-    class_replaceMethod(objcClass, selector, (IMP)replacement, method_getTypeEncoding(method));
-
-    if(old_ptr) {
-        *old_ptr = (void *)inherited;
-    }
-
-    return HK_OK;
-}
-
 // The native engine patches executable memory without suspending peer
 // threads, so code patching must only happen at load time, on the main
 // thread, before the target can run elsewhere (same contract as Substitute).
@@ -135,47 +108,6 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
     return HK_OK;
 }
 
-// No cross-hook batching to exploit — each patch is independent — and the
-// descriptor's nativeBatch=NO means the facade drains per-op through
-// executeOperation:onBackend: instead of calling this. The protocol still
-// requires a correct batch path, so each op runs the full publication cycle
-// (begin -> apply -> publish -> finish) exactly like the facade's single-op
-// helper, with status and backendErrno carrying the per-op outcome.
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    for(HKHookOperation *hook in hooks) {
-        hk_original_begin(&hook->original);
-
-        void **cell = hk_original_output_cell(&hook->original);
-        hookkit_status_t result = HK_ERR;
-
-        switch(hook->kind) {
-            case HKHookKindMessage:
-                result = [self hookMessageInClass:hook->objcClass withSelector:hook->selector withReplacement:hook->replacement outOldPtr:cell];
-                break;
-
-            case HKHookKindFunction:
-                result = [self hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell];
-                break;
-
-            case HKHookKindMemory:
-                result = [self hookMemory:hook->target withData:[hook->data bytes] size:hook->size];
-                break;
-        }
-
-        // Record what the backend produced (idempotent when it wrote straight
-        // into the caller's cell; marks published so finish's invariant
-        // passes), then finalize: finish applies the publish-only-real-
-        // original invariant and may change the status.
-        hk_original_publish(&hook->original, cell ? *cell : NULL);
-        result = hk_original_finish(&hook->original, result);
-        hook->status = result;
-
-        if(result != HK_OK) {
-            hook->backendErrno = _lastErrno;
-        }
-    }
-}
-
 - (HKImageRef)openImage:(NSString *)path {
     return (HKImageRef)hk_native_open_image([path fileSystemRepresentation]);
 }
@@ -225,43 +157,6 @@ static hookkit_status_t hk_native_map_engine_failure(int errnoVal) {
 
 - (int)lastErrno {
     return _lastErrno;
-}
-
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // nothing pending: Swift hooks apply at hook time (descriptor
-    // nativeBatch = NO).
-    // Defensive honesty: an op reaching here was never installed, so it must
-    // not report success (the facade's finish restores any begun cell for
-    // NOT_SUPPORTED).
-    for(HKHookOperation *hook in hooks) {
-        hook->status = HK_ERR_NOT_SUPPORTED;
-    }
-}
-
-- (HKImageRef)openImage:(NSString *)path {
-    return NULL;
-}
-
-- (void)closeImage:(HKImageRef)image {
-}
-
-- (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName {
-    return NULL;
 }
 
 // Engine errors fall into two buckets: class-shape problems mean the target

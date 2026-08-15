@@ -25,7 +25,7 @@ include $(THEOS)/makefiles/common.mk
 
 FRAMEWORK_NAME = HookKit
 
-HookKit_FILES = HKSubstitutor.m HKBackendRegistry.m Backends/HKBackendCommon.m Backends/HKElleKitBackend.m Backends/HKMSBackends.m Backends/HKFishhookBackend.m Backends/HKLitehookBackend.m Backends/HKInlineBackends.m Backends/HKNativeBackends.m vendor/fishhook/fishhook.c vendor/litehook/litehook.c Internal/HKSubstituteErrors.c Internal/HKInlinePreflight.m Internal/HKInlineGuard.c
+HookKit_FILES = HKSubstitutor.m HKBackendRegistry.m Backends/HKBackendCommon.m Backends/HKElleKitBackend.m Backends/HKMSBackends.m Backends/HKFishhookBackend.m Backends/HKLitehookBackend.m Backends/HKInlineBackends.m Backends/HKNativeBackends.m vendor/fishhook/fishhook.c vendor/litehook/litehook.c Internal/HKOriginalPublication.m Internal/HKSubstituteErrors.c Internal/HKInlinePreflight.m Internal/HKInlineGuard.c
 # Native backend: arm64/arm64e only, stubbed out by #if on armv7.
 HookKit_FILES += native/hk_native.c native/hk_arm64.c native/hk_symbols.c
 # Swift vtable backend: arm64/arm64e only (entry points report unsupported on
@@ -135,11 +135,11 @@ check-exports:
 check-compat:
 	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT)$(ECHO_END)
 
-# Host-side test aggregate: builds and runs both suites in sequence, stopping
+# Host-side test aggregate: builds and runs each suite in sequence, stopping
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -173,3 +173,9 @@ test-substitute-classifier:
 .PHONY: test-inline-guard
 test-inline-guard:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -o $(THEOS_OBJ_DIR)/test_inline_guard tests/test_inline_guard.c Internal/HKInlineGuard.c && $(THEOS_OBJ_DIR)/test_inline_guard$(ECHO_END)
+
+# Host-side original-publication contract test. Uses the real implementation
+# with the same minimal Foundation stubs as the substitute classifier.
+.PHONY: test-original-publication
+test-original-publication:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -x objective-c -IHeaders -I$(CURDIR)/tests/fake_headers -I$(CURDIR)/Internal -o $(THEOS_OBJ_DIR)/test_original_publication tests/test_original_publication.m Internal/HKOriginalPublication.m && $(THEOS_OBJ_DIR)/test_original_publication$(ECHO_END)
