@@ -129,9 +129,10 @@ static BOOL hk_shared_inline_preflight_ok(id<HKSubstitutorBackend> backend, HKFu
 // strategy before asking `visit` whether it wins. Stops at the first YES and
 // returns that backend; nil when every picker declined or no category matched
 // (an empty list therefore resolves no backend).
-static id<HKSubstitutorBackend> hk_walk_categories(NSArray<NSNumber *> *categories, BOOL (^visit)(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker)) {
+static id<HKSubstitutorBackend> hk_walk_categories(NSArray<NSNumber *> *categories, BOOL (^visit)(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor)) {
     size_t count = 0;
     const HKBackendDescriptor *table = hk_backends(&count);
+    NSUInteger cursor = 0;
 
     for(NSNumber *num in categories) {
         if(![num isKindOfClass:[NSNumber class]]) {
@@ -150,6 +151,7 @@ static id<HKSubstitutorBackend> hk_walk_categories(NSArray<NSNumber *> *categori
             if(hk_category_priorities[c].category & want) {
                 for(size_t o = 0; o < hk_category_priorities[c].count; o++) {
                     HKCategoryPicker picker = hk_category_priorities[c].order[o];
+                    NSUInteger pickerCursor = cursor++;
 
                     for(size_t i = 0; i < count; i++) {
                         if(table[i].type != picker.type || !table[i].available()) {
@@ -162,7 +164,7 @@ static id<HKSubstitutorBackend> hk_walk_categories(NSArray<NSNumber *> *categori
                             [candidate setStrategy:picker.strategy];
                         }
 
-                        if(visit(candidate, picker)) {
+                        if(visit(candidate, picker, pickerCursor)) {
                             return candidate;
                         }
                     }
@@ -338,8 +340,11 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 - (BOOL)enqueueKind:(HKHookKind)kind status:(hookkit_status_t *)outStatus build:(void (^)(HKHookOperation *hook))build;
 - (hookkit_status_t)executeOperation:(HKHookOperation *)hook onBackend:(id<HKSubstitutorBackend>)resultBackend;
 - (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend;
+- (void)drainRoutedHooks:(NSArray<HKHookOperation *> *)hooks;
 - (BOOL)backendHasNativeBatch:(id<HKSubstitutorBackend>)candidate;
 - (HKFunctionTechnique)resolvedTechniqueForBackend:(id<HKSubstitutorBackend>)candidate;
+- (BOOL)routeFunctionOperation:(HKHookOperation *)hook;
+- (BOOL)routeMemoryOperation:(HKHookOperation *)hook;
 @end
 
 @implementation HKSubstitutor {
@@ -361,6 +366,10 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
     // backend whose side-effect-free preflight accepts the target is invoked
     // exactly once. Set via substitutorWithAutoCoverCategories:.
     NSArray<NSNumber *> *autoCoverCategories;
+    // The implicit/default substitutor keeps its legacy pinned backend for
+    // image APIs and activeType, but routes function and memory hooks by
+    // operation. Explicit type/category requests never set this flag.
+    BOOL automaticSelection;
     // Technique the active backend applies: the winning picker's strategy, or
     // HKStrategyDefault when resolution didn't name one. Zero-init default.
     HKStrategy resolvedStrategy;
@@ -455,23 +464,21 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
         // category-driven path.
         types = HK_LIB_NONE;
 
-        backend = hk_walk_categories(orderedCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker) {
+        backend = hk_walk_categories(orderedCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor) {
+            (void) cursor;
             resolvedStrategy = picker.strategy;
             types |= [self typeForBackend:candidate];
             return YES;
         });
     } else if(autoCoverCategories) {
-        // Auto-cover mode: no single backend is authoritative. Pin the first
-        // available category backend as the fallback used by the drained
-        // (batched) path and the image APIs; non-batched function hooks route
-        // per-hook via preflight instead (see hk_backendForAutoCoverFunction:).
-        // The pin records its picker's strategy so batched function ops
-        // resolve the ACTUAL technique (e.g. litehook inline), not the
-        // vendor default.
+        // Auto-cover mode: no single function backend is authoritative. Pin
+        // the first available category backend for image/symbol APIs and
+        // activeType; function hooks route per operation.
         types = HK_LIB_NONE;
         resolvedStrategy = HKStrategyDefault;
 
-        backend = hk_walk_categories(autoCoverCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker) {
+        backend = hk_walk_categories(autoCoverCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor) {
+            (void) cursor;
             resolvedStrategy = picker.strategy;
             types |= [self typeForBackend:candidate];
             return YES;
@@ -479,6 +486,8 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
     } else if(types == HK_LIB_NONE) {
         backend = [[self class] defaultBackend];
         resolvedStrategy = HKStrategyDefault;
+        automaticSelection = YES;
+        autoCoverCategories = @[@(HK_CAT_FUNCTION_INLINE), @(HK_CAT_FUNCTION_REBIND)];
     } else {
         size_t count = 0;
         const HKBackendDescriptor *table = hk_backends(&count);
@@ -742,15 +751,20 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 // dispatch check in hookFunction: still enforces the policy before any guard
 // reserve, so the router is a preference, not the only gate).
 //
-// Deliberately preflight-driven only: it never inspects a hook RESULT to
-// decide routing (a failed invocation may have mutated the target). A backend
-// without preflightFunction: is presumed to accept only when it is not an
+// The caller advances the returned cursor only after NOT_SUPPORTED, whose
+// public contract guarantees nothing was written. Every other hook result is
+// terminal. A backend without preflightFunction: is presumed to accept only
+// when it is not an
 // inline-capable prologue writer — inline-capable backends without a vendor
 // preflight (the MS providers) are gated by the shared conservative prologue
 // check (hk_shared_inline_preflight_ok), so no inline-capable dispatch ever
 // proceeds unguarded.
-- (id<HKSubstitutorBackend>)hk_backendForAutoCoverFunction:(void *)function replacement:(void *)replacement requestOriginal:(BOOL)requestOriginal technique:(HKFunctionTechnique *)outTechnique {
-    return hk_walk_categories(autoCoverCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker) {
+- (id<HKSubstitutorBackend>)hk_backendForAutoCoverFunction:(void *)function replacement:(void *)replacement requestOriginal:(BOOL)requestOriginal startingAtCursor:(NSUInteger)startCursor nextCursor:(NSUInteger *)outNextCursor technique:(HKFunctionTechnique *)outTechnique {
+    return hk_walk_categories(autoCoverCategories, ^BOOL(id<HKSubstitutorBackend> candidate, HKCategoryPicker picker, NSUInteger cursor) {
+        if(cursor < startCursor) {
+            return NO;
+        }
+
         if(requestOriginal) {
             // H8: resolved policy (Runtime entries are resolved from the
             // provider ABI here, exactly as the dispatch check does) — a
@@ -780,6 +794,9 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
             if(outTechnique) {
                 *outTechnique = picker.technique;
             }
+            if(outNextCursor) {
+                *outNextCursor = cursor + 1;
+            }
 
             return YES;
         }
@@ -790,6 +807,9 @@ static hookkit_status_t hk_apply_message_hook(Class objcClass, SEL selector, voi
 
         if(outTechnique) {
             *outTechnique = picker.technique;
+        }
+        if(outNextCursor) {
+            *outNextCursor = cursor + 1;
         }
 
         return YES;
@@ -821,6 +841,107 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     return NO;
 }
 
+// Selects and reserves the next safe function route. Returning YES means the
+// caller should dispatch the operation. Returning NO means routing settled it
+// (idempotent success, hard guard error, or exhausted capability routes).
+- (BOOL)routeFunctionOperation:(HKHookOperation *)hook {
+    for(;;) {
+        HKFunctionTechnique technique = HKFunctionTechniqueNone;
+        NSUInteger nextCursor = hook->routeCursor;
+        id<HKSubstitutorBackend> candidate = [self hk_backendForAutoCoverFunction:hook->function
+                                                                      replacement:hook->replacement
+                                                                  requestOriginal:hook->original.requested
+                                                                startingAtCursor:hook->routeCursor
+                                                                       nextCursor:&nextCursor
+                                                                        technique:&technique];
+        if(!candidate) {
+            hook->routedBackend = nil;
+            hook->backendErrno = 0;
+            hook->status = HK_ERR_NOT_SUPPORTED;
+            return NO;
+        }
+
+        hook->routedBackend = candidate;
+        hook->routeCursor = nextCursor;
+        hook->technique = technique;
+        hook->backendErrno = 0;
+
+        if(!hk_descriptor_kind_supported(candidate, HKHookKindFunction) ||
+           !hk_shared_inline_preflight_ok(candidate, technique, hook->function, hook->replacement)) {
+            continue;
+        }
+
+        if(technique != HKFunctionTechniqueInline) {
+            hook->guardToken = 0;
+            return YES;
+        }
+
+#if __has_feature(ptrauth_calls)
+        hook->function = ptrauth_strip(hook->function, ptrauth_key_asia);
+#endif
+        void *guardOrig = NULL;
+        uint64_t generation = 0;
+        hk_guard_result_t guard = hk_inline_guard_reserve(hk_inline_guard_key(hook->function),
+                                                          hook->replacement,
+                                                          [self typeForBackend:candidate],
+                                                          &generation,
+                                                          &guardOrig);
+        switch(guard) {
+            case HK_GUARD_BLOCKED:
+            case HK_GUARD_FULL:
+                // This inline writer cannot own the prologue. Continue to a
+                // later route (normally an import-slot rebind).
+                continue;
+
+            case HK_GUARD_DUP_PENDING:
+            case HK_GUARD_DUP_TAINTED:
+                hook->status = HK_ERR;
+                return NO;
+
+            case HK_GUARD_DUP_INSTALLED:
+                if(!hook->original.requested) {
+                    hook->status = HK_OK;
+                } else if(guardOrig) {
+                    *hook->original.callerCell = guardOrig;
+                    hook->original.value = guardOrig;
+                    hook->status = HK_OK;
+                } else {
+                    hook->status = HK_ERR;
+                }
+                return NO;
+
+            case HK_GUARD_RESERVED:
+                hook->guardToken = generation;
+                return YES;
+        }
+    }
+}
+
+// Default memory routing follows the descriptor priority and retries only a
+// backend that truthfully reports NOT_SUPPORTED (the public nothing-written
+// contract). Explicit backend instances never call this helper.
+- (BOOL)routeMemoryOperation:(HKHookOperation *)hook {
+    size_t count = 0;
+    const HKBackendDescriptor *table = hk_backends(&count);
+
+    for(NSUInteger i = hook->routeCursor; i < count; i++) {
+        if(!(table[i].kinds & HK_CAT_MEMORY) || !table[i].available()) {
+            continue;
+        }
+
+        hook->routedBackend = [table[i].backendClass new];
+        hook->routeCursor = i + 1;
+        hook->backendErrno = 0;
+        hook->technique = HKFunctionTechniqueNone;
+        return YES;
+    }
+
+    hook->routedBackend = nil;
+    hook->backendErrno = 0;
+    hook->status = HK_ERR_NOT_SUPPORTED;
+    return NO;
+}
+
 // Shared tail of the three batching-capable hook entry points: backend
 // presence, the batching decision, the kind check and the enqueue. Returns YES
 // when the call is fully handled (result in *outStatus), NO when the caller
@@ -842,7 +963,8 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
 - (BOOL)enqueueKind:(HKHookKind)kind status:(hookkit_status_t *)outStatus build:(void (^)(HKHookOperation *hook))build {
     if(!backend) {
         *outStatus = HK_ERR_NOT_SUPPORTED;
-    } else if(!hk_descriptor_kind_supported(backend, kind)) {
+    } else if(!hk_descriptor_kind_supported(backend, kind) &&
+              !(automaticSelection && (kind == HKHookKindMessage || kind == HKHookKindMemory))) {
         *outStatus = HK_ERR_NOT_SUPPORTED;
     } else if(!batching) {
         return NO;
@@ -898,7 +1020,9 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     hookkit_status_t result = hk_apply_message_hook(dispatchClass, selector, replacement, &publication);
     result = hk_original_finish(&publication, result);
 
-    [self noteHookResult:result];
+    // Message hooks are implemented by the Objective-C runtime path above;
+    // there is no backend errno/type to attribute.
+    [self noteHookResult:result fromBackend:nil];
     return result;
 }
 
@@ -908,161 +1032,101 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         return HK_ERR_INVALID_ARGUMENT;
     }
 
-    // Auto-cover routing: pick the first backend whose preflight accepts this
-    // target (see hk_backendForAutoCoverFunction:), then invoke it once. When
-    // routing is not enabled, `backend` is the pinned resolution. The
-    // operation's ACTUAL technique is resolved here — the winning picker's
-    // technique in auto-cover mode, the strategy/default-technique resolution
-    // otherwise — and recorded on the op BEFORE the guard reserve, so the
-    // guard, the preflight and the drain all see the same technique the
-    // backend will apply.
-    id<HKSubstitutorBackend> routeBackend = backend;
-    HKFunctionTechnique technique = HKFunctionTechniqueNone;
-
     if(autoCoverCategories) {
-        // H8: original-requesting hooks route policy-aware — the router skips
-        // candidates whose resolved policy cannot publish an original before
-        // activation, so a backend that could only refuse is never picked.
-        // Runs whether or not batching: the batched path records the routed
-        // backend on the op (build block below) so executeHooks can group and
-        // native-batch each backend's ops instead of one immediate single-op
-        // install (a full image walk) per hook.
-        routeBackend = [self hk_backendForAutoCoverFunction:function replacement:replacement requestOriginal:(old_ptr != NULL) technique:&technique];
+        HKHookOperation *hook = [HKHookOperation new];
+        hook->kind = HKHookKindFunction;
+        hook->function = function;
+        hook->replacement = replacement;
+        hook->original.callerCell = old_ptr;
+        hook->original.requested = (old_ptr != NULL);
+        hook->automaticRoute = YES;
+        hook->routeAtDrain = batching && autoCoverCategories.count == 1 &&
+            [autoCoverCategories.firstObject isKindOfClass:[NSNumber class]] &&
+            autoCoverCategories.firstObject.unsignedIntegerValue == HK_CAT_FUNCTION_REBIND;
 
-        if(!routeBackend) {
-            // Every picker declined the target: no backend can hook it safely.
-            // No backend-specific detail to report — clear any stale state.
-            [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:nil];
-            return HK_ERR_NOT_SUPPORTED;
+        if(!hook->routeAtDrain && ![self routeFunctionOperation:hook]) {
+            [self noteHookResult:hook->status fromBackend:hook->routedBackend];
+            return hook->status;
         }
-    } else {
-        technique = [self resolvedTechniqueForBackend:routeBackend];
+
+        if(batching) {
+            @synchronized(self) {
+                [batchHooks addObject:hook];
+            }
+            [self noteHookResult:HK_OK];
+            return HK_OK;
+        }
+
+        for(;;) {
+            id<HKSubstitutorBackend> routeBackend = hook->routedBackend;
+            hookkit_status_t result = [self executeOperation:hook onBackend:routeBackend];
+
+            if(hook->guardToken) {
+                hk_inline_guard_update(hk_inline_guard_key(hook->function), hook->guardToken,
+                                       result == HK_OK ? 0 : (result == HK_ERR_NOT_SUPPORTED ? 2 : 1),
+                                       hook->original.value);
+                hook->guardToken = 0;
+            }
+
+            if(result != HK_ERR_NOT_SUPPORTED || ![self routeFunctionOperation:hook]) {
+                [self noteHookResult:hook->status fromBackend:hook->routedBackend ?: routeBackend];
+                return hook->status;
+            }
+        }
     }
 
-    // Capability gate (H2/M7): the routed backend's descriptor kinds mask is
-    // the source of truth for what it serves. A function hook on a backend
-    // whose mask lacks the function kinds is refused BEFORE any guard
-    // reservation or backend call — both here (immediate path) and in
-    // enqueueKind (queued path) — so no PENDING guard entry is ever left
-    // behind by a capability refusal.
+    id<HKSubstitutorBackend> routeBackend = backend;
+    HKFunctionTechnique technique = [self resolvedTechniqueForBackend:routeBackend];
+
     if(!hk_descriptor_kind_supported(routeBackend, HKHookKindFunction)) {
         [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    // Descriptor-driven original-publication policy (M7): a caller that
-    // REQUESTED an original is refused BEFORE any dispatch when the resolved
-    // technique's policy cannot publish one before activation. Backends whose
-    // policy is BeforeActivation/Runtime write the original into the caller's
-    // cell before the patch lands; AfterActivation/Unavailable backends get a
-    // side-effect-free HK_ERR_NOT_SUPPORTED so the caller can retry without
-    // requesting an original.
     if(old_ptr) {
         HKOriginalPublicationPolicy policy = hk_resolved_publication_policy([self typeForBackend:routeBackend], technique);
-
         if(policy == HKOriginalPublicationAfterActivation || policy == HKOriginalPublicationUnavailable) {
             [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
             return HK_ERR_NOT_SUPPORTED;
         }
     }
 
-    // Shared prologue check: an inline-capable backend without a
-    // preflightFunction: of its own (ElleKit/Substrate/Substitute) is only
-    // dispatched when the shared validator accepts the target — the generic
-    // checks on every inline dispatch, plus the fixed-window scan for the
-    // flagged relocators (Dobby, litehook), the same checks those backends
-    // run themselves. The check is descriptor-gated (see
-    // hk_shared_inline_preflight_ok: arch + technique + sharedArm64Preflight),
-    // so rebind paths skip it and the strong engines are basic-checked only.
-    // This covers every inline-capable dispatch path — auto-cover (already
-    // declined in the router, re-checked here), explicit inline, and the
-    // batched enqueue — and refuses BEFORE any guard reservation or write,
-    // so a rejected target never reaches a backend unguarded.
     if(!hk_shared_inline_preflight_ok(routeBackend, technique, function, replacement)) {
         [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    // Process-wide inline-ownership guard: prevents HookKit-vs-HookKit
-    // contention — two substitutors (or one hooking twice) installing
-    // DIFFERENT inline hooks on the same address through DIFFERENT inline
-    // backends would double-patch one prologue. Only the inline technique is
-    // guarded (descriptor-resolved): rebind paths (fishhook/litehook-rebind)
-    // are GOT-scoped and memory patches are byte blobs — neither overwrites
-    // the prologue, so both stay unguarded (ponytail: rebind-vs-inline on one
-    // address is a same-slot double-write only if the prologue is the GOT
-    // slot, which never happens for function pointers).
-    uint64_t guardGeneration = 0;   // 0 = not inline-guarded
-
+    uint64_t guardGeneration = 0;
     if(technique == HKFunctionTechniqueInline) {
-        // Normalize the key exactly as the backend will write: strip PAC on
-        // arm64e, mask the thumb bit on 32-bit ARM. The op stores the
-        // stripped pointer, so executeHooks can re-derive the same key for
-        // the settle (hk_inline_guard_key) without the raw pointer the
-        // backend consumed.
 #if __has_feature(ptrauth_calls)
         function = ptrauth_strip(function, ptrauth_key_asia);
 #endif
-        uintptr_t guardAddr = hk_inline_guard_key(function);
-
         void *guardOrig = NULL;
-        hk_guard_result_t guard = hk_inline_guard_reserve(guardAddr, replacement, [self typeForBackend:routeBackend], &guardGeneration, &guardOrig);
-
+        hk_guard_result_t guard = hk_inline_guard_reserve(hk_inline_guard_key(function), replacement,
+                                                          [self typeForBackend:routeBackend],
+                                                          &guardGeneration, &guardOrig);
         switch(guard) {
             case HK_GUARD_BLOCKED:
-                // Already inline-hooked by another HookKit backend with a
-                // DIFFERENT replacement — invoking this backend would double-
-                // patch the prologue. Nothing was written.
-                [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
-                return HK_ERR_NOT_SUPPORTED;
-
             case HK_GUARD_FULL:
-                // The ownership table is full and no entry matched: nothing
-                // was reserved, so proceeding would install an UNGUARDED hook
-                // — the one outcome worse than declining it. Refuse; nothing
-                // was written.
                 [self noteHookResult:HK_ERR_NOT_SUPPORTED fromBackend:routeBackend];
                 return HK_ERR_NOT_SUPPORTED;
-
             case HK_GUARD_DUP_PENDING:
-                // Same address + same replacement already reserved but not
-                // installed (its hook is queued or in flight): nothing was
-                // written and no original exists yet — refuse. The old
-                // waiter-based deferral is gone: the caller can retry after
-                // the owning drain settles the entry.
-                [self noteHookResult:HK_ERR fromBackend:nil];
-                return HK_ERR;
-
             case HK_GUARD_DUP_TAINTED:
-                // Same address + same replacement, but a previous hook failed
-                // mid-flight: the original is unknowable — hard error.
                 [self noteHookResult:HK_ERR fromBackend:nil];
                 return HK_ERR;
-
             case HK_GUARD_DUP_INSTALLED:
-                // Idempotent same-replacement re-hook: the hook is already
-                // installed, so the saved original is the answer — but only
-                // when the caller asked for one AND one exists.
                 if(!old_ptr) {
                     [self noteHookResult:HK_OK fromBackend:routeBackend];
                     return HK_OK;
                 }
-
                 if(guardOrig) {
                     *old_ptr = guardOrig;
                     [self noteHookResult:HK_OK fromBackend:routeBackend];
                     return HK_OK;
                 }
-
-                // The caller requested an original the installed entry cannot
-                // provide: hard error, nothing more to publish.
                 [self noteHookResult:HK_ERR fromBackend:nil];
                 return HK_ERR;
-
             case HK_GUARD_RESERVED:
-                // Entry reserved (PENDING); the hook proceeds. The entry is
-                // settled below (immediate path) or in executeHooks (batched
-                // path) with the generation token.
                 break;
         }
     }
@@ -1076,10 +1140,6 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         hook->original.requested = (old_ptr != NULL);
         hook->guardToken = guardGeneration;   // 0 = not inline-guarded
         hook->technique = technique;   // ACTUAL resolved technique (see above)
-        // Auto-cover only: record the per-hook routed backend so executeHooks
-        // drains grouped-by-backend. nil for pinned substitutors keeps their
-        // single-backend fast path.
-        hook->routedBackend = autoCoverCategories ? routeBackend : nil;
     }]) {
         return status;
     }
@@ -1122,6 +1182,38 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
     if(!target || !data || size == 0) {
         [self noteHookResult:HK_ERR_INVALID_ARGUMENT];
         return HK_ERR_INVALID_ARGUMENT;
+    }
+
+    if(automaticSelection) {
+        HKHookOperation *hook = [HKHookOperation new];
+        hook->kind = HKHookKindMemory;
+        hook->target = target;
+        hook->data = [NSData dataWithBytes:data length:size];
+        hook->size = size;
+        hook->automaticRoute = YES;
+
+        if(![self routeMemoryOperation:hook]) {
+            [self noteHookResult:hook->status fromBackend:nil];
+            return hook->status;
+        }
+
+        if(batching) {
+            @synchronized(self) {
+                [batchHooks addObject:hook];
+            }
+            [self noteHookResult:HK_OK];
+            return HK_OK;
+        }
+
+        for(;;) {
+            id<HKSubstitutorBackend> routeBackend = hook->routedBackend;
+            hookkit_status_t result = [self executeOperation:hook onBackend:routeBackend];
+
+            if(result != HK_ERR_NOT_SUPPORTED || ![self routeMemoryOperation:hook]) {
+                [self noteHookResult:hook->status fromBackend:hook->routedBackend ?: routeBackend];
+                return hook->status;
+            }
+        }
     }
 
     hookkit_status_t status;
@@ -1506,6 +1598,7 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
 // publish-only-real-original invariant). The op's status and backendErrno
 // carry the final outcome.
 - (hookkit_status_t)executeOperation:(HKHookOperation *)hook onBackend:(id<HKSubstitutorBackend>)resultBackend {
+    hook->backendErrno = 0;
     hk_original_begin(&hook->original);
 
     void **cell = hk_original_output_cell(&hook->original);
@@ -1535,7 +1628,7 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
     result = hk_original_finish(&hook->original, result);
     hook->status = result;
 
-    if(result != HK_OK) {
+    if(result != HK_OK && hook->kind != HKHookKindMessage) {
         hook->backendErrno = [resultBackend lastErrno];
     }
 
@@ -1549,8 +1642,10 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
 // through the single-op helper. Extracted from executeHooks so the grouped
 // auto-cover path and the single-backend fast path share one implementation.
 - (void)drainGroup:(NSArray<HKHookOperation *> *)hooks onBackend:(id<HKSubstitutorBackend>)groupBackend {
-    if([self backendHasNativeBatch:groupBackend]) {
+    if(hooks.count && ((HKHookOperation *)hooks.firstObject)->kind == HKHookKindFunction &&
+       [self backendHasNativeBatch:groupBackend]) {
         for(HKHookOperation *hook in hooks) {
+            hook->backendErrno = 0;
             hk_original_begin(&hook->original);
         }
 
@@ -1565,6 +1660,42 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         for(HKHookOperation *hook in hooks) {
             [self executeOperation:hook onBackend:groupBackend];
         }
+    }
+}
+
+// Automatic batches may contain several backends and techniques. Coalesce
+// only identical (backend class, hook kind, technique) routes: litehook
+// inline and litehook rebind are the same class but different engines.
+- (void)drainRoutedHooks:(NSArray<HKHookOperation *> *)hooks {
+    NSMutableArray<id<HKSubstitutorBackend>> *reps = [NSMutableArray new];
+    NSMutableArray<HKHookOperation *> *heads = [NSMutableArray new];
+    NSMutableArray<NSMutableArray<HKHookOperation *> *> *groups = [NSMutableArray new];
+
+    for(HKHookOperation *hook in hooks) {
+        id<HKSubstitutorBackend> groupBackend = hook->routedBackend ?: backend;
+        NSUInteger idx = NSNotFound;
+
+        for(NSUInteger i = 0; i < reps.count; i++) {
+            HKHookOperation *head = heads[i];
+            if([reps[i] class] == [groupBackend class] &&
+               head->kind == hook->kind && head->technique == hook->technique) {
+                idx = i;
+                break;
+            }
+        }
+
+        if(idx == NSNotFound) {
+            [reps addObject:groupBackend];
+            [heads addObject:hook];
+            [groups addObject:[NSMutableArray new]];
+            idx = reps.count - 1;
+        }
+
+        [groups[idx] addObject:hook];
+    }
+
+    for(NSUInteger i = 0; i < reps.count; i++) {
+        [self drainGroup:groups[i] onBackend:reps[i]];
     }
 }
 
@@ -1588,55 +1719,62 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
         return HK_ERR_NOT_SUPPORTED;
     }
 
-    // Dispatch each op to the backend it will actually install on, one native
-    // batch per backend where supported.
-    BOOL anyRouted = NO;
+    // Rebind-only routes resolve against the image set at drain rather than
+    // enqueue. Other automatic routes already carry their first candidate.
+    NSMutableArray<HKHookOperation *> *dispatchHooks = [NSMutableArray arrayWithCapacity:hooks.count];
     for(HKHookOperation *hook in hooks) {
-        if(hook->routedBackend) {
-            anyRouted = YES;
-            break;
+        if(hook->routeAtDrain) {
+            hook->routeAtDrain = NO;
+            if(![self routeFunctionOperation:hook]) {
+                continue;
+            }
         }
+        [dispatchHooks addObject:hook];
     }
 
-    if(!anyRouted) {
-        // Fast path — every op shares the pinned backend (all non-auto-cover
-        // substitutors): drain the whole snapshot in one group, exactly as the
-        // single-backend path always did.
-        [self drainGroup:hooks onBackend:backend];
+    if(!automaticSelection && !autoCoverCategories) {
+        [self drainGroup:dispatchHooks onBackend:backend];
     } else {
-        // Auto-cover: each op carries the backend the per-hook router picked.
-        // Group by backend CLASS — hk_walk_categories news a FRESH instance per
-        // hook, so identity comparison would never coalesce; the backends are
-        // per-hook stateless (they drive the global fishhook list / libhooker),
-        // so one representative instance of a class drives its whole group's
-        // native batch. Order preserved within each group; original-requesting
-        // identity hooks that fell back to rebind coalesce into ONE image walk.
-        NSMutableArray<id<HKSubstitutorBackend>> *reps = [NSMutableArray new];
-        NSMutableArray<NSMutableArray<HKHookOperation *> *> *groups = [NSMutableArray new];
+        [self drainRoutedHooks:dispatchHooks];
+    }
 
-        for(HKHookOperation *hook in hooks) {
-            id<HKSubstitutorBackend> groupBackend = hook->routedBackend ?: backend;
-            NSUInteger idx = NSNotFound;
+    // Retry automatic operations in grouped waves. Only NOT_SUPPORTED enters
+    // another wave; OK, PARTIAL and ERR are terminal because they may have
+    // changed the target.
+    NSArray<HKHookOperation *> *wave = dispatchHooks;
+    for(;;) {
+        NSMutableArray<HKHookOperation *> *retry = [NSMutableArray new];
 
-            for(NSUInteger j = 0; j < reps.count; j++) {
-                if([reps[j] class] == [groupBackend class]) {
-                    idx = j;
-                    break;
-                }
+        for(HKHookOperation *hook in wave) {
+            if(!hook->automaticRoute) {
+                continue;
             }
 
-            if(idx == NSNotFound) {
-                [reps addObject:groupBackend];
-                [groups addObject:[NSMutableArray new]];
-                idx = reps.count - 1;
+            if(hook->guardToken && hook->kind == HKHookKindFunction) {
+                hk_inline_guard_update(hk_inline_guard_key(hook->function), hook->guardToken,
+                                       hook->status == HK_OK ? 0 : (hook->status == HK_ERR_NOT_SUPPORTED ? 2 : 1),
+                                       hook->original.value);
+                hook->guardToken = 0;
             }
 
-            [groups[idx] addObject:hook];
+            if(hook->status != HK_ERR_NOT_SUPPORTED) {
+                continue;
+            }
+
+            BOOL shouldDispatch = hook->kind == HKHookKindFunction
+                ? [self routeFunctionOperation:hook]
+                : [self routeMemoryOperation:hook];
+            if(shouldDispatch) {
+                [retry addObject:hook];
+            }
         }
 
-        for(NSUInteger i = 0; i < reps.count; i++) {
-            [self drainGroup:groups[i] onBackend:reps[i]];
+        if(!retry.count) {
+            break;
         }
+
+        [self drainRoutedHooks:retry];
+        wave = retry;
     }
 
     // Settle the inline guards from each op's FINAL status (finish may have
@@ -1676,7 +1814,7 @@ static pthread_mutex_t *hk_image_acquire(struct HKImage *wrapper, hookkit_lib_t 
                 lastLibErrnoType = HK_LIB_NONE;
             } else {
                 lastLibErrno = hook->backendErrno;
-                lastLibErrnoType = [self typeForBackend:backend];
+                lastLibErrnoType = [self typeForBackend:hook->routedBackend ?: backend];
             }
 
             break;

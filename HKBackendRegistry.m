@@ -53,7 +53,8 @@ static BOOL swift_available(void) {
 
     if(!cached) {
         if(hk_swift_supported()) {
-            if(@available(iOS 12.2, *)) {
+            NSOperatingSystemVersion swiftFloor = { 12, 2, 0 };
+            if([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:swiftFloor]) {
                 hk_swift_demangle = (hk_swift_demangle_fn)dlsym(RTLD_DEFAULT, "swift_demangle");
 
                 if(!hk_swift_demangle) {
@@ -79,10 +80,10 @@ static BOOL swift_available(void) {
     return result;
 }
 
-// Dobby is compiled in on arm64/arm64e only (the vendored static lib has no
-// armv7 slice); the table entry stays on every arch so the count is stable.
+// Dobby is compiled in on modern arm64/arm64e only; the table entry stays on
+// every arch/lane so the public type values and backend count remain stable.
 static BOOL dobby_available(void) {
-#if defined(__arm64__) || defined(__arm64e__)
+#if (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
     return YES;
 #else
     return NO;
@@ -124,9 +125,10 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             // unclassified provider fails closed to Unavailable.
             .defaultTechnique = HKFunctionTechniqueInline,
             .publicationPolicy = { HKOriginalPublicationBeforeActivation, HKOriginalPublicationUnavailable, HKOriginalPublicationRuntime },
-            // Batch API returns per-operation applied counts (and message ops
-            // apply immediately mid-batch), so it is not an atomic drain —
-            // the facade falls back to sequential publication.
+            // Real libhooker returns only an aggregate applied count, while
+            // ElleKit applies entries sequentially under different return
+            // semantics. Neither gives honest per-op outcomes after a partial
+            // batch, so the facade drains one operation at a time.
             .nativeBatch = NO,
             .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
@@ -163,8 +165,8 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .nativeBatch = NO,
             .sharedArm64Preflight = NO,   // vendor relocator decides instruction eligibility
         };
-        // Never automatic: HookKit's own engine is opt-in so that devices with
-        // a battle-tested library installed keep using it.
+        // Not eligible for the legacy pinned default; capability/operation
+        // routing may still reach it.
         table[3] = (HKBackendDescriptor){
             .type = HK_LIB_NATIVE,
             .backendClass = [HKNativeBackend class],
@@ -182,9 +184,8 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .nativeBatch = NO,   // executeHooks drains per-op sequentially
             .sharedArm64Preflight = YES,
         };
-        // Not automatic (M4 finding: default selection must prefer the
-        // provider backends then fishhook; Dobby becomes opt-in via
-        // category/capability selection).
+        // Not eligible for the legacy pinned default. The implicit function
+        // router may reach Dobby through FUNCTION_INLINE.
         table[4] = (HKBackendDescriptor){
             .type = HK_LIB_DOBBY,
             .backendClass = [HKDobbyBackend class],
@@ -203,8 +204,8 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .nativeBatch = NO,
             .sharedArm64Preflight = YES,
         };
-        // Never automatic: Frida is opt-in — Dobby is compiled in and lighter;
-        // Frida is the premium arm64e-tested engine users request explicitly.
+        // Not eligible for the legacy pinned default; category routing reaches
+        // it only after the lighter inline candidates decline.
         table[5] = (HKBackendDescriptor){
             .type = HK_LIB_FRIDA,
             .backendClass = [HKFridaBackend class],
@@ -255,9 +256,8 @@ const HKBackendDescriptor *hk_backends(size_t *outCount) {
             .nativeBatch = NO,
             .sharedArm64Preflight = NO,   // vtable metadata, never a prologue writer
         };
-        // Never automatic: litehook is opt-in — fishhook is the compiled-in
-        // function-rebind floor; litehook adds memory patching on all archs,
-        // plus inline and private-symbol techniques for its category entries.
+        // Not eligible for the legacy pinned default. Operation routing uses
+        // it as the compiled-in fallback for rebind and memory coverage.
         // Judgment call: the memory bit is set — litehook_hook_memory is a
         // real, KERN_SUCCESS-checked patch path (supportsHookKind: lists
         // HKHookKindMemory), so the descriptor must say so truthfully.

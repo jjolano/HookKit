@@ -29,6 +29,7 @@ fork:
 
 - `__AUTH_CONST` scanning.
 - matched/failed rebind stats.
+- side-effect-free import-slot preflight and batch no-op pruning.
 - publish-callback API (`rebind_symbols_hook`).
 - recursive-mutex + add-image callback re-registration guard.
 - `18a29b7` (2026-08-11) — drop `dladdr()` header validation in the rebind
@@ -52,6 +53,7 @@ upstream commit). Committed local patches:
 - `8c267fd` (2026-08-09) — `litehook_rebind_symbol` commits the global rebind
   record only on first match; reports `HK_ERR_NOT_SUPPORTED` on zero match
   (upstream appended the record unconditionally).
+- side-effect-free address-slot preflight used by automatic backend routing.
 - `d172b0f` (2026-08-09) — hardening: protection restore, locked rebinds,
   32-bit strategy gates.
 - `a99f14d` (2026-08-10) — crash prevention hardening (~160 lines).
@@ -83,7 +85,8 @@ and the patch touches no public symbol or signature — ABI unchanged.
   (upstream: `blr` at 0x300 before `str` at 0x334); arm64e `str` at 0x3a8
   before `blraa` at 0x3d4 (upstream: `blraa` at 0x394 before `str` at 0x3c4).
 
-Rebuild: `libdobby.a` from source (arm64 + arm64e slices, theos clang
+Rebuild: `libdobby.a` from source (arm64 iOS 9.0 rebuilt 2026-08-15;
+arm64e iOS 14.0 slice preserved from the 2026-08-11 build, theos clang
 13.0.0) — see Rebuild commands below.
 
 ### gum (wrapper only; devkit binary is pristine)
@@ -122,6 +125,31 @@ vendored — upstream has none (fetch of master/LICENSE 404s).
 
 Rebuild: none — header only.
 
+### Runtime provider contract audit (source only)
+
+Audited 2026-08-15 against exact upstream snapshots; these sources are not
+vendored or linked into HookKit:
+
+- ElleKit `1017a0d09606`; the same ABI and symlink layout were checked across
+  releases `v0.4.3`, `v0.6.3`, `v1.0`, and `v1.1.3` (`24033cc3cfa7`):
+  `LBHookMessage` is void, `LHHookFunctions` and `LHPatchMemory` return zero
+  on success, originals are written after the patch call, and the package
+  symlinks both `libhooker.dylib` and `libblackjack.dylib` to
+  `libellekit.dylib`.
+- libhooker 1.6.9 OSS `4f85a68daeba`: the build produces separate libhooker
+  and libblackjack dylibs; the batch APIs continue after individual failures
+  and return only a success count, while function originals are created before
+  the shadow-page commit.
+- sbingner/ substitute `211873b3c184`: the native
+  `substitute_find_private_syms` out-array already contains final pointers.
+  `substitute_sym_to_ptr` is declared in the public header but has no exported
+  implementation, so it is not part of HookKit's native-API availability
+  test.
+
+This validates adapter signatures, return conventions, and publication order
+only. An installed jailbreak package may come from a different commit; PAC,
+dyld, page-protection, and injection behavior remains device-unverified.
+
 ### substrate (header only)
 
 No canonical upstream repo exists (saurik/substrate and saurik/CydiaSubstrate
@@ -146,10 +174,11 @@ Update this file when that lane lands.
 ## Rebuild commands
 
 - fishhook, litehook: none — built from source by `make`.
-- dobby: rebuilt from source (2026-08-11) at upstream commit `5dfc854` with the
-  publication-before-activation patch (see Local patches). Commands, per arch
+- dobby: arm64 rebuilt 2026-08-15 and arm64e preserved from the 2026-08-11
+  build, both at upstream commit `5dfc854` with the publication-before-activation
+  patch (see Local patches). Commands, per arch
   (`SDK=$HOME/theos/sdks/iPhoneOS16.5.sdk`, `TC=$HOME/theos/toolchain/linux/iphone/bin`,
-  `$ARCH`/`$MIN` = `arm64`/`9.3` and `arm64e`/`14.0`):
+  `$ARCH`/`$MIN` = `arm64`/`9.0` and `arm64e`/`14.0`):
 
   ```
   cmake -S . -B build-$ARCH -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \

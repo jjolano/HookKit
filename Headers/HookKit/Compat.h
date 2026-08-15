@@ -142,8 +142,9 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * HK_ERR_NOT_SUPPORTED contract: the code means "not installed — the target
  * is outside this technique's capability, nothing was written, and the
  * caller's old_ptr is untouched", so callers may retry with another
- * technique. Backends that cannot promise a side-effect-free failure report
- * HK_ERR instead (a failed invocation may have applied). Per backend:
+ * technique. Automatic HookKit instances perform that retry internally.
+ * Backends that cannot promise a side-effect-free failure report HK_ERR
+ * instead (a failed invocation may have applied). Per backend:
  * fishhook returns it when a symbol is exported but no loaded image
  *  references it, and unregisters the rebinding so nothing applies to future
  *  image loads (rebind_symbols_unbind); substitute maps the capability-miss
@@ -191,12 +192,13 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 @property (assign, nonatomic) hookkit_lib_t types;
 @property (assign, nonatomic) BOOL batching;
 
-// The backend type actually in use (HK_LIB_NONE if no backend is available).
+// The pinned backend used by explicit instances and by image/symbol APIs on
+// automatic instances (HK_LIB_NONE if none is available). Automatic function
+// and memory hooks may select another backend per operation.
 @property (readonly, nonatomic) hookkit_lib_t activeType;
 
-// The strategy the active backend applies (HKStrategyDefault when no
-// backend is available or when resolution did not name a technique). Set
-// before hooking begins; mirrors what category resolution picked.
+// The pinned backend's strategy (HKStrategyDefault when resolution did not
+// name one). Automatic per-operation winners are not reported here.
 @property (readonly, nonatomic) HKStrategy activeStrategy;
 
 // Resolves the backend from the types property. One-shot: the first call that
@@ -239,23 +241,22 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // HK_LIB_NONE).
 + (instancetype)substitutorWithOrderedCategories:(NSArray<NSNumber *> *)categories;
 
-// Auto-cover routing mode: creates an instance of HKSubstitutor that, instead
-// of pinning one backend at init, routes each non-batched function hook to the
-// first available backend in the given categories whose side-effect-free
-// preflight accepts the target. Each element is an NSNumber wrapping a
-// hookkit_cat_t; within a category the built-in picker priority applies, and
-// categories are tried in the given order. When every picker declines the
-// target, the hook returns HK_ERR_NOT_SUPPORTED without invoking any backend
-// (fail closed, nothing written). Backends without a preflight are presumed to
-// accept. This is the "try the next technique when the first cannot handle
-// this function" fallback, made safe: routing is driven by preflight
-// capability probes, never by hook results (a failed invocation may have
-// mutated the target, so results are never retried). Batch hooks and the
-// image/symbol APIs use the first available category backend, pinned at init
-// (batches must not split across backends). activeType reflects the pinned
-// fallback; the per-hook winner is not reported. Coverage note: a function
-// too small for an inline patch is often still rebindable — fishhook and
-// litehook rebind a GOT-referenced export regardless of body size — so
+// Auto-cover routing mode: creates an instance of HKSubstitutor that routes each
+// function hook to the first available backend in the given categories whose
+// side-effect-free preflight accepts the target. Each element is an NSNumber
+// wrapping a hookkit_cat_t; within a category the built-in picker priority
+// applies, and categories are tried in the given order. When every picker
+// declines the target, the hook returns HK_ERR_NOT_SUPPORTED without invoking
+// any backend (fail closed, nothing written). Backends without a preflight are
+// presumed to accept. An invoked backend returning HK_ERR_NOT_SUPPORTED is
+// skipped because that status guarantees nothing was written; every other
+// result is terminal. Batched routes retry in grouped backend/technique waves;
+// rebind-only batches first resolve against the image set at drain time.
+// Image/symbol APIs use the first available category backend pinned at init;
+// activeType reflects that pinned fallback, not a per-hook winner. Coverage
+// note: a function too small for an
+// inline patch is often still rebindable — fishhook and litehook rebind a
+// GOT-referenced export regardless of body size — so
 // @[@(HK_CAT_FUNCTION_INLINE), @(HK_CAT_FUNCTION_REBIND)] is the recommended
 // composition.
 + (instancetype)substitutorWithAutoCoverCategories:(NSArray<NSNumber *> *)categories;
@@ -268,7 +269,10 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // with a single entry; HK_CAT_NONE is skipped and yields no backend.
 + (instancetype)substitutorWithCategory:(hookkit_cat_t)category;
 
-// Creates an instance of HKSubstitutor using the currently loaded substitutor.
+// Creates the process-wide automatic substitutor. Message hooks use the ObjC
+// runtime path; function hooks walk FUNCTION_INLINE then FUNCTION_REBIND;
+// memory hooks walk capable backend descriptors. Only a side-effect-free
+// HK_ERR_NOT_SUPPORTED result advances to the next candidate.
 + (instancetype)defaultSubstitutor;
 
 // Hook method for Objective-C runtime methods. Class-method-only selectors are

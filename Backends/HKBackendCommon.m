@@ -10,7 +10,7 @@
 @end
 
 // Jailbreak-root path seam — compile-time per scheme. Each package is built
-// for one jailbreak type, so the branch is baked in: rooted = identity (no
+// for one jailbreak type, so the branch is baked in: rootful = identity (no
 // prefix), rootless = libroot's jbrootpath (auto-linked -lroot by theos;
 // resolves /var/jb or the jailbreak's own prefix), roothide = libroothide's
 // jbroot() (random-named jbroot, no /var/jb).

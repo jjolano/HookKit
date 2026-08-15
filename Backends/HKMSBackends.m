@@ -121,7 +121,6 @@ static int (*fn_substitute_hook_objc_message)(Class, SEL, void *, void *, bool *
 static struct substitute_image *(*fn_substitute_open_image)(const char *) = NULL;
 static void (*fn_substitute_close_image)(struct substitute_image *) = NULL;
 static int (*fn_substitute_find_private_syms)(struct substitute_image *, const char **, void **, size_t) = NULL;
-static void *(*fn_substitute_sym_to_ptr)(struct substitute_image *, substitute_sym *) = NULL;
 static BOOL substitute_native_available = NO;
 
 static void *resolve_ms_symbol(void *handle, const char *name, const char *fallback) {
@@ -163,11 +162,10 @@ static BOOL probe_substitute(void) {
     struct substitute_image *(*openImage)(const char *) = (struct substitute_image *(*)(const char *))dlsym(handle, "substitute_open_image");
     void (*closeImage)(struct substitute_image *) = (void (*)(struct substitute_image *))dlsym(handle, "substitute_close_image");
     int (*findPrivateSyms)(struct substitute_image *, const char **, void **, size_t) = (int (*)(struct substitute_image *, const char **, void **, size_t))dlsym(handle, "substitute_find_private_syms");
-    void *(*symToPtr)(struct substitute_image *, substitute_sym *) = (void *(*)(struct substitute_image *, substitute_sym *))dlsym(handle, "substitute_sym_to_ptr");
 
     BOOL nativeAvailable = hookFunctions && hookObjcMessage
         && openImage && closeImage
-        && findPrivateSyms && symToPtr;
+        && findPrivateSyms;
 
     // ABI-incomplete (neither the MS-compatible shim set nor the native set
     // is fully present): drop the handle and stay uncached so a later probe
@@ -190,7 +188,6 @@ static BOOL probe_substitute(void) {
     fn_substitute_open_image = openImage;
     fn_substitute_close_image = closeImage;
     fn_substitute_find_private_syms = findPrivateSyms;
-    fn_substitute_sym_to_ptr = symToPtr;
     substitute_native_available = nativeAvailable;
 
     return YES;
@@ -529,7 +526,7 @@ static hookkit_status_t substitute_error_to_status(int err) {
         void *sym = NULL;
 
         if(fn_substitute_find_private_syms((struct substitute_image *)image, &symbol, &sym, 1) == SUBSTITUTE_OK && sym) {
-            return fn_substitute_sym_to_ptr((struct substitute_image *)image, (substitute_sym *)sym);
+            return sym;
         }
 
         return NULL;
@@ -549,7 +546,7 @@ static hookkit_status_t substitute_error_to_status(int err) {
         void *result = NULL;
 
         if(fn_substitute_find_private_syms(subImage, &probe, &sym, 1) == SUBSTITUTE_OK && sym) {
-            result = fn_substitute_sym_to_ptr(subImage, (substitute_sym *)sym);
+            result = sym;
         }
 
         fn_substitute_close_image(subImage);

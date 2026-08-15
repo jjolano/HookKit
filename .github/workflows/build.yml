@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+env:
+  THEOS: /opt/theos
+
+jobs:
+  legacy:
+    name: rootful-legacy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Theos and old-ABI toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential fakeroot rsync curl perl xz-utils git libxml2 libtinfo6
+          sudo git clone --recursive --quiet https://github.com/theos/theos.git "$THEOS"
+
+          mkdir -p "$RUNNER_TEMP/oldabi"
+          curl -fL -o "$RUNNER_TEMP/oldabi/toolchain.tar.xz" \
+            https://github.com/L1ghtmann/llvm-project/releases/download/test-210562a/iOSToolchain-x86_64.tar.xz
+          echo 'a72a7a577e2fbe2838b6b5e9c72034fa7d114af96f0e1d4b016f18730ce4056e  '"$RUNNER_TEMP/oldabi/toolchain.tar.xz" | sha256sum -c -
+          sudo mkdir -p "$THEOS/toolchain/oldabi"
+          sudo tar -xJf "$RUNNER_TEMP/oldabi/toolchain.tar.xz" -C "$THEOS/toolchain/oldabi"
+
+          curl -fL -o "$RUNNER_TEMP/oldabi/iPhoneOS13.7.sdk.tar.xz" \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS13.7.sdk.tar.xz
+          echo '661d1a8c518025f084d8c1e70dd8767581fb5730fb5950378f0915d840a7b5c3  '"$RUNNER_TEMP/oldabi/iPhoneOS13.7.sdk.tar.xz" | sha256sum -c -
+          sudo tar -xJf "$RUNNER_TEMP/oldabi/iPhoneOS13.7.sdk.tar.xz" -C "$THEOS/sdks"
+
+      - name: Build and verify
+        run: ./build.sh rootful-legacy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hookkit-rootful-legacy
+          path: build/hookkit-rootful-legacy.deb
+
+  modern:
+    name: ${{ matrix.flavor }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [rootful-modern, rootless, roothide]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          brew install dpkg ldid
+          sudo git clone --recursive --quiet https://github.com/roothide/theos.git "$THEOS"
+
+      - name: Build and verify
+        run: ./build.sh "${{ matrix.flavor }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hookkit-${{ matrix.flavor }}
+          path: build/hookkit-${{ matrix.flavor }}.deb

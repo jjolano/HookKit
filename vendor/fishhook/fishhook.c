@@ -86,6 +86,9 @@ struct rebindings_entry {
   // restore_failed). Sticky: ORs across every section and image this entry
   // is applied to.
   bool restore_failed;
+  // Read-only applicability probe: count matching slots without changing
+  // protections, publishing originals, or writing replacements.
+  bool scan_only;
   // C1 publish state (rebind_symbols_hook only): the callback receives the
   // caller's original pointer exactly once, on the first writable matching
   // slot, before the replacement write. Cleared (publish/publish_context
@@ -155,6 +158,7 @@ static int prepend_rebindings(struct rebindings_entry **rebindings_head,
   new_entry->matched = 0;
   new_entry->failed = 0;
   new_entry->restore_failed = false;
+  new_entry->scan_only = false;
   // No publish callback by default; rebind_symbols_hook fills it after
   // prepend and clears it again once the initial scan is done.
   new_entry->publish = NULL;
@@ -262,6 +266,11 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
     while (cur) {
       for (uint j = 0; j < cur->rebindings_nel; j++) {
         if (symbol_name_longer_than_1 && strcmp(&symbol_name[1], cur->rebindings[j].name) == 0) {
+          if (cur->scan_only) {
+            cur->matched += 1;
+            goto symbol_loop;
+          }
+
           if (!writable) {
             if (!protection_attempted) {
               protection_attempted = true;
@@ -500,7 +509,8 @@ static int rebind_symbols_common(struct rebinding rebindings[],
                                  struct rebind_result *outResult,
                                  rebind_publish_fn publish,
                                  void *publish_context,
-                                 void **publish_cells[]) {
+                                 void **publish_cells[],
+                                 bool prune_unmatched) {
   int retval;
 
   pthread_mutex_lock(&rebindings_lock);
@@ -565,6 +575,21 @@ static int rebind_symbols_common(struct rebinding rebindings[],
     outResult->restore_failed = entry->restore_failed ? 1 : 0;
   }
 
+  if (prune_unmatched) {
+    // A batch reports NOT_SUPPORTED per rebinding when its retained original
+    // cell stayed NULL. Remove those entries while still holding the callback
+    // lock, so a future image can never activate a hook whose caller was told
+    // it was not installed (and whose public original cell was never kept).
+    size_t kept = 0;
+    for (size_t i = 0; i < entry->rebindings_nel; i++) {
+      void **original = entry->rebindings[i].replaced;
+      if (original && *original) {
+        entry->rebindings[kept++] = entry->rebindings[i];
+      }
+    }
+    entry->rebindings_nel = kept;
+  }
+
   // C1: no dangling publish state — future image loads (add-image callback)
   // must apply the entry silently, never re-invoking the caller's callback
   // or touching its context. Clean the PINNED entry: a reentrant call may
@@ -584,13 +609,13 @@ static int rebind_symbols_common(struct rebinding rebindings[],
 }
 
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
-  return rebind_symbols_common(rebindings, rebindings_nel, NULL, NULL, NULL, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, NULL, NULL, NULL, NULL, NULL, NULL, false);
 }
 
 int rebind_symbols_checked(struct rebinding rebindings[],
                            size_t rebindings_nel,
                            size_t *outMatched) {
-  return rebind_symbols_common(rebindings, rebindings_nel, outMatched, NULL, NULL, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, outMatched, NULL, NULL, NULL, NULL, NULL, false);
 }
 
 int rebind_symbols_stats(struct rebinding rebindings[],
@@ -603,7 +628,36 @@ int rebind_symbols_stats(struct rebinding rebindings[],
     outStats->failed = 0;
     outStats->restore_failed = 0;
   }
-  return rebind_symbols_common(rebindings, rebindings_nel, NULL, outStats, NULL, NULL, NULL, NULL);
+  return rebind_symbols_common(rebindings, rebindings_nel, NULL, outStats, NULL, NULL, NULL, NULL, false);
+}
+
+int rebind_symbols_preflight(const char *name, size_t *outMatched) {
+  if (outMatched) {
+    *outMatched = 0;
+  }
+  if (!name) {
+    return -1;
+  }
+
+  struct rebinding rebinding = { name, NULL, NULL };
+  struct rebindings_entry entry = {
+    .rebindings = &rebinding,
+    .rebindings_nel = 1,
+    .scan_only = true,
+  };
+
+  pthread_mutex_lock(&rebindings_lock);
+  uint32_t count = _dyld_image_count();
+  for (uint32_t i = 0; i < count; i++) {
+    rebind_symbols_for_image(&entry, _dyld_get_image_header(i),
+                             _dyld_get_image_vmaddr_slide(i));
+  }
+  pthread_mutex_unlock(&rebindings_lock);
+
+  if (outMatched) {
+    *outMatched = entry.matched;
+  }
+  return 0;
 }
 
 int rebind_symbols_hook(struct rebinding rebindings[],
@@ -620,7 +674,7 @@ int rebind_symbols_hook(struct rebinding rebindings[],
     result->restore_failed = 0;
   }
 
-  return rebind_symbols_common(rebindings, count, NULL, NULL, result, publish, context, NULL);
+  return rebind_symbols_common(rebindings, count, NULL, NULL, result, publish, context, NULL, false);
 }
 
 int rebind_symbols_hook_batch(struct rebinding rebindings[],
@@ -641,7 +695,7 @@ int rebind_symbols_hook_batch(struct rebinding rebindings[],
     result->restore_failed = 0;
   }
 
-  return rebind_symbols_common(rebindings, count, NULL, NULL, result, NULL, NULL, publish_cells);
+  return rebind_symbols_common(rebindings, count, NULL, NULL, result, NULL, NULL, publish_cells, true);
 }
 
 static int rebind_symbols_image_common(void *header,

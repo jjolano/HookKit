@@ -38,9 +38,19 @@
 }
 
 - (hookkit_status_t)preflightFunction:(void *)function withReplacement:(void *)replacement {
-    // Rebind/memory techniques have no prologue constraints; only the inline
-    // trampoline overwrites the target's bytes.
+    _lastErrno = 0;
+
     if(_strategy != HKStrategyInline) {
+        unsigned int matched = 0;
+        kern_return_t kr = litehook_rebind_symbol_preflight(LITEHOOK_REBIND_GLOBAL, function, replacement, NULL, &matched);
+        if(kr != KERN_SUCCESS) {
+            _lastErrno = kr;
+            return HK_ERR;
+        }
+        if(matched == 0) {
+            _lastErrno = ENOENT;
+            return HK_ERR_NOT_SUPPORTED;
+        }
         return HK_OK;
     }
 

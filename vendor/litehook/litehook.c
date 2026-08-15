@@ -355,6 +355,89 @@ static void _litehook_register_global_rebind_callback(void)
 	_dyld_register_func_for_add_image((void (*)(const struct mach_header *, intptr_t))_litehook_apply_global_rebinds);
 }
 
+static const mach_header_u *_litehook_replacement_header(void *replacement)
+{
+	Dl_info info = {};
+	if (!replacement || dladdr(replacement, &info) == 0 || !info.dli_fname) return NULL;
+
+	for (unsigned i = 0; i < _dyld_image_count(); i++) {
+		if (!strcmp(_dyld_get_image_name(i), info.dli_fname)) {
+			return (const mach_header_u *)_dyld_get_image_header(i);
+		}
+	}
+	return NULL;
+}
+
+static unsigned int _litehook_count_symbol_in_section(const mach_header_u *targetHeader, section_u *section, void *replacee)
+{
+	char segname[sizeof(section->segname)+1];
+	strlcpy(segname, section->segname, sizeof(segname));
+	char sectname[sizeof(section->sectname)+1];
+	strlcpy(sectname, section->sectname, sizeof(sectname));
+
+	unsigned long sectionSize = 0;
+	void **symbolPointers = (void **)getsectiondata(targetHeader, segname, sectname, &sectionSize);
+	bool auth = !strcmp(sectname, "__auth_got");
+	replacee = ptrauth_strip(ptrauth_auth_function(replacee, ptrauth_key_function_pointer, 0), ptrauth_key_function_pointer);
+
+	unsigned int matched = 0;
+	for (uint32_t i = 0; i < (sectionSize / sizeof(void *)); i++) {
+		void *symbolPointer = symbolPointers[i];
+		if (!symbolPointer) continue;
+		if (auth) symbolPointer = ptrauth_strip(ptrauth_auth_function(symbolPointer, ptrauth_key_function_pointer, &symbolPointers[i]), ptrauth_key_function_pointer);
+		if (symbolPointer == replacee) matched++;
+	}
+	return matched;
+}
+
+static unsigned int _litehook_count_symbol_in_header(const mach_header_u *targetHeader, void *replacee)
+{
+	struct load_command *lcp = (void *)((uintptr_t)targetHeader + sizeof(mach_header_u));
+	unsigned int matched = 0;
+	for(int i = 0; i < targetHeader->ncmds; i++) {
+		if (lcp->cmd == LC_SEGMENT_U) {
+			segment_command_u *segCmd = (segment_command_u *)lcp;
+			if (!strncmp(segCmd->segname, "__AUTH_CONST", sizeof(segCmd->segname)) ||
+				!strncmp(segCmd->segname, "__DATA_CONST", sizeof(segCmd->segname)) ||
+				!strncmp(segCmd->segname, "__DATA", sizeof(segCmd->segname))) {
+				section_u *sections = (void *)((uintptr_t)lcp + sizeof(segment_command_u));
+				for (int j = 0; j < segCmd->nsects; j++) {
+					if ((sections[j].flags & SECTION_TYPE) == S_LAZY_SYMBOL_POINTERS ||
+						(sections[j].flags & SECTION_TYPE) == S_NON_LAZY_SYMBOL_POINTERS) {
+						matched += _litehook_count_symbol_in_section(targetHeader, &sections[j], replacee);
+					}
+				}
+			}
+		}
+		lcp = (void *)((uintptr_t)lcp + lcp->cmdsize);
+	}
+	return matched;
+}
+
+kern_return_t litehook_rebind_symbol_preflight(const mach_header_u *targetHeader, void *replacee, void *replacement, bool (*exceptionFilter)(const mach_header_u *header), unsigned int *outMatchCount)
+{
+	if (outMatchCount) *outMatchCount = 0;
+	if (!replacee || !replacement) return KERN_INVALID_ARGUMENT;
+
+	unsigned int matched = 0;
+	if (targetHeader == LITEHOOK_REBIND_GLOBAL) {
+		const mach_header_u *sourceHeader = _litehook_replacement_header(replacement);
+		if (!sourceHeader) return KERN_FAILURE;
+
+		for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+			const mach_header_u *header = (const mach_header_u *)_dyld_get_image_header(i);
+			if (header != sourceHeader && (!exceptionFilter || exceptionFilter(header))) {
+				matched += _litehook_count_symbol_in_header(header, replacee);
+			}
+		}
+	} else {
+		matched = _litehook_count_symbol_in_header(targetHeader, replacee);
+	}
+
+	if (outMatchCount) *outMatchCount = matched;
+	return KERN_SUCCESS;
+}
+
 // Returns true if every matching slot was rewritten; false if at least one
 // matching slot could not be made writable (its write was skipped — see
 // below). Callers propagate that as a failure so a partial rebind is never
@@ -524,22 +607,7 @@ kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *re
 		}
 
 		// We need the mach_header in which the replacement function lives, since we want to exclude it from the rebind
-		Dl_info replacementInfo = {};
-		if (dladdr(replacement, &replacementInfo) == 0) {
-			pthread_mutex_unlock(&gRebindLock);
-			return KERN_FAILURE;
-		}
-		if (replacementInfo.dli_fname == NULL) {
-			pthread_mutex_unlock(&gRebindLock);
-			return KERN_FAILURE;
-		}
-		const mach_header_u *sourceHeader = NULL;
-		for (unsigned i = 0; i < _dyld_image_count(); i++) {
-			if (!strcmp(_dyld_get_image_name(i), replacementInfo.dli_fname)) {
-				sourceHeader = (const mach_header_u *)_dyld_get_image_header(i);
-				break;
-			}
-		}
+		const mach_header_u *sourceHeader = _litehook_replacement_header(replacement);
 		if (!sourceHeader) {
 			pthread_mutex_unlock(&gRebindLock);
 			return KERN_FAILURE;

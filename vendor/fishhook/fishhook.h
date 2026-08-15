@@ -121,6 +121,14 @@ int rebind_symbols_stats(struct rebinding rebindings[],
                          struct rebind_stats *outStats);
 
 /*
+ * Reports how many currently loaded indirect symbol slots reference name,
+ * without registering a rebinding, changing page protections, or writing a
+ * slot. The name uses fishhook's usual spelling (no leading underscore).
+ */
+FISHHOOK_VISIBILITY
+int rebind_symbols_preflight(const char *name, size_t *outMatched);
+
+/*
  * Like rebind_symbols_stats, but additionally solves the C1 ordering
  * problem: for the FIRST writable matching slot of each rebinding entry the
  * original pointer is captured (and, on arm64e, resigned) and handed to
@@ -149,8 +157,10 @@ int rebind_symbols_hook(struct rebinding rebindings[],
  * its replacement goes live. rebindings[j].replaced still receives the original
  * for retention across future image loads; publish_cells is borrowed for the
  * initial scan only (freed/cleared afterward, never touched on later image
- * loads). result may be NULL. This is what rebind_symbols_hook cannot do for
- * N>1: its single publish callback fires once per entry, not once per rebinding.
+ * loads). Rebindings whose retained original remains NULL are removed before
+ * return, so a reported no-op cannot activate on a future image. result may be
+ * NULL. This is what rebind_symbols_hook cannot do for N>1: its single publish
+ * callback fires once per entry, not once per rebinding.
  */
 FISHHOOK_VISIBILITY
 int rebind_symbols_hook_batch(struct rebinding rebindings[],

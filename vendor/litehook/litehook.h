@@ -41,3 +41,8 @@ kern_return_t litehook_hook_function(void *source, void *target);
 // caller's zero-match decision cannot race a concurrent dyld add-image walk.
 // It is also written (to 0) on the failure paths above.
 kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *replacee, void *replacement, bool (*exceptionFilter)(const mach_header_u *header), unsigned int *outMatchCount);
+
+// Read-only form of litehook_rebind_symbol: counts slots the same global or
+// single-image request would target, without changing protections, writing a
+// slot, registering a callback, or retaining a future-image rebind.
+kern_return_t litehook_rebind_symbol_preflight(const mach_header_u *targetHeader, void *replacee, void *replacement, bool (*exceptionFilter)(const mach_header_u *header), unsigned int *outMatchCount);
