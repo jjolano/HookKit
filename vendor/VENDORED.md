@@ -59,9 +59,9 @@ upstream commit). Committed local patches:
 - `a99f14d` (2026-08-10) — crash prevention hardening (~160 lines).
 - `cfc736d` (2026-08-10) — off-by-one fix in rebind record append.
 
-Plus the current uncommitted working-tree DSC-parser removal (see In-flight
-below): `litehook_locate_dsc` / `litehook_find_dsc_symbol` stubbed out,
-replaced by `native/hk_symbols.c`.
+- `fbe2235` (2026-08-11) — removed the DSC parser by stubbing
+  `litehook_locate_dsc` / `litehook_find_dsc_symbol`; `native/hk_symbols.c`
+  replaces it.
 
 Rebuild: none; compiled from source by the Makefile.
 
@@ -157,19 +157,6 @@ No canonical upstream repo exists (saurik/substrate and saurik/CydiaSubstrate
 header is 0.9.7101-era (copyright 2008-2019 saurik), byte-identical to the
 Dopamine BaseBin mirror commit `e89072adc591881146c9513a616fa68b7323d6a7`.
 License: 3-clause BSD per the header text. Rebuild: none — header only.
-
-## In-flight (uncommitted, concurrent vendor lane, 2026-08-11)
-
-Beyond the committed patches above, the working tree carries further local
-modifications not yet in git history:
-
-- fishhook: protection-restore and rebind-stats work, plus the
-  publish-callback API (`rebind_symbols_hook`).
-- litehook: the DSC-parser removal is **confirmed stubbed** in the working
-  tree — `litehook_locate_dsc` / `litehook_find_dsc_symbol` return NULL/0,
-  replaced by `native/hk_symbols.c`.
-
-Update this file when that lane lands.
 
 ## Rebuild commands
 
