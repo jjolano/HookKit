@@ -83,23 +83,7 @@ ifeq ($(THEOS_PLATFORM_NAME),linux)
 HookKit_LDFLAGS += -nodefaultlibs -lSystem
 endif
 else ifeq ($(filter arm64,$(ARCHS)),arm64)
-# libc++ comes from Dobby on the slices that link it; the arm64e slice below
-# drops Dobby but still needs it for the ObjC function-local-static guards.
-HookKit_LDFLAGS += -lc++
-# STOPGAP: the vendored archive's arm64e slice is old-ABI arm64e -- modern
-# Xcode's ld reports "found architecture 'arm64e.old', required architecture
-# 'arm64e'", discards every member, and the link dies on undefined _DobbyHook.
-# Until vendor/dobby/libdobby.a is rebuilt with a new-ABI arm64e slice, drop
-# Dobby from that slice only (theos re-reads this makefile per arch with
-# THEOS_CURRENT_ARCH set). HKDobbyBackend keeps its class and table entry and
-# reports unavailable there via dobby_available(), exactly as on armv7 and the
-# legacy lane. Revert by deleting this conditional and restoring the plain
-# -Lvendor/dobby -ldobby.
-ifeq ($(THEOS_CURRENT_ARCH),arm64e)
-HookKit_CFLAGS += -DHK_NO_DOBBY
-else
-HookKit_LDFLAGS += -Lvendor/dobby -ldobby
-endif
+HookKit_LDFLAGS += -Lvendor/dobby -ldobby -lc++
 endif
 
 # HKGum: thin wrapper dylib statically linking the frida-gum devkit. The
