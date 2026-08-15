@@ -43,40 +43,36 @@ esac
 
 [ -f "$ARTIFACT" ] || { echo "error: artifact not found: $ARTIFACT" >&2; exit 2; }
 
+# Tool lookup, in order: PATH, Xcode, then any Theos toolchain. The toolchain
+# layout varies per install (darwin/iphone/bin, linux/iphone/bin, and the
+# rootful-legacy lane's hand-installed oldabi/linux/iphone/bin), so glob for
+# the bin directory rather than hardcoding the two Theos ships. Multiple names
+# may be given; the first tool found wins.
 find_tool() {
-    local candidate
-    for candidate in "$@"; do
+    local name candidate dir
+    for name in "$@"; do
+        candidate=$(command -v "$name" 2>/dev/null || true)
         [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+
+        candidate=$(xcrun --find "$name" 2>/dev/null || true)
+        [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+
+        for dir in "${THEOS:-/nonexistent}"/toolchain/*/bin \
+                   "${THEOS:-/nonexistent}"/toolchain/*/*/bin \
+                   "${THEOS:-/nonexistent}"/toolchain/*/*/*/bin; do
+            [ -x "$dir/$name" ] && { printf '%s\n' "$dir/$name"; return; }
+        done
     done
     return 1
 }
 
-DPKG_DEB=$(find_tool \
-    "$(command -v dpkg-deb 2>/dev/null || true)" \
-    "${THEOS:-}/toolchain/darwin/iphone/bin/dpkg-deb" \
-    "${THEOS:-}/toolchain/linux/iphone/bin/dpkg-deb") || {
-    echo "error: dpkg-deb not found" >&2; exit 1;
-}
-LIPO=$(find_tool \
-    "$(command -v lipo 2>/dev/null || true)" \
-    "$(xcrun --find lipo 2>/dev/null || true)" \
-    "${THEOS:-}/toolchain/darwin/iphone/bin/lipo" \
-    "${THEOS:-}/toolchain/linux/iphone/bin/lipo") || {
-    echo "error: lipo not found" >&2; exit 1;
-}
-VTOOL=$(find_tool \
-    "$(command -v vtool 2>/dev/null || true)" \
-    "$(xcrun --find vtool 2>/dev/null || true)" \
-    "${THEOS:-}/toolchain/darwin/iphone/bin/vtool" \
-    "${THEOS:-}/toolchain/linux/iphone/bin/vtool" || true)
-OTOOL=$(find_tool \
-    "$(command -v otool 2>/dev/null || true)" \
-    "$(xcrun --find otool 2>/dev/null || true)" \
-    "${THEOS:-}/toolchain/darwin/iphone/bin/otool" \
-    "${THEOS:-}/toolchain/linux/iphone/bin/otool" || true)
-OBJDUMP=$(find_tool \
-    "$(command -v llvm-objdump 2>/dev/null || true)" \
-    "$(find ~/.local/share/mise/installs/swift -path '*/usr/bin/llvm-objdump' -type f 2>/dev/null | sort | tail -n 1)" || true)
+DPKG_DEB=$(find_tool dpkg-deb) || { echo "error: dpkg-deb not found" >&2; exit 1; }
+LIPO=$(find_tool lipo llvm-lipo) || { echo "error: lipo not found" >&2; exit 1; }
+VTOOL=$(find_tool vtool || true)
+OTOOL=$(find_tool otool || true)
+OBJDUMP=$(find_tool llvm-objdump \
+    || find ~/.local/share/mise/installs/swift -path '*/usr/bin/llvm-objdump' -type f 2>/dev/null | sort | tail -n 1 \
+    || true)
 [ -n "$VTOOL$OTOOL$OBJDUMP" ] || { echo "error: vtool, otool, or llvm-objdump is required" >&2; exit 1; }
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-compat.XXXXXX")
