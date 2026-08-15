@@ -5,6 +5,8 @@
 #define fake_foundation_h
 typedef unsigned long NSUInteger;
 typedef signed char BOOL;
+#define YES ((BOOL)1)
+#define NO ((BOOL)0)
 #define NS_ENUM(_type, _name) enum _name : _type _name; enum _name : _type
 @interface NSObject @end
 @interface NSArray <__covariant ObjectType> @end

@@ -109,11 +109,6 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     return HK_OK;
 }
 
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
     _lastErrno = 0;
 
@@ -219,18 +214,13 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     return HK_OK;
 }
 
-- (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 // Per-op fallback (OOM of the batch scratch arrays): apply each op through the
 // single-op path. The facade's native-batch drain owns begin/publish/finish,
 // so this must NOT call them — it only rebinds and sets hook->status, writing
 // the original into the op's output cell (hookFunction: does that via its
 // publish callback).
-- (void)executeHooksSequential:(NSArray<HKHookOperation *> *)hooks {
-    for(HKHookOperation *hook in hooks) {
+- (void)executeHooksSequential:(NSArray<HKFunctionBatchItem *> *)hooks {
+    for(HKFunctionBatchItem *hook in hooks) {
         void **cell = hk_original_output_cell(&hook->original);
         hookkit_status_t result = [self hookFunction:hook->function withReplacement:hook->replacement outOldPtr:cell];
         hook->status = result;
@@ -240,8 +230,8 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     }
 }
 
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // Native batch (descriptor nativeBatch=YES): apply every rebindable op in
+- (void)executeFunctionHooks:(NSArray<HKFunctionBatchItem *> *)hooks {
+    // Native batch: apply every rebindable op in
     // ONE image walk via rebind_symbols_hook_batch, instead of one ~O(images)
     // walk per op. The facade has already run hk_original_begin for each op
     // (NULLing its output cell) and will run hk_original_publish/finish after
@@ -259,7 +249,7 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     // retain them, and the newly-created rebindings must survive from here
     // through the post-walk distribution below.
     NSMutableArray<HKFishhookRebinding *> *ownedList = [NSMutableArray arrayWithCapacity:n];
-    NSMutableArray<HKHookOperation *> *mapList = [NSMutableArray arrayWithCapacity:n];
+    NSMutableArray<HKFunctionBatchItem *> *mapList = [NSMutableArray arrayWithCapacity:n];
 
     if(!rebindings || !publish_cells) {
         // OOM building the batch: fall back to the per-op path (still correct,
@@ -270,7 +260,7 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     }
 
     size_t k = 0;
-    for(HKHookOperation *hook in hooks) {
+    for(HKFunctionBatchItem *hook in hooks) {
         void *function = hook->function;
 #if __has_feature(ptrauth_calls)
         function = ptrauth_strip(function, ptrauth_key_asia);
@@ -328,7 +318,7 @@ static void hk_fishhook_publish_original(void *context, void *original) {
             // entry before returning. Retain only installed cells; failed
             // cells are no longer referenced and can be freed immediately.
             for(size_t j = 0; j < k; j++) {
-                HKHookOperation *hook = mapList[j];
+                HKFunctionBatchItem *hook = mapList[j];
                 if(*(ownedList[j]->origCell) != NULL) {
                     @synchronized(fishhookRebindingStore()) {
                         [fishhookRebindingStore() addObject:ownedList[j]];

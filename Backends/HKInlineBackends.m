@@ -24,11 +24,6 @@
     return _lastErrno;
 }
 
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 - (hookkit_status_t)hk_dobby_inline_preflight:(void *)function replacement:(void *)replacement {
     // Fail closed before DobbyHook: Dobby's relocator neither rejects short
     // functions (it reads its 12-16 byte overwrite window without recognizing
@@ -90,15 +85,6 @@
     return result == 0 ? HK_OK : HK_ERR;
 }
 
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // Unreachable from the facade (nativeBatch = NO: the drain runs ops
-    // per-op through executeOperation:onBackend:). Defensive honesty: an op
-    // reaching here was never installed, so it must not report success — the
-    // facade's finish restores any begun cell for NOT_SUPPORTED.
-    for(HKHookOperation *hook in hooks) {
-        hook->status = HK_ERR_NOT_SUPPORTED;
-    }
-}
 @end
 #else   // Unsupported arch or legacy lane: keep the class/ABI, report unavailable.
 @implementation HKDobbyBackend
@@ -106,29 +92,6 @@
     return _lastErrno;
 }
 
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // Unreachable from the facade (nativeBatch = NO, and dobby_available()
-    // is NO on armv7 so this class is never instantiated). Defensive
-    // honesty: an op reaching here was never installed.
-    for(HKHookOperation *hook in hooks) {
-        hook->status = HK_ERR_NOT_SUPPORTED;
-    }
-}
 // image methods inherited from HKDlfcnBackend: they were NULL stubs here, but
 // dobby_available() is NO here, so this class is never instantiated; the stub
 // exists only so the class symbol resolves for the registry entry.
@@ -241,11 +204,6 @@ BOOL frida_discoverable(void) {
     return _lastErrno;
 }
 
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
     // C1: gum_interceptor_replace publishes the original through the
     // out-param as it stages the replacement, so hand the caller's cell
@@ -265,11 +223,6 @@ BOOL frida_discoverable(void) {
     return result == 0 ? HK_OK : HK_ERR;
 }
 
-- (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 // One gum transaction around the whole batch: replacements inside a
 // transaction are staged and only published at end_transaction, so the batch
 // is applied atomically. frida-gum 17.17 reports no failure at the
@@ -283,44 +236,27 @@ BOOL frida_discoverable(void) {
 // Individual hook failures fail the batch without a rollback, exactly as
 // documented. Message/memory hooks are not supported (ops get
 // HK_ERR_NOT_SUPPORTED; the facade's finish restores any begun cell).
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
+- (void)executeFunctionHooks:(NSArray<HKFunctionBatchItem *> *)hooks {
     int failureErrno = 0;
 
     fn_hkgum_begin_transaction();
 
-    for(HKHookOperation *hook in hooks) {
-        switch(hook->kind) {
-            case HKHookKindFunction: {
-                void *orig = NULL;
-                int result = fn_hkgum_hook_function(hook->function, hook->replacement, &orig);
+    for(HKFunctionBatchItem *hook in hooks) {
+        void *orig = NULL;
+        int result = fn_hkgum_hook_function(hook->function, hook->replacement, &orig);
 
-                if(result == 0) {
-                    // C1: publish the original BEFORE end_transaction — the
-                    // replacement goes live the moment the transaction ends,
-                    // and a reentrant replacement must never observe a NULL
-                    // original. The facade already began the publication
-                    // (caller cell saved and NULLed), so this write reaches
-                    // the caller immediately; the drain's re-publish is
-                    // idempotent.
-                    hk_original_publish(&hook->original, orig);
-                    hook->status = HK_OK;
-                } else {
-                    hook->status = HK_ERR;
-                    hook->backendErrno = result;
+        if(result == 0) {
+            // Publish before end_transaction makes the original visible when
+            // the staged replacement becomes reachable.
+            hk_original_publish(&hook->original, orig);
+            hook->status = HK_OK;
+        } else {
+            hook->status = HK_ERR;
+            hook->backendErrno = result;
 
-                    if(!failureErrno) {
-                        failureErrno = result;
-                    }
-                }
-
-                break;
+            if(!failureErrno) {
+                failureErrno = result;
             }
-
-            case HKHookKindMessage:
-            case HKHookKindMemory:
-                // not supported
-                hook->status = HK_ERR_NOT_SUPPORTED;
-                break;
         }
     }
 

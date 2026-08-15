@@ -3,10 +3,7 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 
-// The @implementation lives here (not the shared header): the ivars of
-// HKHookOperation are @public and referenced from every backend TU through
-// the _OBJC_IVAR_$_ symbols, which only the implementing TU emits.
-@implementation HKHookOperation
+@implementation HKFunctionBatchItem
 @end
 
 // Jailbreak-root path seam — compile-time per scheme. Each package is built

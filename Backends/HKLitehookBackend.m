@@ -61,11 +61,6 @@
     return _lastErrno;
 }
 
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
     _lastErrno = 0;
 
@@ -152,16 +147,6 @@
     kern_return_t kr = litehook_hook_memory(target, (void *)data, size);
     _lastErrno = kr;
     return kr == KERN_SUCCESS ? HK_OK : HK_ERR;
-}
-
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // Unreachable from the facade (nativeBatch = NO: the drain runs ops
-    // per-op through executeOperation:onBackend:). Defensive honesty: an op
-    // reaching here was never installed, so it must not report success — the
-    // facade's finish restores any begun cell for NOT_SUPPORTED.
-    for(HKHookOperation *hook in hooks) {
-        hook->status = HK_ERR_NOT_SUPPORTED;
-    }
 }
 
 - (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName {

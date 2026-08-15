@@ -18,7 +18,6 @@
 // (older versions) or Sub* (newer versions) names, so try both.
 static void *substrate_handle = NULL;
 static void (*substrate_hookFunction)(void *, void *, void **) = NULL;
-static void (*substrate_hookMessageEx)(Class, SEL, void *, void **) = NULL;
 static void *(*substrate_getImageByName)(const char *) = NULL;
 static void *(*substrate_findSymbol)(void *, const char *) = NULL;
 static void (*substrate_hookMemory)(void *, const void *, size_t) = NULL;
@@ -42,7 +41,6 @@ static BOOL probe_substrate(void) {
     // ENTIRE required symbol set is present, so an incomplete library can
     // never leave half-populated function pointers behind.
     void (*hookFunction)(void *, void *, void **) = (void (*)(void *, void *, void **))dlsym(handle, "MSHookFunction");
-    void (*hookMessageEx)(Class, SEL, void *, void **) = (void (*)(Class, SEL, void *, void **))dlsym(handle, "MSHookMessageEx");
     void *(*getImageByName)(const char *) = (void *(*)(const char *))dlsym(handle, "MSGetImageByName");
     void *(*findSymbol)(void *, const char *) = (void *(*)(void *, const char *))dlsym(handle, "MSFindSymbol");
     void (*hookMemory)(void *, const void *, size_t) = (void (*)(void *, const void *, size_t))dlsym(handle, "MSHookMemory");
@@ -50,14 +48,13 @@ static BOOL probe_substrate(void) {
     // ABI-incomplete: drop the handle and stay uncached so a later probe
     // genuinely retries (the engine may gain the full ABI after HookKit
     // loads). Nothing was published.
-    if(!(hookFunction && hookMessageEx && getImageByName && findSymbol)) {
+    if(!(hookFunction && getImageByName && findSymbol)) {
         dlclose(handle);
         return NO;
     }
 
     substrate_handle = handle;
     substrate_hookFunction = hookFunction;
-    substrate_hookMessageEx = hookMessageEx;
     substrate_getImageByName = getImageByName;
     substrate_findSymbol = findSymbol;
     substrate_hookMemory = hookMemory;
@@ -110,14 +107,12 @@ BOOL substrate_discoverable(void) {
 
 static void *libsubstitute_handle = NULL;
 static void (*substitute_hookFunction)(void *, void *, void **) = NULL;
-static void (*substitute_hookMessageEx)(Class, SEL, void *, void **) = NULL;
 static void *(*substitute_getImageByName)(const char *) = NULL;
 static void *(*substitute_findSymbol)(void *, const char *) = NULL;
 static void (*substitute_hookMemory)(void *, const void *, size_t) = NULL;
 
 // Native libsubstitute API, preferred over the MS-compatible shims when present.
 static int (*fn_substitute_hook_functions)(const struct substitute_function_hook *, size_t, struct substitute_function_hook_record **, int) = NULL;
-static int (*fn_substitute_hook_objc_message)(Class, SEL, void *, void *, bool *) = NULL;
 static struct substitute_image *(*fn_substitute_open_image)(const char *) = NULL;
 static void (*fn_substitute_close_image)(struct substitute_image *) = NULL;
 static int (*fn_substitute_find_private_syms)(struct substitute_image *, const char **, void **, size_t) = NULL;
@@ -152,25 +147,22 @@ static BOOL probe_substitute(void) {
     // ENTIRE required symbol set is present, so an incomplete library can
     // never leave half-populated function pointers behind.
     void (*hookFunction)(void *, void *, void **) = (void (*)(void *, void *, void **))resolve_ms_symbol(handle, "MSHookFunction", "SubHookFunction");
-    void (*hookMessageEx)(Class, SEL, void *, void **) = (void (*)(Class, SEL, void *, void **))resolve_ms_symbol(handle, "MSHookMessageEx", "SubHookMessageEx");
     void *(*getImageByName)(const char *) = (void *(*)(const char *))resolve_ms_symbol(handle, "MSGetImageByName", "SubGetImageByName");
     void *(*findSymbol)(void *, const char *) = (void *(*)(void *, const char *))resolve_ms_symbol(handle, "MSFindSymbol", "SubFindSymbol");
     void (*hookMemory)(void *, const void *, size_t) = (void (*)(void *, const void *, size_t))resolve_ms_symbol(handle, "MSHookMemory", "SubHookMemory");
 
     int (*hookFunctions)(const struct substitute_function_hook *, size_t, struct substitute_function_hook_record **, int) = (int (*)(const struct substitute_function_hook *, size_t, struct substitute_function_hook_record **, int))dlsym(handle, "substitute_hook_functions");
-    int (*hookObjcMessage)(Class, SEL, void *, void *, bool *) = (int (*)(Class, SEL, void *, void *, bool *))dlsym(handle, "substitute_hook_objc_message");
     struct substitute_image *(*openImage)(const char *) = (struct substitute_image *(*)(const char *))dlsym(handle, "substitute_open_image");
     void (*closeImage)(struct substitute_image *) = (void (*)(struct substitute_image *))dlsym(handle, "substitute_close_image");
     int (*findPrivateSyms)(struct substitute_image *, const char **, void **, size_t) = (int (*)(struct substitute_image *, const char **, void **, size_t))dlsym(handle, "substitute_find_private_syms");
 
-    BOOL nativeAvailable = hookFunctions && hookObjcMessage
-        && openImage && closeImage
+    BOOL nativeAvailable = hookFunctions && openImage && closeImage
         && findPrivateSyms;
 
     // ABI-incomplete (neither the MS-compatible shim set nor the native set
     // is fully present): drop the handle and stay uncached so a later probe
     // genuinely retries. Nothing was published.
-    if(!((hookFunction && hookMessageEx && getImageByName && findSymbol)
+    if(!((hookFunction && getImageByName && findSymbol)
             || nativeAvailable)) {
         dlclose(handle);
         return NO;
@@ -178,13 +170,11 @@ static BOOL probe_substitute(void) {
 
     libsubstitute_handle = handle;
     substitute_hookFunction = hookFunction;
-    substitute_hookMessageEx = hookMessageEx;
     substitute_getImageByName = getImageByName;
     substitute_findSymbol = findSymbol;
     substitute_hookMemory = hookMemory;
 
     fn_substitute_hook_functions = hookFunctions;
-    fn_substitute_hook_objc_message = hookObjcMessage;
     fn_substitute_open_image = openImage;
     fn_substitute_close_image = closeImage;
     fn_substitute_find_private_syms = findPrivateSyms;
@@ -240,12 +230,10 @@ BOOL substitute_discoverable(void) {
 
 @implementation HKMSBackend
 - (instancetype)initWithHookFunction:(void (*)(void *, void *, void **))hookFunction
-                      hookMessageEx:(void (*)(Class, SEL, void *, void **))hookMessageEx
                     getImageByName:(void *(*)(const char *))getImageByName
                        findSymbol:(void *(*)(void *, const char *))findSymbol {
     if((self = [super init])) {
         msHookFunction = hookFunction;
-        msHookMessageEx = hookMessageEx;
         msGetImageByName = getImageByName;
         msFindSymbol = findSymbol;
         _lastErrno = 0;
@@ -256,43 +244,6 @@ BOOL substitute_discoverable(void) {
 
 - (int)lastErrno {
     return _lastErrno;
-}
-
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    if(!class_getInstanceMethod(objcClass, selector) && !class_getClassMethod(objcClass, selector)) {
-        _lastErrno = 0;
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
-    // MSHookMessageEx is void; the only observable success signal is the
-    // original IMP being written into the out cell. Always pass a slot WE
-    // own (never the caller's directly): a call that produced no original
-    // must not publish a NULL cell as success (HKSubstitutor invariant:
-    // publish only non-NULL originals). Some Substrate builds also signal
-    // failure through errno.
-    IMP original = NULL;
-    errno = 0;
-    msHookMessageEx(objcClass, selector, replacement, (void **)&original);
-    _lastErrno = errno;
-
-    if(errno) {
-        // Failure signalled through errno: the hook may already be applied.
-        return HK_ERR;
-    }
-
-    if(!original) {
-        // No errno but no original either: nothing observable happened, so
-        // the hook was not applied — a capability-style miss, side-effect-
-        // free, so callers may switch technique.
-        _lastErrno = ENOENT;
-        return HK_ERR_NOT_SUPPORTED;
-    }
-
-    if(old_ptr) {
-        *old_ptr = (void *)original;
-    }
-
-    return HK_OK;
 }
 
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
@@ -329,17 +280,6 @@ BOOL substitute_discoverable(void) {
     }
 
     return HK_OK;
-}
-
-- (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
-}
-
-- (void)executeHooks:(NSArray<HKHookOperation *> *)hooks {
-    // No native batch primitive (descriptor nativeBatch=NO): the facade
-    // drains per-op via executeOperation:onBackend: and never calls this.
-    // Hooks are applied at hook time; nothing is pending here.
 }
 
 - (HKImageRef)openImage:(NSString *)path {
@@ -419,7 +359,7 @@ static hookkit_status_t hk_verified_memory_patch(void *target, const void *data,
 
 @implementation HKSubstrateBackend
 - (instancetype)init {
-    return [super initWithHookFunction:substrate_hookFunction hookMessageEx:substrate_hookMessageEx getImageByName:substrate_getImageByName findSymbol:substrate_findSymbol];
+    return [super initWithHookFunction:substrate_hookFunction getImageByName:substrate_getImageByName findSymbol:substrate_findSymbol];
 }
 
 - (hookkit_status_t)hookMemory:(void *)target withData:(const void *)data size:(size_t)size {
@@ -466,15 +406,7 @@ static hookkit_status_t substitute_error_to_status(int err) {
 
 @implementation HKSubstituteBackend
 - (instancetype)init {
-    return [super initWithHookFunction:substitute_hookFunction hookMessageEx:substitute_hookMessageEx getImageByName:substitute_getImageByName findSymbol:substitute_findSymbol];
-}
-
-- (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
-    // The facade's central runtime hook (hk_apply_message_hook) owns all
-    // message hooking — this protocol method is never dispatched anymore.
-    // Minimal conforming stub: side-effect-free refusal.
-    _lastErrno = 0;
-    return HK_ERR_NOT_SUPPORTED;
+    return [super initWithHookFunction:substitute_hookFunction getImageByName:substitute_getImageByName findSymbol:substitute_findSymbol];
 }
 
 - (hookkit_status_t)hookFunction:(void *)function withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
