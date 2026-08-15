@@ -98,6 +98,7 @@ HKSubstitutor *sub = [HKSubstitutor substitutorWithAutoCoverCategories:@[@(HK_CA
 ```
 
 - Per hook, category pickers are walked in priority order. Preflight declines are skipped; an invoked backend returning `HK_ERR_NOT_SUPPORTED` is also skipped because that status guarantees nothing was written. `HK_ERR`, `HK_ERR_PARTIAL`, and success are terminal.
+- Requesting `old_ptr` skips candidates that cannot publish the original before activation.
 - Batched hooks retry in grouped waves by backend, hook kind, and technique, preserving native batching without mixing inline and rebind routes from the same backend class. Rebind-only batches first resolve at drain time. Image/symbol APIs use the pinned first category backend; `activeType` reflects that fallback, not each hook's winner.
 - Coverage story: a function too small for an inline patch is often still rebindable — fishhook and litehook rebind a GOT-referenced export regardless of body size — which is why `[FUNCTION_INLINE, FUNCTION_REBIND]` is the recommended composition.
 
@@ -114,29 +115,27 @@ The slot write is a single aligned pointer store (≈ atomic) with no code patch
 ## Usage
 
 ```objc
-HKSubstitutor *sub = [HKSubstitutor defaultSubstitutor]; // or substitutorWithTypes:
-
-// Batching is queue-always: every supported hook kind queues; nothing applies until executeHooks.
 HKEnableBatching();
 
-void (*orig_malloc)(void *);
-HKHookFunction(&malloc, &my_malloc, &orig_malloc);
+void *(*orig_malloc)(size_t);
+hookkit_status_t queued = HKHookFunction((void *)&malloc, (void *)&my_malloc,
+                                         (void **)&orig_malloc);
+hookkit_status_t installed = HKExecuteBatch();
 
-[sub hookMessageInClass:[NSString class]
-           withSelector:@selector(length)
-         withReplacement:&my_length
-               outOldPtr:&orig_length];
-
-HKExecuteBatch();
+if (queued != HK_OK || installed != HK_OK) {
+    // Disable or verify the dependent feature.
+}
 ```
 
 `HKHookMessage`, `HKHookMemory`, `HKOpenImage`, and `HKFindSymbol` macros are also available.
+
+Without batching, a hook method returns its final status. With batching, `HK_OK` only means queued; `executeHooks` returns the aggregate result. On `HK_ERR_PARTIAL`, verify or disable dependent features. `activeType` does not prove installation.
 
 `hookMessageInClass:` dispatches class-method-only selectors through the metaclass (`object_getClass()`), so class methods hook correctly on every backend; instance methods pass the class as-is.
 
 ## Semantics
 
-Normative semantics — the symbol-name convention, status codes, the `HK_ERR_NOT_SUPPORTED` contract, the fail-closed prologue preflight, arch gates, `getLibErrno:`, threading, batch storage lifetime, and availability probing — are specified in the `HKSubstitutor` interface comment in `Headers/HookKit/Compat.h`, which is the source of truth. This section keeps only the backend-operational behavior not covered there:
+Normative semantics — the symbol-name convention, status codes, the `HK_ERR_NOT_SUPPORTED` contract, the fail-closed prologue preflight, arch gates, `getLibErrno:`, threading, batch storage lifetime, and availability probing — are specified in the `HKSubstitutor` interface comment in `Headers/HookKit.h`, which is the source of truth. This section keeps only the backend-operational behavior not covered there:
 
 - Publish-before-activation: originals are published into the caller's cell before a replacement becomes reachable — Cydia Substrate, Substitute, native, fishhook (rebind), litehook (rebind), Dobby (the vendored lib is rebuilt from upstream with a publication reorder patch), and Frida all publish first. Backends that cannot guarantee this refuse a requested `old_ptr` with `HK_ERR_NOT_SUPPORTED` before anything is written: ElleKit (its hooking writes the original into the out-cell only after the patch lands) and litehook (its inline has no original-call trampoline at all).
 - Shared prologue preflight: inline-capable backends without a `preflightFunction:` of their own (ElleKit, Cydia Substrate, Substitute) are gated by a shared fixed-window prologue validator before dispatch — arm64/arm64e only; on ARMv7 the shared check is skipped, since Substrate and Substitute validate their own prologues there.
