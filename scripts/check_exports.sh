@@ -7,10 +7,20 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Mach-O-aware nm: GNU binutils nm cannot read Mach-O files.
+# Mach-O-aware nm: GNU binutils nm cannot read Mach-O files, so the Theos
+# toolchain's own nm (cctools) is preferred over whatever PATH's `nm` is. The
+# toolchain layout varies per install (darwin/iphone/bin, linux/iphone/bin,
+# and the rootful-legacy lane's hand-installed oldabi/linux/iphone/bin), so
+# glob for the bin directory.
 NM=""
 for cand in "$(command -v llvm-nm 2>/dev/null)" \
             "$(ls ~/.local/share/mise/installs/swift/*/usr/bin/llvm-nm 2>/dev/null | tail -n 1)" \
+            "${THEOS:-/nonexistent}"/toolchain/*/bin/llvm-nm \
+            "${THEOS:-/nonexistent}"/toolchain/*/*/bin/llvm-nm \
+            "${THEOS:-/nonexistent}"/toolchain/*/*/*/bin/llvm-nm \
+            "${THEOS:-/nonexistent}"/toolchain/*/bin/nm \
+            "${THEOS:-/nonexistent}"/toolchain/*/*/bin/nm \
+            "${THEOS:-/nonexistent}"/toolchain/*/*/*/bin/nm \
             "$(command -v nm 2>/dev/null)"; do
 	[ -n "$cand" ] && [ -x "$cand" ] && { NM="$cand"; break; }
 done

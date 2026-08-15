@@ -21,8 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 
 // --- simulated PAC (identity would make the self-check trivially pass) -----
 // sign(p, d) keeps p's address bits and stamps 4 bits of d; strip removes the
@@ -65,34 +63,8 @@ bool hk_native_patch_memory(void *target, const void *data, size_t size) {
     return true;
 }
 
-// Fake hk_native_range_readable: the engine's real implementation walks Mach
-// VM regions (native/hk_native.c, iOS-only). On the host, mincore(2) is the
-// equivalent mapped-range probe: ENOMEM means the range contains unmapped
-// pages, and the probe never touches the range itself.
-bool hk_native_range_readable(const void *addr, size_t len) {
-    if(!addr || len == 0) {
-        return false;
-    }
-
-    long page = sysconf(_SC_PAGESIZE);
-    uintptr_t base = (uintptr_t)addr & ~(uintptr_t)(page - 1);
-    uintptr_t end = ((uintptr_t)addr + len + page - 1) & ~(uintptr_t)(page - 1);
-
-    if(end < (uintptr_t)addr) {
-        return false;   // overflow
-    }
-
-    size_t pages = (end - base) / (size_t)page;
-
-    // ponytail: the fake blobs span a few pages at most; larger ranges fail
-    // closed.
-    if(pages > 64) {
-        return false;
-    }
-
-    unsigned char vec[64];
-    return mincore((void *)base, end - base, vec) == 0;
-}
+// hk_native_range_readable's fake lives below, next to the blobs it answers
+// for (the engine only needs the prototype, from hk_native.h).
 
 // The engine's swift_demangle hook: the framework layer owns this global on
 // device; here the test defines it and points it at the identity fake below.
@@ -187,6 +159,30 @@ static void *const g_fns[4] = { (void *)&fake_a, (void *)&fake_b, (void *)&fake_
 
 static void *slot_ptr(uint32_t index) {
     return (void *)(g_metadata + FAKE_VTABLE_WORDS * 8 + (size_t)index * 8);
+}
+
+// Fake hk_native_range_readable: the engine's real implementation walks Mach
+// VM regions (native/hk_native.c, iOS-only). The host has no portable
+// equivalent -- mincore(2) reports unmapped pages as ENOMEM on Linux but
+// merely as zeroed residency bytes on Darwin, so a mincore-based probe waves
+// the bogus 0x1 class through and the engine faults dereferencing it. The
+// fake answers from the test's own blobs instead: every range the engine
+// derives lies inside g_metadata (class + vtable) or g_desc (descriptor +
+// method array), and everything else is unreadable by construction.
+bool hk_native_range_readable(const void *addr, size_t len) {
+    if(!addr || len == 0) {
+        return false;
+    }
+
+    const char *start = (const char *)addr;
+    const char *end = start + len;
+
+    if(end < start) {
+        return false;   // overflow
+    }
+
+    return (start >= (const char *)g_metadata && end <= (const char *)g_metadata + sizeof(g_metadata))
+        || (start >= (const char *)&g_desc && end <= (const char *)&g_desc + sizeof(g_desc));
 }
 
 // Build a well-formed blob: a Swift class whose 4 own methods land in slots
