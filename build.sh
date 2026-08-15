@@ -15,18 +15,47 @@ run_make() {
     make "${MAKE_ARGS[@]}" "$@"
 }
 
-require_modern_xcode() {
-    [ "$(uname -s)" = Darwin ] || {
-        echo "error: $1 requires macOS/Xcode for the new arm64e ABI" >&2
+# Modern lanes need a toolchain that stamps arm64e slices with the versioned
+# ptrauth ABI (cpusubtype 0x80000002). Xcode 12+ does; theos's bundled Linux
+# clang does not -- it emits 0x00000002, the preview ABI modern ld rejects as
+# "arm64e.old". scripts/setup-modern-toolchain.sh assembles a Linux toolchain
+# that can, and MODERN_TOOLCHAIN points at it.
+MODERN_TOOLCHAIN=${MODERN_TOOLCHAIN:-$THEOS/toolchain/modern/linux/iphone}
+
+require_modern_toolchain() {
+    if [ "$(uname -s)" = Darwin ]; then
+        local version major
+        version=$(xcodebuild -version | awk 'NR == 1 { print $2 }')
+        major=${version%%.*}
+        [ "$major" -ge 12 ] || {
+            echo "error: $1 requires Xcode 12 or newer (found $version)" >&2
+            return 1
+        }
+        return
+    fi
+
+    # Probe rather than trust: a toolchain that merely *exists* here is more
+    # dangerous than a missing one, because the wrong compiler produces an
+    # old-ABI arm64e slice that links locally and is rejected everywhere else.
+    [ -x "$MODERN_TOOLCHAIN/bin/clang" ] || {
+        echo "error: $1 needs a new-ABI arm64e toolchain at $MODERN_TOOLCHAIN" >&2
+        echo "       run scripts/setup-modern-toolchain.sh to assemble one" >&2
         return 1
     }
-    local version major
-    version=$(xcodebuild -version | awk 'NR == 1 { print $2 }')
-    major=${version%%.*}
-    [ "$major" -ge 12 ] || {
-        echo "error: $1 requires Xcode 12 or newer (found $version)" >&2
+    bash "$ROOT/scripts/setup-modern-toolchain.sh" --verify "$MODERN_TOOLCHAIN" >/dev/null || {
+        echo "error: $1: $MODERN_TOOLCHAIN emits old-ABI arm64e" >&2
+        echo "       re-run scripts/setup-modern-toolchain.sh" >&2
         return 1
     }
+}
+
+# Modern-lane make: on Linux the toolchain above replaces theos's default.
+modern_make() {
+    if [ "$(uname -s)" = Darwin ]; then
+        make "${MAKE_ARGS[@]}" "$@"
+    else
+        make "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" "$@"
+    fi
 }
 
 require_oldabi_toolchain() {
@@ -139,11 +168,11 @@ build_rootful_legacy() {
 
 build_rootful_modern() {
     local lane=rootful-modern artifact
-    require_modern_xcode "$lane"
+    require_modern_toolchain "$lane"
     write_control "$lane"
-    run_make HOOKKIT_LANE="$lane" clean
-    run_make HOOKKIT_LANE="$lane" test
-    run_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
+    modern_make HOOKKIT_LANE="$lane" clean
+    modern_make HOOKKIT_LANE="$lane" test
+    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
     run_make check-exports
@@ -152,11 +181,11 @@ build_rootful_modern() {
 
 build_rootless() {
     local lane=rootless artifact
-    require_modern_xcode "$lane"
+    require_modern_toolchain "$lane"
     write_control "$lane"
-    run_make HOOKKIT_LANE="$lane" clean
-    run_make HOOKKIT_LANE="$lane" test
-    run_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
+    modern_make HOOKKIT_LANE="$lane" clean
+    modern_make HOOKKIT_LANE="$lane" test
+    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
     run_make check-exports
@@ -166,12 +195,12 @@ build_rootless() {
 # Existing roothide profile; it shares the modern/rootless compatibility floor.
 build_roothide() {
     local artifact
-    require_modern_xcode roothide
+    require_modern_toolchain roothide
     test -d "${THEOS:?}/vendor/mod/roothide"
     write_control roothide
-    run_make clean
-    run_make test
-    run_make THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:15.0 package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH=build/control.roothide
+    modern_make clean
+    modern_make test
+    modern_make THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:15.0 package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH=build/control.roothide
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE=roothide COMPAT_ARTIFACT="$artifact"
     run_make check-exports
