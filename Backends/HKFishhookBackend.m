@@ -79,6 +79,36 @@ static void hk_fishhook_publish_original(void *context, void *original) {
     return _lastErrno;
 }
 
+- (hookkit_status_t)preflightFunction:(void *)function withReplacement:(void *)replacement {
+    _lastErrno = 0;
+    (void) replacement;
+
+#if __has_feature(ptrauth_calls)
+    function = ptrauth_strip(function, ptrauth_key_asia);
+#endif
+
+    Dl_info info;
+    if(!(dladdr(function, &info) && info.dli_sname && info.dli_saddr == function)) {
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    const char *name = info.dli_sname;
+    if(name[0] == '_') name++;
+
+    size_t matched = 0;
+    if(rebind_symbols_preflight(name, &matched) != 0) {
+        _lastErrno = errno;
+        return HK_ERR;
+    }
+
+    if(matched == 0) {
+        _lastErrno = ENOENT;
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
+    return HK_OK;
+}
+
 - (hookkit_status_t)hookMessageInClass:(Class)objcClass withSelector:(SEL)selector withReplacement:(void *)replacement outOldPtr:(void **)old_ptr {
     _lastErrno = 0;
     return HK_ERR_NOT_SUPPORTED;
@@ -294,21 +324,21 @@ static void hk_fishhook_publish_original(void *context, void *original) {
                 mapList[j]->backendErrno = errno;
             }
         } else {
-            // The whole batch is one retained fishhook entry (all k rebindings,
-            // matched and no-op alike), so every origCell must stay alive for
-            // process life — keep every owned in the store. Per-op outcome is
-            // read from its origCell: written ⇒ at least one slot was rewritten
-            // (live); still NULL ⇒ the symbol is referenced by no loaded image
-            // (a silent no-op, reported NOT_SUPPORTED). No-op rebindings sit in
-            // the shared entry harmlessly (they never match a future image).
-            @synchronized(fishhookRebindingStore()) {
-                [fishhookRebindingStore() addObjectsFromArray:ownedList];
-            }
+            // The vendor prunes every NULL-original rebinding from the shared
+            // entry before returning. Retain only installed cells; failed
+            // cells are no longer referenced and can be freed immediately.
             for(size_t j = 0; j < k; j++) {
                 HKHookOperation *hook = mapList[j];
                 if(*(ownedList[j]->origCell) != NULL) {
+                    @synchronized(fishhookRebindingStore()) {
+                        [fishhookRebindingStore() addObject:ownedList[j]];
+                    }
                     hook->status = HK_OK;
                 } else {
+                    free(ownedList[j]->name);
+                    free(ownedList[j]->origCell);
+                    ownedList[j]->name = NULL;
+                    ownedList[j]->origCell = NULL;
                     hook->status = HK_ERR_NOT_SUPPORTED;
                     hook->backendErrno = ENOENT;
                     if(publish_cells[j]) {

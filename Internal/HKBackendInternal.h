@@ -92,13 +92,16 @@ hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_
     HKOriginalPublication original;
     uint64_t guardToken;
     int backendErrno;
-    // Per-op routed backend for an AUTO-COVER substitutor: the backend the
-    // per-hook router picked at enqueue (hookFunction: batched routing). nil
-    // for every pinned substitutor — executeHooks then keeps its single-backend
-    // fast path. When set, executeHooks groups ops by this backend's CLASS so
-    // each backend's ops drain in ONE native batch (hk_walk_categories news a
-    // fresh instance per hook, so group by class, not identity).
+    // Per-op backend selected by automatic routing. nil for pinned operations.
     id<HKSubstitutorBackend> routedBackend;
+    // Rebind-only auto-cover batches route at drain time, after every hook is
+    // queued, so applicability reflects the images that will actually be
+    // patched rather than an earlier transient loader state.
+    BOOL routeAtDrain;
+    // Next picker/descriptor cursor. A side-effect-free NOT_SUPPORTED result
+    // resumes here, so the same (backend, strategy) route is never retried.
+    NSUInteger routeCursor;
+    BOOL automaticRoute;
 }
 @end
 
@@ -267,7 +270,7 @@ struct HKImage {
     void *rawHandle;
 };
 
-// Jailbreak-root path (identity on rooted; libroot's jbrootpath on
+// Jailbreak-root path (identity on rootful; libroot's jbrootpath on
 // rootless; libroothide's jbroot on roothide). Defined in
 // Backends/HKBackendCommon.m.
 NSString *HKJBPath(NSString *path);

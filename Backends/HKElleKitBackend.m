@@ -13,7 +13,8 @@
 
 // libhooker is dlopen'd at runtime so that HookKit loads cleanly without ElleKit installed.
 // fishhook is compiled in and always available.
-static void* libhooker_handle = NULL;
+static void *libhooker_handle = NULL;
+static void *libblackjack_handle = NULL;
 // The libhooker ABI is NOT uniform across providers. The vendored header
 // (libhooker.h, coolstar's real libhooker for unc0ver/Taurine) declares
 // LBHookMessage returning enum LIBHOOKER_ERR and LHHookFunctions/
@@ -49,43 +50,85 @@ static void (*fn_LHCloseImage)(struct libhooker_image *) = NULL;
 static bool (*fn_LHFindSymbols)(struct libhooker_image *, const char **, void **, size_t) = NULL;
 
 // Defined below probe_libhooker, which calls it during ABI detection.
-static BOOL provider_exports_official_set(void *handle);
+static BOOL provider_exports_official_set(void *hookerHandle, void *messageHandle);
 
 // Only successful probes are cached: if dlopen fails, a later call retries
 // (the engine may appear after HookKit loads).
 static BOOL probe_libhooker(void) {
-    NSString *jbPath = HKJBPath(@"/usr/lib/libhooker.dylib");
+    NSString *hookerPath = HKJBPath(@"/usr/lib/libhooker.dylib");
 
-    if(!jbPath) {
+    if(!hookerPath) {
         return NO;
     }
 
-    libhooker_handle = dlopen([jbPath fileSystemRepresentation], RTLD_LAZY);
+    void *hookerHandle = dlopen([hookerPath fileSystemRepresentation], RTLD_LAZY);
 
-    if(!libhooker_handle) {
+    if(!hookerHandle) {
         return NO;
+    }
+
+    // ElleKit packages one image behind libhooker/libblackjack symlinks;
+    // official libhooker builds them as separate dylibs. Prefer a combined
+    // export, then load libblackjack only when LBHookMessage is absent.
+    void *messageHandle = hookerHandle;
+    void *blackjackHandle = NULL;
+    void (*LBHookMessage)(Class, SEL, void *, void *) = (void (*)(Class, SEL, void *, void *))dlsym(messageHandle, "LBHookMessage");
+
+    if(!LBHookMessage) {
+        NSString *blackjackPath = HKJBPath(@"/usr/lib/libblackjack.dylib");
+
+        if(blackjackPath) {
+            blackjackHandle = dlopen([blackjackPath fileSystemRepresentation], RTLD_LAZY);
+        }
+
+        if(blackjackHandle) {
+            messageHandle = blackjackHandle;
+            LBHookMessage = (void (*)(Class, SEL, void *, void *))dlsym(messageHandle, "LBHookMessage");
+        }
     }
 
     // Resolve into locals first: the globals are published only after the
     // ENTIRE required symbol set is present, so an incomplete library can
     // never leave half-populated function pointers behind.
-    void (*LBHookMessage)(Class, SEL, void *, void *) = (void (*)(Class, SEL, void *, void *))dlsym(libhooker_handle, "LBHookMessage");
-    int (*LHHookFunctions)(const struct LHFunctionHook *, int) = (int (*)(const struct LHFunctionHook *, int))dlsym(libhooker_handle, "LHHookFunctions");
-    int (*LHPatchMemory)(const struct LHMemoryPatch *, int) = (int (*)(const struct LHMemoryPatch *, int))dlsym(libhooker_handle, "LHPatchMemory");
-    struct libhooker_image *(*LHOpenImage)(const char *) = (struct libhooker_image *(*)(const char *))dlsym(libhooker_handle, "LHOpenImage");
-    void (*LHCloseImage)(struct libhooker_image *) = (void (*)(struct libhooker_image *))dlsym(libhooker_handle, "LHCloseImage");
-    bool (*LHFindSymbols)(struct libhooker_image *, const char **, void **, size_t) = (bool (*)(struct libhooker_image *, const char **, void **, size_t))dlsym(libhooker_handle, "LHFindSymbols");
+    int (*LHHookFunctions)(const struct LHFunctionHook *, int) = (int (*)(const struct LHFunctionHook *, int))dlsym(hookerHandle, "LHHookFunctions");
+    int (*LHPatchMemory)(const struct LHMemoryPatch *, int) = (int (*)(const struct LHMemoryPatch *, int))dlsym(hookerHandle, "LHPatchMemory");
+    struct libhooker_image *(*LHOpenImage)(const char *) = (struct libhooker_image *(*)(const char *))dlsym(hookerHandle, "LHOpenImage");
+    void (*LHCloseImage)(struct libhooker_image *) = (void (*)(struct libhooker_image *))dlsym(hookerHandle, "LHCloseImage");
+    bool (*LHFindSymbols)(struct libhooker_image *, const char **, void **, size_t) = (bool (*)(struct libhooker_image *, const char **, void **, size_t))dlsym(hookerHandle, "LHFindSymbols");
 
     // ABI-incomplete: drop the handle and stay uncached so a later probe
     // genuinely retries (the engine may gain the full ABI after HookKit
     // loads). Nothing was published.
     if(!(LBHookMessage && LHHookFunctions && LHPatchMemory
             && LHOpenImage && LHCloseImage && LHFindSymbols)) {
-        dlclose(libhooker_handle);
-        libhooker_handle = NULL;
+        if(blackjackHandle) {
+            dlclose(blackjackHandle);
+        }
+
+        dlclose(hookerHandle);
         return NO;
     }
 
+    // Provider ABI detection (H8): classify by observable exports, never by
+    // image filename. Probe only this provider's handles: RTLD_DEFAULT could
+    // find an unrelated ElleKit image when real libhooker is also installed.
+    if(dlsym(hookerHandle, "EKHookFunction") || dlsym(messageHandle, "EKHookFunction")) {
+        // ElleKit: void LBHookMessage, 0-on-success LHHookFunctions/LHPatchMemory.
+        libhooker_abi = HKEKABIElleKit;
+    } else if(provider_exports_official_set(hookerHandle, messageHandle)) {
+        // Real libhooker (unc0ver/Taurine): applied-count returns + errno.
+        libhooker_abi = HKEKABILibhooker;
+    } else {
+        if(blackjackHandle) {
+            dlclose(blackjackHandle);
+        }
+
+        dlclose(hookerHandle);
+        return NO;
+    }
+
+    libhooker_handle = hookerHandle;
+    libblackjack_handle = blackjackHandle;
     fn_LBHookMessage = LBHookMessage;
     fn_LHHookFunctions = LHHookFunctions;
     fn_LHPatchMemory = LHPatchMemory;
@@ -93,42 +136,28 @@ static BOOL probe_libhooker(void) {
     fn_LHCloseImage = LHCloseImage;
     fn_LHFindSymbols = LHFindSymbols;
 
-    // Provider ABI detection (H8): classify by observable exports, never by
-    // image filename. EKHookFunction is ElleKit's own entry point; the compat
-    // layer may re-export it into this handle or dlopen libellekit lazily, so
-    // probe the handle first and the global scope second before concluding the
-    // provider is not ElleKit.
-    if(dlsym(libhooker_handle, "EKHookFunction") || dlsym(RTLD_DEFAULT, "EKHookFunction")) {
-        // ElleKit: void LBHookMessage, 0-on-success LHHookFunctions/LHPatchMemory.
-        libhooker_abi = HKEKABIElleKit;
-    } else if(provider_exports_official_set(libhooker_handle)) {
-        // Real libhooker (unc0ver/Taurine): applied-count returns + errno.
-        libhooker_abi = HKEKABILibhooker;
-    } else {
-        // Unclassifiable provider (partial/shim surface): fail closed — every
-        // operation is refused (see refuseIfUnknownABI). A misclassification
-        // could apply a hook and then suppress its original.
-        libhooker_abi = HKEKABIUnknown;
-    }
-
     return YES;
 }
 
 // The complete official libhooker symbol set, per the vendored headers
 // (libhooker.h + libblackjack.h): LBHookMessage, LHHookFunctions,
 // LHPatchMemory, LHOpenImage, LHCloseImage, LHFindSymbols, LHStrError,
-// LHExecMemory. The whole set present — with the EKHookFunction marker
-// absent — identifies real libhooker's count-returning ABI; anything less
-// is an incomplete shim and fails closed.
-static BOOL provider_exports_official_set(void *handle) {
+// LHExecMemory. Official builds split LBHookMessage into libblackjack and the
+// LH* symbols into libhooker. The whole set present — with the EKHookFunction
+// marker absent — identifies real libhooker's count-returning ABI.
+static BOOL provider_exports_official_set(void *hookerHandle, void *messageHandle) {
+    if(!dlsym(messageHandle, "LBHookMessage")) {
+        return NO;
+    }
+
     static const char *const officialSymbols[] = {
-        "LBHookMessage", "LHHookFunctions", "LHPatchMemory",
+        "LHHookFunctions", "LHPatchMemory",
         "LHOpenImage", "LHCloseImage", "LHFindSymbols",
         "LHStrError", "LHExecMemory"
     };
 
     for(size_t i = 0; i < sizeof(officialSymbols) / sizeof(officialSymbols[0]); i++) {
-        if(!dlsym(handle, officialSymbols[i])) {
+        if(!dlsym(hookerHandle, officialSymbols[i])) {
             return NO;
         }
     }
@@ -181,17 +210,18 @@ BOOL libhooker_available(void) {
 // (getAvailableSubstitutorTypes / getAvailableCategories): reports loadability
 // WITHOUT loading — dlopen_preflight never maps the image and never runs its
 // constructors, so introspection cannot initialize a hooking provider.
-// Deliberately uncached: the check is a single stat-family syscall on the
-// preflight path, and an uncached probe retries if the engine appears after
-// HookKit loads (mirroring the activation probe's retry contract).
+// Deliberately uncached: the two cheap preflights retry if the engine appears
+// after HookKit loads (mirroring the activation probe's retry contract).
 BOOL libhooker_discoverable(void) {
-    NSString *jbPath = HKJBPath(@"/usr/lib/libhooker.dylib");
+    NSString *hookerPath = HKJBPath(@"/usr/lib/libhooker.dylib");
+    NSString *blackjackPath = HKJBPath(@"/usr/lib/libblackjack.dylib");
 
-    if(!jbPath) {
+    if(!hookerPath || !blackjackPath) {
         return NO;
     }
 
-    return dlopen_preflight([jbPath fileSystemRepresentation]);
+    return dlopen_preflight([hookerPath fileSystemRepresentation])
+        && dlopen_preflight([blackjackPath fileSystemRepresentation]);
 }
 
 // Runtime original-publication policy for the combined ElleKit/libhooker

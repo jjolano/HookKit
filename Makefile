@@ -1,10 +1,25 @@
 ARCHS ?= armv7 armv7s arm64 arm64e
-# TARGET: clang:latest keeps the toolchain current; the 9.0 floor matches
-# control's Depends: firmware (>= 9.0) and lets one fat package serve armv7
-# through arm64e, the way 1.0.x shipped. Note: theos bumps the arm64e slice
-# minos to 14.0 automatically, so the low floor costs the modern slices
-# nothing. The rootless pass overrides both (see build.sh).
 TARGET ?= iphone:clang:latest:9.0
+
+# Release lanes override inherited make/environment values so a preceding
+# rootless build cannot silently turn a rootful framework into an iOS 15 one.
+ifeq ($(HOOKKIT_LANE),rootful-legacy)
+override ARCHS := armv7 armv7s arm64 arm64e
+override TARGET := iphone:clang:13.7
+override TARGET_OS_DEPLOYMENT_VERSION := 9.0
+override TARGET_OS_DEPLOYMENT_VERSION_arm64e := 12.0
+override THEOS_PACKAGE_SCHEME :=
+else ifeq ($(HOOKKIT_LANE),rootful-modern)
+override ARCHS := arm64 arm64e
+override TARGET := iphone:clang:latest:14.0
+override THEOS_PACKAGE_SCHEME :=
+else ifeq ($(HOOKKIT_LANE),rootless)
+override ARCHS := arm64 arm64e
+override TARGET := iphone:clang:latest:15.0
+override THEOS_PACKAGE_SCHEME := rootless
+else ifneq ($(HOOKKIT_LANE),)
+$(error unknown HOOKKIT_LANE '$(HOOKKIT_LANE)')
+endif
 
 include $(THEOS)/makefiles/common.mk
 
@@ -22,7 +37,7 @@ HookKit_PUBLIC_HEADERS = Headers/HookKit.h Headers/HookKit
 HookKit_CFLAGS = -fobjc-arc -I. -IHeaders -Ivendor -Ivendor/litehook
 HookKit_LDFLAGS =
 # Jailbreak-root seam is compile-time per scheme (see Backends/HKBackendCommon.m):
-# rooted = identity, rootless = libroot (auto-linked -lroot by theos),
+# rootful = identity, rootless = libroot (auto-linked -lroot by theos),
 # roothide = libroothide's jbroot(). Must append after the base CFLAGS above.
 # THEOS_PACKAGE_SCHEME_ROOTHIDE makes <roothide.h> select the real libroothide
 # API; without it the header falls back to roothide/stub.h whose jbroot()
@@ -53,10 +68,21 @@ HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/scripts/export-HookKit.list
 
 include $(THEOS_MAKE_PATH)/framework.mk
 
-# Dobby: vendored static lib, arm64/arm64e slices only (no armv7), C++
-# implementation so it needs libc++ at link. Excluded from the legacy
-# armv7/armv7s build by the ARCHS filter.
-ifeq ($(filter arm64,$(ARCHS)),arm64)
+# Dobby's current archive is new-ABI arm64e and hard-imports post-iOS-9
+# private symbols. Keep it out of the old-ABI/iOS-9 lane; the existing stub
+# leaves HK_LIB_DOBBY ABI-compatible but unavailable there.
+ifeq ($(HOOKKIT_LANE),rootful-legacy)
+HookKit_CFLAGS += -DHK_NO_DOBBY
+# Dobby supplies libc++ in modern lanes; legacy still needs it for the
+# compiler-generated guards around Objective-C function-local statics.
+HookKit_LDFLAGS += -lc++
+# The pre-Clang-12 Linux bundles do not ship Apple's iOS compiler-rt. Avoid
+# accidentally taking the current toolchain's iOS-14 runtime and link the
+# platform runtime explicitly. Xcode 11.7 has the matching compiler-rt.
+ifeq ($(THEOS_PLATFORM_NAME),linux)
+HookKit_LDFLAGS += -nodefaultlibs -lSystem
+endif
+else ifeq ($(filter arm64,$(ARCHS)),arm64)
 HookKit_LDFLAGS += -Lvendor/dobby -ldobby -lc++
 endif
 
@@ -68,6 +94,7 @@ endif
 # global ARCHS: that lets the framework span all four slices in one pass while
 # gum stays 64-bit. Rootless packaging maps /usr/lib -> /var/jb/usr/lib
 # automatically.
+ifneq ($(HOOKKIT_LANE),rootful-legacy)
 LIBRARY_NAME = HKGum
 HKGum_FILES = vendor/gum/hkgum.c
 HKGum_ARCHS = arm64 arm64e
@@ -76,6 +103,7 @@ HKGum_ARCHS = arm64 arm64e
 HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/scripts/export-HKGum.list
 HKGum_INSTALL_PATH = /usr/lib
 include $(THEOS_MAKE_PATH)/library.mk
+endif
 
 # Release export check: verifies every built binary exports exactly its
 # allowlist (scripts/export-*.list), per arch slice. Discovers the freshly
@@ -85,6 +113,11 @@ include $(THEOS_MAKE_PATH)/library.mk
 .PHONY: check-exports
 check-exports:
 	$(ECHO_NOTHING)bash scripts/check_exports.sh$(ECHO_END)
+
+# Release compatibility check. build.sh supplies the package profile.
+.PHONY: check-compat
+check-compat:
+	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT)$(ECHO_END)
 
 # Host-side test aggregate: builds and runs both suites in sequence, stopping
 # at the first failure (no -k).

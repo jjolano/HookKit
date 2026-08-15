@@ -10,15 +10,15 @@
 #import "native/hk_arm64.h"
 
 // Dobby: vendored static lib with arm64/arm64e slices only; the header is
-// plain C and safe to include, but the backend class below is arch-gated too
-// so armv7 builds never reference DobbyHook/DobbyCodePatch at link time.
-#if defined(__arm64__) || defined(__arm64e__)
+// plain C and safe to include, but the backend class below is gated too so
+// armv7 and legacy builds never reference DobbyHook/DobbyCodePatch.
+#if (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
 #include "dobby/dobby.h"
 #endif
 
 #pragma mark - HKDobbyBackend
 
-#if defined(__arm64__) || defined(__arm64e__)
+#if (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
 @implementation HKDobbyBackend
 - (int)lastErrno {
     return _lastErrno;
@@ -100,8 +100,7 @@
     }
 }
 @end
-#else   // !arm64: stub — the class symbol must exist for the registry entry,
-        // but dobby_available() is NO on armv7 so this is never instantiated.
+#else   // Unsupported arch or legacy lane: keep the class/ABI, report unavailable.
 @implementation HKDobbyBackend
 - (int)lastErrno {
     return _lastErrno;
@@ -131,8 +130,8 @@
     }
 }
 // image methods inherited from HKDlfcnBackend: they were NULL stubs here, but
-// dobby_available() is NO on armv7 so this class is never instantiated — the
-// stub existed only so the class symbol resolves for the registry entry.
+// dobby_available() is NO here, so this class is never instantiated; the stub
+// exists only so the class symbol resolves for the registry entry.
 @end
 #endif
 
@@ -140,12 +139,9 @@
 
 // Frida hooks through the HKGum.dylib wrapper, dlopen'd at runtime (path
 // resolved via HKJBPath, same pattern as libhooker/libsubstitute): the framework never
-// links frida-gum directly. No arch guard — everything is runtime dlopen, and
-// on armv7 dlopen simply fails (the wrapper product is arch-gated in the
-// Makefile). Theos forces the arm64e slice minos to 14.0, but the arm64 slice
-// keeps the deployment floor (9.0/12.0), so HKGum.dylib loads on iOS 12/13 on
-// arm64 devices; only on arm64e does dyld refuse below iOS 14. dlopen failure
-// is the whole gate (verified: built HKGum arm64 slice carries minos 12.0).
+// links frida-gum directly. No arch guard — everything is runtime dlopen. The
+// legacy package omits the wrapper, so dlopen is also the fallback that makes
+// Frida unavailable there without changing HookKit's public API.
 static void *hkgum_handle = NULL;
 static int (*fn_hkgum_hook_function)(void *, void *, void **) = NULL;
 static void (*fn_hkgum_begin_transaction)(void) = NULL;
