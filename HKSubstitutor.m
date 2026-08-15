@@ -1,4 +1,4 @@
-#import <HookKit/Compat.h>
+#import <HookKit.h>
 #import "Internal/HKBackendInternal.h"
 #import "Internal/HKInlineGuard.h"
 #import "Internal/HKInlinePreflight.h"

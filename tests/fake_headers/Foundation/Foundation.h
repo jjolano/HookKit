@@ -1,5 +1,5 @@
 // Host-test stub for Apple's <Foundation/Foundation.h>: lets the test include
-// the REAL Headers/HookKit/Compat.h on Linux. Compat.h only uses these names
+// the real Headers/HookKit.h on Linux. HookKit.h only uses these names
 // in declarations; the test never touches them at runtime.
 #ifndef fake_foundation_h
 #define fake_foundation_h

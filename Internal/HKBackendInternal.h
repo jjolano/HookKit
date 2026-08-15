@@ -6,7 +6,7 @@
 #ifndef hookkit_backend_internal_h
 #define hookkit_backend_internal_h
 
-#import <HookKit/Compat.h>
+#import <HookKit.h>
 
 #pragma mark - Hook operations
 
@@ -107,7 +107,7 @@ hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_
 
 #pragma mark - Backend protocol
 
-// HKStrategy is public API now (Compat.h, next to hookkit_cat_t) so that
+// HKStrategy is public API now (HookKit.h, next to hookkit_cat_t) so that
 // activeStrategy is observable; the protocol's setStrategy: below is the
 // backend-facing channel that consumes it.
 @protocol HKSubstitutorBackend <NSObject>
@@ -263,7 +263,7 @@ hookkit_status_t hk_original_finish(HKOriginalPublication *publication, hookkit_
 // Facade-owned wrapper around a backend image handle: the facade allocates
 // one per openImage: call, tags it with the owning backend, and unwraps the
 // raw handle before forwarding to that backend's find/close. The public
-// HKImageRef typedef in Compat.h stays an opaque pointer to this struct.
+// HKImageRef typedef in HookKit.h stays an opaque pointer to this struct.
 struct HKImage {
     uint32_t magic;
     hookkit_lib_t ownerType;

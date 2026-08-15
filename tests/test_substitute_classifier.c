@@ -25,7 +25,7 @@
 
 #include "substitute/substitute.h"
 
-#include "HookKit/Compat.h"
+#include "HookKit.h"
 
 #include "HKSubstituteErrors.h"
 

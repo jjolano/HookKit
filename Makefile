@@ -33,7 +33,7 @@ HookKit_FILES += native/hk_native.c native/hk_arm64.c native/hk_symbols.c
 HookKit_FILES += native/hk_swift.c
 HookKit_FRAMEWORKS = Foundation
 HookKit_INSTALL_PATH = /Library/Frameworks
-HookKit_PUBLIC_HEADERS = Headers/HookKit.h Headers/HookKit
+HookKit_PUBLIC_HEADERS = Headers/HookKit.h
 HookKit_CFLAGS = -fobjc-arc -I. -IHeaders -Ivendor -Ivendor/litehook
 HookKit_LDFLAGS =
 # Jailbreak-root seam is compile-time per scheme (see Backends/HKBackendCommon.m):
@@ -143,7 +143,7 @@ test-swift-abi:
 
 # Host-side substitute error classifier test. Pure code table, runs on the
 # build machine. Compiles as ObjC so the test can include the REAL
-# Headers/HookKit/Compat.h and the REAL vendored substitute.h (through a fake
+# Headers/HookKit.h and the real vendored substitute.h (through a fake
 # __APPLE__ plus minimal Mach-O/ObjC/Foundation header stubs, so the vendored
 # header's Apple-only sections compile on Linux). The classifier under test is
 # the REAL Internal/HKSubstituteErrors.c — compiled alongside the test, no

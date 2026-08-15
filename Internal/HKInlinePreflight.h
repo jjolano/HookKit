@@ -26,7 +26,7 @@
 #ifndef hookkit_inline_preflight_h
 #define hookkit_inline_preflight_h
 
-#import <HookKit/Compat.h>
+#import <HookKit.h>
 
 #include <stddef.h>
 #include <stdint.h>
