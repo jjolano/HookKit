@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -218,6 +218,17 @@ test-hook-add:
 .PHONY: test-plan-analyze
 test-plan-analyze:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_analyze Tests/Host/test_plan_analyze.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_analyze$(ECHO_END)
+
+# HookKit 3.0 engine registry test (Milestone 4's "fake engines"): proves
+# hk_plan_analyze actually consults registered engines now (see
+# Sources/Core/HKEngineInternal.h for the minimal internal contract this
+# is built on) -- an eligible engine upgrades a hook from NO_ROUTE to
+# ANALYZED, an engine matching the target kind but not the required reach
+# correctly stays NO_ROUTE, and first-eligible-wins correctly skips past
+# an ineligible engine registered earlier.
+.PHONY: test-engine-registry
+test-engine-registry:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_engine_registry Tests/Host/test_engine_registry.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_engine_registry$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

@@ -511,22 +511,31 @@ hk_status_t hk_plan_add_hook(
     return HK_STATUS_OK;
 }
 
-// No route exists for anything yet -- see this file's header comment.
+// Fills `out` with the NO_ROUTE defaults every hook starts from, then (if
+// the plan's runtime has any registered engines -- see HKEngineInternal.h)
+// checks each in registration order and stops at the first eligible one,
+// upgrading the result to HK_OUTCOME_ANALYZED. First-eligible-wins, not
+// ranked: spec section 9's full ranking algorithm (preferred bits
+// satisfied, fewest effects, strongest verification, ...) needs criteria
+// this milestone doesn't have real values for yet (no engine has a real
+// prepare/commit effect declaration, no ownership ledger exists to check
+// conflicts against). Only one fake engine exists in this codebase's own
+// tests today, so first-eligible-wins and true ranking aren't
+// distinguishable yet either way -- stated so this isn't mistaken for the
+// real algorithm once a second engine makes the difference visible.
+//
 // Side-effect-free by construction: this touches no target, calls no
 // provider, allocates only the ordinary heap memory the result/report
-// need. There is nothing here that COULD violate the side-effect-free
-// invariant yet, since there is no engine code to call in the first
-// place -- once a real engine registry exists, that is where the
-// discipline has to be enforced, not retrofitted here.
-static void hk_hook_result_no_route(const struct hk_hook *hook, hk_hook_result_t *out) {
+// need. describe() is required to be side-effect-free too (spec section
+// 8.3) -- not mechanically enforced yet (that needs the interposition-
+// based analysis side-effect tests in spec section 21.2, not written),
+// but every fake engine this codebase defines honors it by construction.
+static void hk_hook_analyze_one(const hk_plan_t *plan, const struct hk_hook *hook, hk_hook_result_t *out) {
     memset(out, 0, sizeof(*out));
     out->struct_size = sizeof(*out);
     out->struct_version = HK_ABI_VERSION_3_0;
     out->request_id = hook->hook_id;
-    out->outcome = HK_OUTCOME_NO_ROUTE;
     out->mutation = HK_MUTATION_NONE;
-    out->achieved_reach = 0;
-    out->unmet_preferred_reach = hook->spec.preferred_reach;
     out->declared_prepare_effects = 0;
     out->observed_prepare_effects = 0;
     out->declared_commit_effects = 0;
@@ -536,24 +545,43 @@ static void hk_hook_result_no_route(const struct hk_hook *hook, hk_hook_result_t
     out->continuation.kind = HK_CONTINUATION_KIND_NONE;
     out->original_available = false;
     out->verified = false;
-    // Judgment call, stated: NO_ROUTE is retryable because registering an
-    // engine later (a runtime/process-lifetime event this plan's analysis
-    // has no way to know about in advance) could change the outcome on a
-    // fresh hk_plan_analyze call. currently_valid is true because the
-    // result accurately reflects reality right now, not because the
-    // situation can never change.
-    out->retryable = true;
     out->currently_valid = true;
     out->matched_locations = 0;
     out->modified_locations = 0;
-    out->diagnostic_engine_id.data = NULL;
-    out->diagnostic_engine_id.length = 0;
     out->error_domain.data = NULL;
     out->error_domain.length = 0;
     out->error_code = 0;
     out->error_message.data = NULL;
     out->error_message.length = 0;
     out->artifact_count = 0;
+
+    for (size_t i = 0; i < plan->runtime->engine_count; i++) {
+        hk_engine_capabilities_t caps = plan->runtime->engines[i]->describe();
+        if (!hk_engine_eligible_minimal(&caps, hook->spec.target_kind, hook->spec.required_reach)) {
+            continue;
+        }
+        out->outcome = HK_OUTCOME_ANALYZED;
+        out->achieved_reach = caps.achievable_reach;
+        out->unmet_preferred_reach = hook->spec.preferred_reach & ~caps.achievable_reach;
+        out->retryable = false;  // a real route exists now; nothing to retry
+        out->diagnostic_engine_id.data = caps.engine_id;
+        out->diagnostic_engine_id.length = caps.engine_id ? strlen(caps.engine_id) : 0;
+        return;
+    }
+
+    // No engine was eligible (including the "zero engines registered"
+    // case this always was before this iteration) -- same honest NO_ROUTE
+    // as before, judgment calls on retryable/currently_valid unchanged.
+    out->outcome = HK_OUTCOME_NO_ROUTE;
+    out->achieved_reach = 0;
+    out->unmet_preferred_reach = hook->spec.preferred_reach;
+    // Judgment call, stated: NO_ROUTE is retryable because registering an
+    // engine later (a runtime/process-lifetime event this plan's analysis
+    // has no way to know about in advance) could change the outcome on a
+    // fresh hk_plan_analyze call.
+    out->retryable = true;
+    out->diagnostic_engine_id.data = NULL;
+    out->diagnostic_engine_id.length = 0;
 }
 
 hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {
@@ -582,7 +610,7 @@ hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {
     }
 
     for (size_t i = 0; i < plan->hook_count; i++) {
-        hk_hook_result_no_route(plan->hooks[i], &results[i]);
+        hk_hook_analyze_one(plan, plan->hooks[i], &results[i]);
         plan->hooks[i]->result = results[i];  // hk_hook_copy_result reads this directly
     }
 

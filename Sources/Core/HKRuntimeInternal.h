@@ -6,8 +6,17 @@
 #define HK_CORE_RUNTIME_INTERNAL_H
 
 #include <stdatomic.h>
+#include <stddef.h>
 
 #include "../../Headers/HookKit/HookKitRuntime.h"
+#include "HKEngineInternal.h"
+
+// Fixed-size, not grown dynamically: the real production engine set
+// (Milestone 6+) is small and compiled-in, and test code registering fake
+// engines never needs more than a handful at once. A growable array would
+// be solving a problem this doesn't have yet -- see HKPlanInternal.h for
+// where that complexity (pointer-stable growth) actually is needed.
+#define HK_RUNTIME_MAX_ENGINES 16
 
 struct hk_runtime {
     hk_id_t owner_id;
@@ -20,6 +29,14 @@ struct hk_runtime {
     hk_runtime_config_t config;
 
     atomic_bool shutdown_called;
+
+    // Not public API -- see HKEngineInternal.h. Empty in production (no
+    // production engine calls hk_runtime_register_engine_for_testing yet;
+    // Milestone 6+ engines will eventually populate this for real, at
+    // which point "for_testing" in the function name stops being
+    // accurate and it should be renamed, not left misleading).
+    const hk_engine_vtable_t *engines[HK_RUNTIME_MAX_ENGINES];
+    size_t engine_count;
 };
 
 #endif // HK_CORE_RUNTIME_INTERNAL_H

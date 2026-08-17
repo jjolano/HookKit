@@ -89,6 +89,25 @@ hk_id_t hk_runtime_owner_id(const hk_runtime_t *runtime) {
     return runtime->owner_id;
 }
 
+// Not public API -- see HKEngineInternal.h/HKRuntimeInternal.h. `vtable`
+// is not owned or copied: the caller (test code today; a real engine
+// module eventually) must keep it alive for the runtime's lifetime, the
+// same non-ownership convention hk_hook_spec_t.replacement already uses
+// for a caller-owned function pointer.
+bool hk_runtime_register_engine_for_testing(
+    hk_runtime_t *runtime,
+    const hk_engine_vtable_t *vtable)
+{
+    if (!runtime || !vtable) {
+        return false;
+    }
+    if (runtime->engine_count >= HK_RUNTIME_MAX_ENGINES) {
+        return false;
+    }
+    runtime->engines[runtime->engine_count++] = vtable;
+    return true;
+}
+
 // Nothing can be pending yet: the late-image delta queue this drains
 // (Milestone 12) doesn't exist. Always succeeds with an empty report
 // rather than erroring, since "nothing to drain" is a legitimate steady

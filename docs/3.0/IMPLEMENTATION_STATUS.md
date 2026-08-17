@@ -380,12 +380,12 @@ left for a future iteration rather than rushed through this one.
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
 | Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook complete; analyze/prepare/commit not started) | this commit — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
-| Router | in progress — honestly minimal: zero engines registered means zero candidates, so `hk_plan_analyze` correctly returns `HK_OUTCOME_NO_ROUTE` for everything; the actual ranking/eligibility algorithm (spec section 9) has nothing to rank yet | this commit |
-| Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | this commit — see below |
+| Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
+| Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
 | Artifact ledger | not started | |
 | Ownership ledger | not started | |
 | Original slots | not started | |
-| Fake engines | not started | |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — minimal `describe()`-only contract; `prepare_group`/`commit_group`/etc. not modeled yet (nothing calls them before `hk_plan_prepare` exists) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
 
@@ -573,6 +573,59 @@ unimplemented — they describe state that can't exist before a real commit
 happens against a real engine, so there's nothing honest to return yet.
 Left undefined rather than given a placeholder body that would compile but
 lie; nothing currently links against them, so this doesn't block anything.
+
+**Engine registry + router**, this iteration: `Sources/Core/HKEngineInternal.h`
+(new), a fixed-size (16-slot) engine array on `hk_runtime_t`, and
+`hk_runtime_register_engine_for_testing`. `hk_plan_analyze` upgrades from
+"always `NO_ROUTE`" to actually checking registered engines — the first
+piece of real router behavior this rewrite has, and the reason the
+previous entry's "zero candidates" state was worth building honestly
+first rather than faked, since this is exactly the code path it's now
+exercising for real.
+
+Deliberately minimal, stated as such rather than presented as the full
+contract: the vtable has only `describe()` — no `prepare_group`/
+`commit_group`/`revalidate_group`/`verify_group`/`compensate_group`/
+`inspect_continuation` (spec section 8.1), because nothing calls those
+until `hk_plan_prepare` exists to call them. Eligibility checks exactly 2
+of spec section 9's ~14 criteria: target kind supported, and every
+required-reach bit within the engine's achievable reach. Not checked yet,
+named explicitly in a code comment rather than silently assumed passing:
+image scope exactness, original-requirement/continuation-policy
+compatibility, forbidden effects, install context, architecture/OS,
+ownership conflicts, engine certification — each needs a concept this
+rewrite hasn't built yet (image catalog is Milestone 5; ownership ledger
+and certification are later Milestone 4/8/10 work). Multiple eligible
+engines aren't ranked, just first-registration-order-wins — with only one
+fake engine existing in any test so far, true ranking and
+first-wins aren't even distinguishable yet; stated so this isn't mistaken
+for the real section 9 algorithm once a second engine makes the
+difference visible.
+
+Not public API, and the registration function's own name says so:
+`hk_runtime_register_engine_for_testing` is for `Sources/Core`/`Tests/Host`
+only — the eventual real engines (Milestone 6+) are a fixed, compiled-in
+set, not something arbitrary callers extend. The function will need
+renaming the day a production engine actually calls it for real, not
+patched around; noted in its own doc comment so that rename isn't a
+surprise later.
+
+5 host tests (`test-engine-registry`) with a fake "rebind-style" engine
+(function-symbol targets, `HK_REACH_EXISTING_IMPORTS`) and a fake
+"objc-style" one (objc-method targets, `HK_REACH_OBJC_DISPATCH`), covering:
+the pre-existing zero-engines behavior is unchanged (regression check); an
+eligible engine upgrades a hook to `HK_OUTCOME_ANALYZED` with the right
+`achieved_reach` and `unmet_preferred_reach` (a preferred bit the engine
+can't achieve shows up as unmet, not silently dropped); an engine matching
+the target kind but not the required reach correctly stays `NO_ROUTE` (kind
+match alone is never sufficient); first-eligible-wins correctly skips past
+an engine registered earlier that doesn't match, rather than stopping or
+mis-selecting on the mismatch. Clean under `-fsanitize=address,undefined`,
+including confirming a `describe()` result's `engine_id` (a static string
+literal in every fake engine defined so far) survives being read back out
+of the result after the local `hk_engine_capabilities_t` that received it
+has gone out of scope — safe by construction since literals aren't
+stack-allocated, verified rather than assumed.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
