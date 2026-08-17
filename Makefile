@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -249,6 +249,18 @@ test-plan-prepare:
 .PHONY: test-plan-commit
 test-plan-commit:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_commit Tests/Host/test_plan_commit.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_commit$(ECHO_END)
+
+# HookKit 3.0 domain preparation gate test (spec section 15.1): a domain
+# with require_all_mandatory_prepared set, containing a mandatory hook
+# with no route, must block EVERY hook in that domain during
+# hk_plan_prepare -- even ones that individually would have prepared
+# successfully. Caught a real bug in the plan-level PREPARED/PARTIAL/
+# FAILED rollup while writing this test (a gate-blocked hook counted as
+# failed but not attempted, breaking the failed<=attempted assumption the
+# rollup depends on) -- see the fix's comment in HKPlan.c.
+.PHONY: test-domain-gate
+test-domain-gate:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_domain_gate Tests/Host/test_domain_gate.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_domain_gate$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

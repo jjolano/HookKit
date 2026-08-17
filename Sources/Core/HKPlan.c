@@ -643,15 +643,39 @@ hk_status_t hk_hook_copy_result(const hk_hook_t *hook, hk_hook_result_t *out_res
     return HK_STATUS_OK;
 }
 
+// Spec section 15.1's "domain preparation gate", the specific sub-check
+// that's actually checkable today: for a domain with
+// require_all_mandatory_prepared set, every HK_OPERATION_MANDATORY hook
+// assigned to it must have found a route (HK_OUTCOME_ANALYZED) or the
+// WHOLE domain is blocked -- even hooks in it that individually would
+// have prepared successfully. NOT checked yet, stated rather than
+// silently assumed satisfied: ownership-reservation currency and domain
+// dependency cycles (both later Milestone 4 work; there is no ownership
+// ledger or dependency graph yet to check against).
+static bool hk_domain_mandatory_gate_satisfied(const hk_plan_t *plan, const struct hk_domain *domain) {
+    if (!domain->spec.require_all_mandatory_prepared) {
+        return true;
+    }
+    for (size_t i = 0; i < plan->hook_count; i++) {
+        const struct hk_hook *hook = plan->hooks[i];
+        if (hook->spec.domain != domain) {
+            continue;
+        }
+        if (hook->spec.role == HK_OPERATION_MANDATORY && hook->result.outcome != HK_OUTCOME_ANALYZED) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Attempts preparation for every hook that got a route at analyze time
-// (HK_OUTCOME_ANALYZED). Hooks that stayed NO_ROUTE are left untouched --
-// there is nothing to prepare without a matched engine. No domain-level
-// gating yet (spec section 15.1's "domain preparation gate": one failed
-// mandatory member should block its whole domain) -- real, stated gap,
-// not implemented because nothing yet reads hk_domain_spec_t's
-// require_all_mandatory_prepared during prepare. Each hook's own outcome
-// is still accurate regardless; only the cross-hook domain-blocking
-// behavior is missing.
+// (HK_OUTCOME_ANALYZED) and whose domain's mandatory gate (above) is
+// satisfied. Hooks that stayed NO_ROUTE, or whose domain gate is blocked,
+// are left without a prepare_one attempt -- domain-gated hooks are marked
+// HK_OUTCOME_FAILED_SAFE (nothing was touched; the gate refused before any
+// attempt, not after a failed one) rather than silently carrying forward
+// ANALYZED, since ANALYZED would misreport them as still having a live,
+// attemptable route.
 hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
     if (out_report) {
         *out_report = NULL;
@@ -671,6 +695,18 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
         }
     }
 
+    bool *domain_gate_ok = NULL;
+    if (plan->domain_count > 0) {
+        domain_gate_ok = (bool *)malloc(plan->domain_count * sizeof(bool));
+        if (!domain_gate_ok) {
+            free(results);
+            return HK_STATUS_OUT_OF_MEMORY;
+        }
+        for (size_t d = 0; d < plan->domain_count; d++) {
+            domain_gate_ok[d] = hk_domain_mandatory_gate_satisfied(plan, plan->domains[d]);
+        }
+    }
+
     size_t attempted = 0, prepared = 0, failed = 0;
 
     for (size_t i = 0; i < plan->hook_count; i++) {
@@ -681,7 +717,33 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
         if (hook->result.outcome != HK_OUTCOME_ANALYZED) {
             continue;  // no route -- nothing to prepare
         }
+
+        // Counts as attempted whether or not the domain gate below ends up
+        // refusing it: the plan DID process this hook, the gate is just an
+        // earlier, cheaper failure point than calling prepare_one -- not
+        // "never touched" the way an upstream NO_ROUTE hook is. Getting
+        // this wrong (counting gate-blocked hooks as failed but not
+        // attempted) breaks the failed<=attempted assumption the
+        // PREPARED/PARTIAL/FAILED rollup below depends on -- caught for
+        // real by test_domain_gate.c's test_gate_on_blocks_whole_domain,
+        // not spotted by inspection.
         attempted++;
+
+        bool gate_blocked = false;
+        if (hook->spec.domain) {
+            for (size_t d = 0; d < plan->domain_count; d++) {
+                if (plan->domains[d] == hook->spec.domain) {
+                    gate_blocked = !domain_gate_ok[d];
+                    break;
+                }
+            }
+        }
+        if (gate_blocked) {
+            out->outcome = HK_OUTCOME_FAILED_SAFE;
+            failed++;
+            hook->result = *out;
+            continue;
+        }
 
         // An engine that was eligible for describe() but never implemented
         // prepare_one is a real inconsistency, not a silent skip -- treated
@@ -703,6 +765,7 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
         }
         hook->result = *out;
     }
+    free(domain_gate_ok);
 
     hk_report_t *report = hk_report_create(results, plan->hook_count);
     free(results);

@@ -712,6 +712,40 @@ the spec defines for this path — real coverage of the mechanism the rest
 of Milestone 4 (artifact ledger, ownership ledger, original slots) and
 Milestone 6+'s real engines build on top of.
 
+**Domain preparation gate** (spec section 15.1), this iteration: closes
+the gap stated in the previous two commits. `hk_domain_mandatory_gate_satisfied`
+checks the one sub-condition that's actually checkable today — every
+`HK_OPERATION_MANDATORY` hook in a `require_all_mandatory_prepared` domain
+must have a route — computed once per domain before `hk_plan_prepare`'s
+main loop, not re-scanned per hook. A hook whose domain gate fails is
+marked `HK_OUTCOME_FAILED_SAFE` even if it individually would have
+prepared successfully, proven by a dedicated test that registers a real
+matching engine for the blocked hook and confirms it still doesn't
+prepare. Not checked yet, stated rather than assumed satisfied:
+ownership-reservation currency and domain dependency cycles — both need
+concepts (an ownership ledger, a dependency graph) this rewrite hasn't
+built yet.
+
+Real bug caught by the test, not by inspection: the first version counted
+a gate-blocked hook toward `failed` but not `attempted`, which broke the
+`failed <= attempted` assumption the `PREPARED`/`PARTIAL`/`FAILED` rollup
+depends on — a plan whose only hook was correctly gate-blocked came out
+`PARTIAL` instead of `FAILED` (0 attempted, 0 prepared, 1 failed doesn't
+satisfy either the `PREPARED` or the `FAILED` branch condition, so it fell
+through to `PARTIAL` by default). `test_gate_on_blocks_whole_domain`
+asserts the plan-level state explicitly, not just each hook's own
+outcome, which is what caught it. Fixed by counting gate-blocked hooks as
+attempted (the plan did process them; the gate is just a cheaper, earlier
+refusal point than calling `prepare_one`), with the reasoning left in a
+comment at the fix site.
+
+4 host tests (`test-domain-gate`): no-domain hooks ungated (regression
+check), the gate is a no-op when `require_all_mandatory_prepared` is
+false, a real optional (non-mandatory) hook with no route does NOT trigger
+the gate (only mandatory members count), and the core blocking behavior
+itself. All 7 pre-existing suites re-verified with zero regressions, all
+clean under `-fsanitize=address,undefined`.
+
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
 
