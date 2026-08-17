@@ -106,9 +106,7 @@ hk_status_t hk_runtime_drain_pending(
     return HK_STATUS_OK;
 }
 
-// hk_report_t has no concrete definition yet (Milestone 4 continues in
-// Sources/Core/HKReport.c) -- every report is NULL today, so there is
-// nothing to free. Real once reports exist; not a permanent no-op.
-void hk_report_release(hk_report_t *report) {
-    (void)report;
-}
+// hk_report_release now lives in Sources/Core/HKReport.c, where
+// hk_report_t's concrete definition does. It used to be a permanent-
+// looking no-op here (every report was NULL because nothing produced one
+// yet); hk_plan_analyze is the first real producer.

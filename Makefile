@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -187,7 +187,7 @@ test-header-compile:
 # calls returned OK. -lpthread for pthread_once (the process-nonce guard).
 .PHONY: test-runtime-lifecycle
 test-runtime-lifecycle:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_runtime_lifecycle Tests/Host/test_runtime_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c -lpthread && $(THEOS_OBJ_DIR)/test_runtime_lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_runtime_lifecycle Tests/Host/test_runtime_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_runtime_lifecycle$(ECHO_END)
 
 # HookKit 3.0 plan lifecycle + domain registration test (Milestone 4):
 # real Sources/Core/HKPlan.c. The critical property this exercises is
@@ -197,7 +197,7 @@ test-runtime-lifecycle:
 # rather than stored inline in that array.
 .PHONY: test-plan-lifecycle
 test-plan-lifecycle:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_lifecycle Tests/Host/test_plan_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_lifecycle Tests/Host/test_plan_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_lifecycle$(ECHO_END)
 
 # HookKit 3.0 hook registration test (Milestone 4): real hk_plan_add_hook,
 # the deep copy of the full target union (symbol/address/objc/memory).
@@ -207,7 +207,17 @@ test-plan-lifecycle:
 # not supported yet (Swift targets, HK_IMAGE_EXPLICIT_SET).
 .PHONY: test-hook-add
 test-hook-add:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_hook_add Tests/Host/test_hook_add.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c -lpthread && $(THEOS_OBJ_DIR)/test_hook_add$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_hook_add Tests/Host/test_hook_add.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_hook_add$(ECHO_END)
+
+# HookKit 3.0 plan analysis test (Milestone 4): real hk_plan_analyze +
+# hk_report_t (Sources/Core/HKReport.c). No engine registry exists yet, so
+# every hook honestly gets HK_OUTCOME_NO_ROUTE -- this test is about the
+# plumbing (state transitions, report/hook independence, result content)
+# being correct given that starting point, not routing logic that doesn't
+# exist yet.
+.PHONY: test-plan-analyze
+test-plan-analyze:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_analyze Tests/Host/test_plan_analyze.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_analyze$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

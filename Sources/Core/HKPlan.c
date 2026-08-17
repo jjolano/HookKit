@@ -1,8 +1,17 @@
-// hk_plan_t lifecycle, domain registration, and hook registration.
-// Milestone 4 continues: hk_plan_analyze/prepare/commit and everything
-// past DRAFT state are not implemented yet. See HKPlanInternal.h for why
-// domains and hooks are individually heap-allocated rather than stored
-// inline in a growable array.
+// hk_plan_t lifecycle, domain registration, hook registration, and
+// analysis. Milestone 4 continues: hk_plan_prepare/commit are not
+// implemented yet. See HKPlanInternal.h for why domains and hooks are
+// individually heap-allocated rather than stored inline in a growable
+// array.
+//
+// hk_plan_analyze reports HK_OUTCOME_NO_ROUTE for every hook right now --
+// honestly, not as a stub standing in for something smarter. No engine
+// registry exists yet (that's Milestone 6+, and the router that would
+// consult it is a separate not-yet-written piece), so there are zero
+// candidates for any hook to route to. "The router ran, found nothing to
+// route to, and said so truthfully" is what side-effect-free analysis is
+// supposed to look like when nothing is registered -- not a placeholder
+// to feel embarrassed about.
 //
 // hk_plan_add_hook only supports HK_TARGET_FUNCTION_SYMBOL/_ADDRESS/
 // _OBJC_METHOD/_MEMORY_PATCH -- HK_TARGET_SWIFT_VTABLE is rejected with
@@ -18,6 +27,7 @@
 
 #include "HKIDs.h"
 #include "HKPlanInternal.h"
+#include "HKReportInternal.h"
 #include "HKRuntimeInternal.h"
 
 #include <stdlib.h>
@@ -500,3 +510,110 @@ hk_status_t hk_plan_add_hook(
     *out_hook = hook;
     return HK_STATUS_OK;
 }
+
+// No route exists for anything yet -- see this file's header comment.
+// Side-effect-free by construction: this touches no target, calls no
+// provider, allocates only the ordinary heap memory the result/report
+// need. There is nothing here that COULD violate the side-effect-free
+// invariant yet, since there is no engine code to call in the first
+// place -- once a real engine registry exists, that is where the
+// discipline has to be enforced, not retrofitted here.
+static void hk_hook_result_no_route(const struct hk_hook *hook, hk_hook_result_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->struct_size = sizeof(*out);
+    out->struct_version = HK_ABI_VERSION_3_0;
+    out->request_id = hook->hook_id;
+    out->outcome = HK_OUTCOME_NO_ROUTE;
+    out->mutation = HK_MUTATION_NONE;
+    out->achieved_reach = 0;
+    out->unmet_preferred_reach = hook->spec.preferred_reach;
+    out->declared_prepare_effects = 0;
+    out->observed_prepare_effects = 0;
+    out->declared_commit_effects = 0;
+    out->observed_commit_effects = 0;
+    out->continuation.struct_size = sizeof(out->continuation);
+    out->continuation.struct_version = HK_ABI_VERSION_3_0;
+    out->continuation.kind = HK_CONTINUATION_KIND_NONE;
+    out->original_available = false;
+    out->verified = false;
+    // Judgment call, stated: NO_ROUTE is retryable because registering an
+    // engine later (a runtime/process-lifetime event this plan's analysis
+    // has no way to know about in advance) could change the outcome on a
+    // fresh hk_plan_analyze call. currently_valid is true because the
+    // result accurately reflects reality right now, not because the
+    // situation can never change.
+    out->retryable = true;
+    out->currently_valid = true;
+    out->matched_locations = 0;
+    out->modified_locations = 0;
+    out->diagnostic_engine_id.data = NULL;
+    out->diagnostic_engine_id.length = 0;
+    out->error_domain.data = NULL;
+    out->error_domain.length = 0;
+    out->error_code = 0;
+    out->error_message.data = NULL;
+    out->error_message.length = 0;
+    out->artifact_count = 0;
+}
+
+hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {
+    if (out_report) {
+        *out_report = NULL;
+    }
+    if (!plan) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+    if (plan->state != HK_PLAN_DRAFT) {
+        // Analysis is meant to snapshot a DRAFT plan's routability.
+        // Re-analyzing an already-analyzed (or later-state) plan isn't
+        // described anywhere in the spec's plan-state text -- rather than
+        // guess at an unspecified re-entry flow, this requires DRAFT,
+        // matching the state machine's linear DRAFT -> ANALYZED ->
+        // PREPARING -> ... shape (section 6.25).
+        return HK_STATUS_INVALID_STATE;
+    }
+
+    hk_hook_result_t *results = NULL;
+    if (plan->hook_count > 0) {
+        results = (hk_hook_result_t *)malloc(plan->hook_count * sizeof(hk_hook_result_t));
+        if (!results) {
+            return HK_STATUS_OUT_OF_MEMORY;
+        }
+    }
+
+    for (size_t i = 0; i < plan->hook_count; i++) {
+        hk_hook_result_no_route(plan->hooks[i], &results[i]);
+        plan->hooks[i]->result = results[i];  // hk_hook_copy_result reads this directly
+    }
+
+    hk_report_t *report = hk_report_create(results, plan->hook_count);
+    free(results);
+    if (!report) {
+        return HK_STATUS_OUT_OF_MEMORY;
+    }
+
+    plan->state = HK_PLAN_ANALYZED;
+
+    if (out_report) {
+        *out_report = report;
+    } else {
+        hk_report_release(report);
+    }
+    return HK_STATUS_OK;
+}
+
+hk_status_t hk_hook_copy_result(const hk_hook_t *hook, hk_hook_result_t *out_result) {
+    if (!hook || !out_result) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+    *out_result = hook->result;  // flat copy: hk_hook_result_t owns no heap allocations today
+    return HK_STATUS_OK;
+}
+
+// hk_hook_original_slot / hk_original_slot_load / hk_hook_installed_handle
+// / hk_installed_hook_copy_result are declared in HookKitPlan.h but not
+// implemented here yet -- they describe state that doesn't exist before a
+// real commit happens (Milestone 4's "Original slots" work, and the
+// engines that would actually install something), so there is nothing
+// honest to return today. Left undefined rather than given a placeholder
+// body that would compile but lie.

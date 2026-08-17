@@ -380,8 +380,8 @@ left for a future iteration rather than rushed through this one.
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
 | Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook complete; analyze/prepare/commit not started) | this commit — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
-| Router | not started | |
-| Results / Reports | not started | `hk_report_t` still has no concrete definition — every `out_report` is `NULL` today |
+| Router | in progress — honestly minimal: zero engines registered means zero candidates, so `hk_plan_analyze` correctly returns `HK_OUTCOME_NO_ROUTE` for everything; the actual ranking/eligibility algorithm (spec section 9) has nothing to rank yet | this commit |
+| Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | this commit — see below |
 | Artifact ledger | not started | |
 | Ownership ledger | not started | |
 | Original slots | not started | |
@@ -515,6 +515,64 @@ test that matters most for that, given how many `malloc`/`free` paths and
 error-unwinding branches this code has. Not tested yet (no fault-injection
 harness exists — that's its own later Milestone 4 deliverable): the
 out-of-memory paths themselves.
+
+**`hk_plan_analyze` + `hk_report_t`**, this iteration: `Sources/Core/HKReport.c`
+(new — matches the file name the spec's own repo layout, section 5, already
+uses), `HKReportInternal.h`, and `hk_plan_analyze`/`hk_hook_copy_result` in
+`HKPlan.c`.
+
+The honest starting point stated plainly rather than dressed up: no engine
+registry exists yet, so there are zero candidates for any hook to route to
+— `hk_plan_analyze` reports `HK_OUTCOME_NO_ROUTE` for every hook, for real,
+not as a placeholder standing in for smarter logic. "The router ran, found
+nothing to route to, and said so truthfully" *is* what side-effect-free
+analysis with nothing registered is supposed to look like — Milestone 6+'s
+job is giving the router something real to find, not making analysis lie
+about the current state to look more finished. `unmet_preferred_reach` on
+each result correctly echoes back exactly what that hook's spec asked for
+(verified per-hook in the test, not just "some non-zero value").
+
+Judgment call stated in code: a `NO_ROUTE` result's `retryable` is set
+`true` — registering an engine later could change the outcome on a fresh
+analysis, even though nothing in this plan's state changed. `currently_valid`
+is `true` for a different reason: the result accurately reflects reality
+*right now*, which is a separate claim from whether that reality might
+later change.
+
+`hk_report_t` is a flat array of `hk_hook_result_t` value copies, not
+pointers back into live hooks — proven independent in
+`test_report_independent_of_plan_after_release` (release the report,
+confirm the plan and its hooks are still fully readable afterward).
+`hk_report_release` moved from `HKRuntime.c` (where it was a
+permanent-looking no-op because nothing produced a report yet) into
+`HKReport.c`, where `hk_report_t`'s concrete definition now lives.
+
+Real slip caught by the build, not by careful reading this time: moving
+`hk_report_release` broke the *existing* `test-runtime-lifecycle` and
+`test-plan-lifecycle`/`test-hook-add` Makefile targets, which call it
+directly or transitively (`hk_plan_analyze` is compiled into `HKPlan.c`
+unconditionally, so linking `HKPlan.c` at all now requires
+`HKReport.c`, whether or not a given test calls `hk_plan_analyze`) —
+`make test` failed with undefined-reference linker errors until all three
+targets' source lists were updated. Both fixed, full suite re-verified
+green afterward rather than assumed fixed from reading the diff.
+
+8 host tests (`test-plan-analyze`), covering all of the above plus:
+re-analyzing an already-`ANALYZED` plan rejected (state machine is
+linear — DRAFT is required, per the spec's own DRAFT → ANALYZED →
+PREPARING → ... shape, section 6.25); a hook's own result correctly
+transitions from `HK_OUTCOME_UNANALYZED` (set at `add_hook` time) to
+`HK_OUTCOME_NO_ROUTE` after analysis; `out_report == NULL` still updates
+every hook's stored result and still transitions plan state, with the
+report itself released internally rather than leaked. Clean under
+`-fsanitize=address,undefined`.
+
+`hk_hook_original_slot`/`hk_original_slot_load`/`hk_hook_installed_handle`/
+`hk_installed_hook_copy_result` remain declared in `HookKitPlan.h` but
+unimplemented — they describe state that can't exist before a real commit
+happens against a real engine, so there's nothing honest to return yet.
+Left undefined rather than given a placeholder body that would compile but
+lie; nothing currently links against them, so this doesn't block anything.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
