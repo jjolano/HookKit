@@ -87,19 +87,61 @@ milestone).
 ---
 
 ## Milestone 2 — Shadow manifest extraction
-**State: not started.** Milestone 1 is complete, so the schema the
-extractor writes against (`Schemas/shadow-hook-manifest.schema.json`)
-exists. This milestone's tooling lives entirely in
-`HookKit/Tools/shadow-manifest-extract/` and only *reads* `shadow/` (no
-commits there, ever, for this milestone) — plain reads are already fine, per
-the Milestone 0 audit work that already read `shadow/docs/*` and grepped its
-tree without issue. The thing worth a heads-up before doing, not a thing
-requiring sign-off to even attempt: running the real Logos-preprocessor /
-Clang-AST crawl (spec §18.2) means invoking build tooling against
-`shadow/`'s live source tree, which is a bigger and noisier action than a
-grep — will build the extractor next against synthetic/local fixtures first,
-and flag before the first real run against the live repo so any temp/build
-output path can be pointed safely outside it.
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit tier only) | this commit |
+| `Tools/shadow-manifest-extract/validate.py` | complete | this commit |
+| `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, empty — nothing has needed one yet) | this commit |
+| `artifacts/shadow-current-manifest.json` | in progress (22/22 install units, 0 individual hook targets within them) | this commit |
+| `logos_preprocess.py` | not started | needed for per-hook decomposition of units that still use raw Logos `%hook` |
+| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally |
+| Initial route-feasibility report | not started | depends on the above |
+
+What actually happened this iteration, precisely: read real Shadow source
+(`ShadowCore.dylib/hooks/**/*`, `HookCoordinator.m`,
+`Shadow.framework/HookConfiguration.{h,m}`) rather than build the extractor
+blind against the spec's description. Found `kSHDWInstallUnits[]` — a real,
+clean C array-of-structs the coordinator itself walks via `SHDWInstallUnits()`
+— and built `extract.py` to parse it directly (proper comment/string-aware
+tokenizer, not regex-over-raw-text: caught myself matching "%hook" inside a
+plain code comment earlier this session with a naive `grep`, so the parser
+strips comments correctly before scanning, and `test_extract.py` has a
+regression fixture for exactly that mistake). Ran it for real, read-only,
+against the live `shadow` repo (commit `efbc732e`) — 22/22 rows parsed,
+schema-valid, cross-checked by hand against three real source files (see
+below). Added `structured_table` as a fourth `extraction_method` enum value
+in `shadow-hook-manifest.schema.json` (was `static_ast`/`logos_preprocess`/
+`manual_override` only) because a direct array-of-structs parse is a
+meaningfully stronger guarantee than either of those and deserves its own
+label, not a shoehorned one — found only after seeing the real source, not
+anticipated when the schema was written last iteration.
+
+**What this is honestly NOT yet**: `SHDWInstallUnit` rows are
+coordinator-level groups (e.g. `"Hook_Filesystem@c"`), not the individual
+hook targets inside them. Confirmed by reading `DeviceCheckHooks.h`/`.m`:
+that group alone has its own clean structured descriptor table
+(`shdw_devicecheck_descriptors[]`, 6-field rows: class, selector, kind,
+encoding, argCount, policy) which a similar direct-parse pass could cover —
+but I have not yet checked whether the other ~19 groups all follow that
+same descriptor-table shape or fall back to raw Logos `%hook` blocks (a real
+mix exists: `grep` for real `^%hook`/`^%end` directives, comment-excluded,
+found 7 files that still use them). Every extracted target's
+`known_compatibility_risks` says this explicitly rather than silently
+implying full coverage. `original_requirement`/`required_reach` per target
+are reasoned defaults cited from the real `SHDWCapabilityKind` doc comments
+in `HookConfiguration.h`, not verified per-hook — flagged as such in
+`extract.py`'s module docstring, to be tightened by the next pass or
+`manual_overrides.yaml`.
+
+Boundary note: everything above was read-only against `shadow/` (source
+reads + `git rev-parse HEAD` for provenance) — no commits, no build/Logos
+preprocessing run against it yet. Running the actual Logos preprocessor or
+Clang AST tooling against `shadow/`'s tree (needed for the per-hook
+decomposition pass) is a bigger, noisier action than a source read and will
+get its own heads-up before it happens, per the standing boundary at the
+top of this file.
 
 ## Milestone 3 — ABI freeze candidate
 **State: not started.**

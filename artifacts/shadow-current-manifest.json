@@ -1,0 +1,477 @@
+{
+  "manifest_version": "0.1.0-milestone2-installunits",
+  "generated_at": "2026-08-17T05:52:15Z",
+  "shadow_commit": "efbc732e99432773158322adf47c93e5bd447518",
+  "targets": [
+    {
+      "stable_hook_id": "dyld",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 11
+      },
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 12
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDFilesystem"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_EnvVars@c",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 13
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDEnvVars"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_EnvVars@objc",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 14
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDEnvVars"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_DeviceCheck",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 15
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDDeviceCheck"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 16
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDMachBootstrap"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_IOKit",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 17
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDIOKit"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 18
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDLowLevelC"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 19
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDAntiDebugging"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "objc",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 20
+      },
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "objc@methodimpl",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 23
+      },
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+      ],
+      "target_kind": "function_symbol"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 24
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDSyscall"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_Memory",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 25
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDMemory"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 26
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDSandbox"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "classes",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 27
+      },
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "symlookup",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 28
+      },
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_DynamicLibrariesExtra",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 31
+      },
+      "role": "optional",
+      "commit_domain": "phase_escalation",
+      "required_reach": [
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDDynamicLibrariesExtra"
+      ],
+      "target_kind": "function_symbol",
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@objc",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 34
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier2",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "defer_until_available",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDFilesystem"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_Foundation@objc",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 35
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier2",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "defer_until_available",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDFoundation"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_HideApps",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 36
+      },
+      "role": "optional",
+      "commit_domain": "phase_tier2",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "defer_until_available",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDHideApps"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_URLScheme",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 38
+      },
+      "role": "optional",
+      "commit_domain": "phase_uikit",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "defer_until_available",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDURLScheme"
+      ],
+      "target_kind": "objc_method"
+    },
+    {
+      "stable_hook_id": "Hook_Foundation@uikit",
+      "source": {
+        "file": "Shadow.framework/HookConfiguration.m",
+        "line": 39
+      },
+      "role": "optional",
+      "commit_domain": "phase_uikit",
+      "required_reach": [
+        "objc_dispatch"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "defer_until_available",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "pref-gated by SHDWHookIDFoundation"
+      ],
+      "target_kind": "objc_method"
+    }
+  ]
+}

@@ -3,6 +3,8 @@ packages/
 build/
 .DS_Store
 .vscode/
+__pycache__/
+*.pyc
 
 # deepwork
 .slim/deepwork/

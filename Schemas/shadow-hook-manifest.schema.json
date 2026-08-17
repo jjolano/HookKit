@@ -130,8 +130,8 @@
 
         "extraction_method": {
           "type": "string",
-          "enum": ["static_ast", "logos_preprocess", "manual_override"],
-          "description": "manual_override entries must be individually justified in Tools/shadow-manifest-extract/manual_overrides.yaml — this field is what lets validate.py flag manifest entries nobody can re-derive from source."
+          "enum": ["structured_table", "static_ast", "logos_preprocess", "manual_override"],
+          "description": "manual_override entries must be individually justified in Tools/shadow-manifest-extract/manual_overrides.yaml — this field is what lets validate.py flag manifest entries nobody can re-derive from source. structured_table means the row was parsed directly from a real C array-of-structs (e.g. kSHDWInstallUnits[]) rather than inferred from free-form Objective-C/Logos source — stronger confidence than static_ast, not weaker: added after finding Shadow's actual install-unit table is exactly this shape."
         }
       },
       "additionalProperties": false

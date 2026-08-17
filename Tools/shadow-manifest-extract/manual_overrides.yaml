@@ -1,0 +1,28 @@
+# Manual overrides for extract.py's output, spec section 18.2.
+#
+# Every key under `overrides` is a stable_hook_id that must already exist in
+# the auto-extracted manifest (validate.py's stale-override check enforces
+# this) -- this file corrects/augments fields extract.py couldn't derive
+# from source, it does not invent new targets. Any field present here is
+# shallow-merged onto the extracted target and the target's
+# extraction_method is set to "manual_override", so validate.py and the
+# route-feasibility tool both know this row's precision came from a human,
+# not a parse.
+#
+# Empty for now -- extract.py's structured_table pass hasn't needed a
+# correction yet. Add entries here once the per-hook decomposition pass
+# (logos_preprocess.py / clang_ast_extract.py, not built yet -- see
+# extract.py's module docstring) finds something it genuinely can't resolve
+# statically, or once a reviewer disagrees with one of extract.py's
+# documented reasoned defaults (original_requirement, required_reach).
+#
+# Example shape:
+#
+# overrides:
+#   Hook_DeviceCheck:
+#     original_requirement: callable_continuation
+#     known_compatibility_risks:
+#       - "reviewed 2026-08-17: DeviceCheckHooks.m's descriptor table never
+#          calls the original IMP, HK_ORIGINAL_NONE is actually correct"
+
+overrides: {}
