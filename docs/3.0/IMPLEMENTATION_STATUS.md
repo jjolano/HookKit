@@ -62,6 +62,11 @@ the performance baseline until the release gates in §28.4.
 | `ENGINE_CONTRACT.md` (draft) | not started | next iteration |
 | Legacy compatibility policy doc | not started | next iteration (will become `LEGACY_ABI.md`) |
 
+Schema validation: all four `Schemas/*.json` files verified as both valid
+JSON and structurally valid JSON Schema (draft 2020-12) via Python's
+`jsonschema.validators.validator_for(...).check_schema()` — host-verified,
+not just eyeballed.
+
 Exit gate not yet met: engine contract draft and legacy compatibility policy
 still open.
 

@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hookkit.dev/schemas/shadow-hook-manifest.schema.json",
+  "title": "Shadow Hook Manifest",
+  "description": "Output of Tools/shadow-manifest-extract (spec section 18), written to artifacts/shadow-current-manifest.json. One entry per concrete Shadow hook target, extracted from SHDWInstallUnits, shadowhook_* functions, direct HKSubstitutor calls, Logos %hook/%function, and the manual overlay for anything that can't be statically enumerated. This is the input Tools/route-feasibility reads against HookKit's engine capability descriptors and ProviderEvidence — see shadow-route-report.schema.json for its output.",
+  "type": "object",
+  "required": ["manifest_version", "generated_at", "targets"],
+  "properties": {
+    "manifest_version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "shadow_commit": { "type": "string" },
+
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "target": {
+      "type": "object",
+      "required": [
+        "stable_hook_id", "target_kind", "role", "commit_domain",
+        "required_reach", "original_requirement", "continuation_policy",
+        "extraction_method"
+      ],
+      "properties": {
+        "stable_hook_id": { "type": "string" },
+        "parent_install_unit": { "type": "string" },
+
+        "source": {
+          "type": "object",
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+
+        "target_kind": {
+          "type": "string",
+          "enum": ["function_symbol", "function_address", "objc_method", "memory_patch", "swift_vtable"]
+        },
+        "target_image": { "type": "string" },
+        "target_symbol": { "type": "string" },
+        "target_address": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
+        "target_class": { "type": "string" },
+        "target_selector": { "type": "string" },
+
+        "definition_scope": {
+          "type": "string",
+          "enum": ["any_loaded", "main_executable", "exact_path", "exact_uuid", "exact_header", "explicit_set"]
+        },
+        "caller_image_scope": {
+          "type": "string",
+          "enum": ["any_loaded", "main_executable", "exact_path", "exact_uuid", "exact_header", "explicit_set"]
+        },
+
+        "required_reach": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "existing_imports", "future_imports", "entrypoint", "dlsym_pointers",
+              "saved_pointers", "exact_image_scope", "private_address",
+              "current_images", "future_images", "objc_dispatch",
+              "swift_vtable_dispatch", "exact_memory"
+            ]
+          }
+        },
+        "preferred_reach": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reach_bit" }
+        },
+
+        "original_requirement": {
+          "type": "string",
+          "enum": ["none", "direct_predecessor", "callable_continuation"]
+        },
+        "continuation_policy": {
+          "type": "string",
+          "enum": ["any", "no_dynamic_executable_memory", "forbidden"]
+        },
+
+        "mutation_constraints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "preparation_effect_constraints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "availability": {
+          "type": "string",
+          "enum": ["required_now", "optional_if_present", "defer_until_available"]
+        },
+        "image_lifecycle": {
+          "type": "string",
+          "enum": ["current_only", "current_and_future"]
+        },
+
+        "role": {
+          "type": "string",
+          "enum": ["mandatory", "optional"]
+        },
+        "commit_domain": { "type": "string" },
+
+        "architecture": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["armv7", "armv7s", "arm64", "arm64e"] }
+        },
+        "minimum_os": { "type": "string" },
+
+        "current_implementation": {
+          "type": "string",
+          "description": "Free-text pointer to the current Shadow implementation, e.g. \"ShadowCore.dylib/hooks/filesystem/stat.x:42\"."
+        },
+        "current_hookkit_2_5_route": {
+          "type": "string",
+          "description": "Which HK_LIB_*/HK_CAT_* the target currently resolves through, if known."
+        },
+
+        "verification_method": { "type": "string" },
+        "known_compatibility_risks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "extraction_method": {
+          "type": "string",
+          "enum": ["static_ast", "logos_preprocess", "manual_override"],
+          "description": "manual_override entries must be individually justified in Tools/shadow-manifest-extract/manual_overrides.yaml — this field is what lets validate.py flag manifest entries nobody can re-derive from source."
+        }
+      },
+      "additionalProperties": false
+    },
+    "reach_bit": {
+      "type": "string",
+      "enum": [
+        "existing_imports", "future_imports", "entrypoint", "dlsym_pointers",
+        "saved_pointers", "exact_image_scope", "private_address",
+        "current_images", "future_images", "objc_dispatch",
+        "swift_vtable_dispatch", "exact_memory"
+      ]
+    }
+  }
+}

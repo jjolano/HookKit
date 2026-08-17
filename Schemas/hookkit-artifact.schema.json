@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hookkit.dev/schemas/hookkit-artifact.schema.json",
+  "title": "HookKit Artifact",
+  "description": "One immutable artifact record from a HookKit 3 report or process-wide snapshot. Field names map 1:1 to hk_artifact_t (docs/3.0/PUBLIC_C_ABI.md, docs/3.0/ARTIFACT_MANIFEST.md pending); enum values here are the lowercase form of the corresponding HK_ARTIFACT_*/HK_* C constant, e.g. \"target_text_patch\" <-> HK_ARTIFACT_TARGET_TEXT_PATCH.",
+  "type": "object",
+  "required": ["artifact_id", "kind", "state", "effects"],
+  "properties": {
+    "artifact_id": { "$ref": "#/$defs/id" },
+    "runtime_owner_id": { "$ref": "#/$defs/id" },
+    "plan_id": { "$ref": "#/$defs/id" },
+    "request_id": { "$ref": "#/$defs/id" },
+    "installed_id": { "$ref": "#/$defs/id" },
+
+    "kind": {
+      "type": "string",
+      "enum": [
+        "import_slot",
+        "target_text_patch",
+        "memory_patch",
+        "trampoline",
+        "static_continuation",
+        "dynamic_executable_allocation",
+        "branch_island",
+        "objc_method_change",
+        "swift_vtable_change",
+        "original_pointer",
+        "loaded_provider_image",
+        "provider_activation",
+        "image_callback",
+        "late_image_application",
+        "memory_protection_transition",
+        "file_mapping",
+        "thread_creation",
+        "unknown_process_mutation"
+      ]
+    },
+
+    "state": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "prepared",
+        "pending",
+        "committed",
+        "verified",
+        "late_applied",
+        "partially_applied",
+        "compensated",
+        "rolled_back",
+        "invalidated",
+        "discarded",
+        "observed_existing"
+      ]
+    },
+
+    "effects": {
+      "description": "Bitwise-OR of hk_effects_t names this artifact represents, as lowercase strings (e.g. HK_EFFECT_TARGET_TEXT_MUTATION -> \"target_text_mutation\"). At least one entry required.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "target_text_mutation",
+          "import_mutation",
+          "objc_metadata_mutation",
+          "swift_vtable_mutation",
+          "memory_mutation",
+          "executable_allocation",
+          "static_continuation_use",
+          "provider_activation",
+          "provider_image_load",
+          "image_load",
+          "callback_registration",
+          "thread_creation",
+          "private_symbol_scan",
+          "file_mapping",
+          "memory_protection_change",
+          "unknown_process_mutation"
+        ]
+      }
+    },
+
+    "engine_id": { "type": "string" },
+    "mechanism_id": { "type": "string" },
+
+    "image": { "$ref": "#/$defs/image_identity" },
+    "image_generation": { "type": "integer", "minimum": 0 },
+    "installed_generation": { "type": "integer", "minimum": 0 },
+
+    "address": { "$ref": "#/$defs/hex_address" },
+    "size": { "type": "integer", "minimum": 0 },
+
+    "original_bytes": { "$ref": "#/$defs/byte_storage" },
+    "expected_bytes": { "$ref": "#/$defs/byte_storage" },
+    "expected_mask": { "$ref": "#/$defs/byte_storage" },
+    "current_bytes": { "$ref": "#/$defs/byte_storage" },
+
+    "original_pointer": { "$ref": "#/$defs/hex_address" },
+    "replacement_pointer": { "$ref": "#/$defs/hex_address" },
+    "import_slot_address": { "$ref": "#/$defs/hex_address" },
+
+    "continuation_address": { "$ref": "#/$defs/hex_address" },
+    "jump_back_destination": { "$ref": "#/$defs/hex_address" },
+
+    "original_protection": { "$ref": "#/$defs/vm_protection" },
+    "current_protection": { "$ref": "#/$defs/vm_protection" },
+
+    "mapping": {
+      "type": "object",
+      "properties": {
+        "mapping_id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "none", "image_text", "image_data", "shared_cache",
+            "static_hookkit_section", "anonymous", "provider_owned", "unknown"
+          ]
+        },
+        "base": { "$ref": "#/$defs/hex_address" },
+        "size": { "type": "integer", "minimum": 0 },
+        "protection": { "$ref": "#/$defs/vm_protection" }
+      },
+      "additionalProperties": false
+    },
+
+    "reversibility": {
+      "type": "object",
+      "properties": {
+        "mechanically_reversible": { "type": "boolean" },
+        "safe_to_reverse_after_activation": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "verification_state": {
+      "type": "string",
+      "enum": ["unverified", "verified", "verification_failed"]
+    },
+    "fully_inspected": {
+      "type": "boolean",
+      "description": "False means the engine could not fully account for this artifact's effects (e.g. an opaque provider-internal continuation) — see hk_continuation_info_t.fully_inspected for the per-hook analogue."
+    }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "id": {
+      "type": "object",
+      "required": ["high", "low"],
+      "properties": {
+        "high": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "hex_address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]+$",
+      "description": "uintptr_t rendered as a 0x-prefixed hex string; 0x0 means absent/none, matching the C convention of 0 for an unused address field."
+    },
+    "vm_protection": {
+      "type": "object",
+      "properties": {
+        "read": { "type": "boolean" },
+        "write": { "type": "boolean" },
+        "execute": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "image_identity": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "uuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "slide": { "$ref": "#/$defs/hex_address" }
+      },
+      "additionalProperties": false
+    },
+    "byte_storage": {
+      "description": "hk_bytes_view_t plus the None/Inline/Hash/Inline+Hash representation from spec section 7.4. Large regions carry hash only; small patches carry inline bytes (and may carry both).",
+      "type": "object",
+      "properties": {
+        "representation": {
+          "type": "string",
+          "enum": ["none", "inline", "hash", "inline_and_hash"]
+        },
+        "inline_hex": {
+          "type": "string",
+          "pattern": "^([0-9a-fA-F]{2})*$",
+          "description": "Present when representation is inline or inline_and_hash."
+        },
+        "hash_algorithm": {
+          "type": "string",
+          "enum": ["sha256"],
+          "description": "Present when representation is hash or inline_and_hash. SHA-256 only — no custom checksum, per spec section 7.4."
+        },
+        "hash_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "length": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false,
+      "required": ["representation"]
+    }
+  }
+}

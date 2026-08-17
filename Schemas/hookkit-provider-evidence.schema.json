@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hookkit.dev/schemas/hookkit-provider-evidence.schema.json",
+  "title": "HookKit Provider Evidence",
+  "description": "One JSON evidence record per (provider version, architecture) pair, per spec section 14.2. Lives under ProviderEvidence/<family>/. Consumed by Tools/route-feasibility and the engine certification process (spec section 8.7) — an engine mode backed by a provider without a matching, certified evidence record may not participate in automatic routing.",
+  "type": "object",
+  "required": [
+    "provider_family", "version", "sha256", "architecture", "os_lane",
+    "continuation_kind", "certification_status"
+  ],
+  "properties": {
+    "provider_family": {
+      "type": "string",
+      "enum": ["ellekit", "libhooker", "substrate", "substitute", "dobby", "gum"]
+    },
+    "version": {
+      "type": "string",
+      "description": "Exact version string, commit hash, or other unambiguous fingerprint identifying what was measured."
+    },
+    "commit": { "type": "string" },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "description": "SHA-256 of the exact vendored binary this evidence describes."
+    },
+
+    "exported_abi": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Exported symbol names this evidence exercised/relies on."
+    },
+
+    "architecture": {
+      "type": "string",
+      "enum": ["armv7", "armv7s", "arm64", "arm64e", "arm64e_old_abi"]
+    },
+    "os_lane": {
+      "type": "string",
+      "enum": ["rootful-legacy", "rootful-modern", "rootless", "roothide"]
+    },
+    "load_path": { "type": "string" },
+
+    "discovery_method": {
+      "type": "string",
+      "enum": ["compiled_in", "dlopen_preflight", "already_loaded_image", "export_probe_on_loaded_image"],
+      "description": "How the engine's discover() step (spec section 8.3) determines availability. Must be side-effect-free — dlopen/constructors/callback registration are never valid discovery methods."
+    },
+
+    "activation_behavior": {
+      "type": "object",
+      "properties": {
+        "requires_provider_activation": { "type": "boolean" },
+        "requires_provider_image_load": { "type": "boolean" },
+        "constructor_behavior": {
+          "type": "string",
+          "enum": ["none", "bounded_and_known", "unbounded_or_unknown"],
+          "description": "unbounded_or_unknown must be reported as HK_EFFECT_UNKNOWN_PROCESS_MUTATION and can never satisfy HK_FORBID_UNKNOWN_*."
+        },
+        "thread_behavior": {
+          "type": "string",
+          "enum": ["none", "creates_threads"]
+        },
+        "callback_behavior": {
+          "type": "string",
+          "enum": ["none", "registers_callbacks"]
+        },
+        "executable_allocation_behavior": {
+          "type": "string",
+          "enum": ["none", "static_only", "dynamic"]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "continuation_kind": {
+      "type": "string",
+      "enum": ["none", "static", "dynamic", "provider_internal", "unknown"],
+      "description": "Per spec section 14.3: calling the provider with old_ptr == NULL is NOT evidence of \"none\". provider_internal or unknown may never satisfy HK_CONTINUATION_FORBIDDEN, HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY, HK_FORBID_UNKNOWN_PREPARATION_EFFECTS, or HK_FORBID_UNKNOWN_COMMIT_EFFECTS."
+    },
+    "continuation_inspectable": { "type": "boolean" },
+
+    "original_publication_order": {
+      "type": "string",
+      "enum": ["before_activation", "after_activation", "unknown"],
+      "description": "unknown or after_activation makes this provider ineligible for any request needing HK_ORIGINAL_* per spec section 4.5."
+    },
+
+    "mutation_failure_semantics": {
+      "type": "string",
+      "enum": ["fails_before_mutation", "may_partially_mutate", "unknown"]
+    },
+
+    "verification_capability": {
+      "type": "string",
+      "enum": ["none", "self_reported_only", "independently_verifiable"]
+    },
+
+    "device_test_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["test_id", "verification_level", "result"],
+        "properties": {
+          "test_id": { "type": "string" },
+          "verification_level": {
+            "type": "string",
+            "enum": ["host_verified", "device_verified"],
+            "description": "Never claim device_verified without an actual device run — spec section 32."
+          },
+          "device_row": { "type": "string", "description": "e.g. \"iPhone 12, iOS 16.5, arm64e, Dopamine rootless\"" },
+          "result": { "type": "string", "enum": ["pass", "fail", "not_run"] },
+          "evidence_run_id": { "type": "string" },
+          "date": { "type": "string", "format": "date" }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "certification_status": {
+      "type": "string",
+      "enum": ["uncertified", "host_certified", "device_certified"],
+      "description": "Only device_certified providers back engine modes eligible for automatic routing (spec section 8.7). uncertified/host_certified are reachable only through the private test SPI."
+    }
+  },
+  "additionalProperties": false
+}
