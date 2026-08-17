@@ -271,7 +271,60 @@ eventually replace, not a permanent shortcut — noted in both the schema's
 own description and the tool's code comment.
 
 ## Milestone 3 — ABI freeze candidate
-**State: not started.**
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| `Headers/HookKit/HookKitBase.h` | complete | this commit |
+| `Headers/HookKit/HookKitTargets.h` | complete | this commit |
+| `Headers/HookKit/HookKitResults.h` | complete | this commit |
+| `Headers/HookKit/HookKitRuntime.h` | complete | this commit |
+| `Headers/HookKit/HookKitPlan.h` | complete | this commit |
+| `Headers/HookKit/HookKit.h` (new umbrella) | complete | this commit |
+| Header compile tests (C, ObjC, C++, ObjC++) | complete | `Tests/Host/test_header_compile.{c,m,cpp,mm}`, wired into `make test` |
+| `HookKitArtifacts.h` | not started | needs real struct design; Milestone 1 deferred this to the JSON schema, which isn't the same as a C struct |
+| `HookKitObjC.h` | not started | typed Class/SEL convenience wrappers |
+| `HookKitSwift.h` | not started | |
+| `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
+| ABI symbol manifest | not started | |
+
+Deliberately safe by construction, not just by intent: the Makefile's
+`HookKit_PUBLIC_HEADERS` still lists only the legacy `Headers/HookKit.h` —
+these new files under `Headers/HookKit/` are not bundled into the built
+framework and cannot affect `./build.sh`'s output. Verified, not assumed:
+ran `./build.sh all` after adding them — same 64/64 PASS, same 4 `.deb`
+artifacts, same benign warnings as the Milestone 0 baseline.
+
+Two real gaps in the master spec's own text, filled in here (not
+transcribed, since the spec never defined them): `hk_plan_config_t` is
+referenced by `hk_plan_create` in section 6.30 but never given a field
+list anywhere in the spec — filled with the minimal thing a plan actually
+needs (an optional debug label), extend when a real requirement appears.
+`hk_diagnostic_callback_fn` is referenced by `hk_runtime_config_t` in
+section 6.29, same story — filled with a minimal string-message callback.
+Both noted in-header, not silently invented.
+
+One real design call made and stated, not left implicit: `hk_target_spec_t`
+(`HookKitTargets.h`) is a union of symbol/address/objc/memory members —
+deliberately no `swift` member. `HK_TARGET_SWIFT_VTABLE` still exists in
+`hk_target_kind_t` for uniform reporting, but Swift hook *requests* are
+meant to go through `HookKitSwift.h`'s own entry point (not yet written),
+matching the master spec's repeated "separate API, no category membership"
+language for Swift (section 13.7) — folding a Swift member into this union
+would give `HookKitTargets.h` a dependency the rest of the design avoids.
+
+Compile tests are real tests, not just "did it build": each one
+`_Static_assert`s/`static_assert`s ABI-critical facts (the `HK_STRUCT_HEADER`
+field order and offsets, several enum numeric values, a couple of bit
+positions) that a mere successful compile wouldn't catch if silently
+reordered, plus builds and inspects one real struct instance per file. The
+ObjC/ObjC++ variants reuse the *existing* `tests/fake_headers` stub rather
+than a new copy, and deliberately avoid `@selector()`/message sends — those
+pull in the GNU ObjC runtime's module loader (`__objc_exec_class`) at link
+time, which this host has no runtime to satisfy, the same constraint the
+existing `test-substitute-classifier`/`test-original-publication` targets
+already work within. All 4 compile clean under `-Wall -Wextra -Werror`
+with zero warnings, host-verified.
 
 ## Milestone 4 — Core runtime and fake engines
 **State: not started.**

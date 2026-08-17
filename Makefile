@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -163,6 +163,22 @@ test-inline-guard:
 .PHONY: test-original-publication
 test-original-publication:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -x objective-c -IHeaders -I$(CURDIR)/tests/fake_headers -I$(CURDIR)/Internal -o $(THEOS_OBJ_DIR)/test_original_publication tests/test_original_publication.m Internal/HKOriginalPublication.m && $(THEOS_OBJ_DIR)/test_original_publication$(ECHO_END)
+
+# HookKit 3.0 new-ABI header compile tests (spec section 21, Milestone 3):
+# the same Headers/HookKit/*.h compiled and run under all 4 language modes.
+# ObjC/ObjC++ reuse the existing fake Foundation/objc-runtime stubs
+# (tests/fake_headers) rather than a new copy -- these new headers are
+# Foundation-free by design, so the stub is only there to give the ObjC
+# compiler front end a minimal NSObject/Class/SEL vocabulary to check
+# against, same reason test-substitute-classifier needs it.
+.PHONY: test-header-compile
+test-header-compile:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && \
+	clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_c Tests/Host/test_header_compile.c && $(THEOS_OBJ_DIR)/test_header_compile_c && \
+	clang -Wall -Wextra -Werror -std=c11 -O2 -x objective-c -D__APPLE__ -I$(CURDIR)/tests/fake_headers -o $(THEOS_OBJ_DIR)/test_header_compile_m Tests/Host/test_header_compile.m && $(THEOS_OBJ_DIR)/test_header_compile_m && \
+	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_cpp Tests/Host/test_header_compile.cpp && $(THEOS_OBJ_DIR)/test_header_compile_cpp && \
+	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -x objective-c++ -D__APPLE__ -I$(CURDIR)/tests/fake_headers -o $(THEOS_OBJ_DIR)/test_header_compile_mm Tests/Host/test_header_compile.mm && $(THEOS_OBJ_DIR)/test_header_compile_mm && \
+	echo "test-header-compile: C, ObjC, C++, ObjC++ all compiled and passed"$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is
