@@ -16,9 +16,9 @@
 #include "HookKitTargets.h"
 #include "HookKitResults.h"
 #include "HookKitPlan.h"
+#include "HookKitArtifacts.h"
 
 // Not yet written (docs/3.0/IMPLEMENTATION_STATUS.md tracks each):
-//   HookKitArtifacts.h  -- artifact kind/state, artifact record, snapshots
 //   HookKitObjC.h       -- typed Class/SEL convenience wrappers
 //   HookKitSwift.h      -- Swift vtable hooking, a separate API surface
 

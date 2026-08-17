@@ -19,6 +19,15 @@ static_assert(offsetof(hk_test_struct_t, struct_version) == sizeof(uint32_t), "s
 
 static_assert(HK_MEMORY_KIND_DATA == 1, "hk_memory_target_kind_t numeric values are part of the ABI");
 static_assert(HK_IMAGE_EXPLICIT_SET == 5, "hk_image_selector_kind_t numeric values are part of the ABI");
+static_assert(HK_ARTIFACT_FILE_MAPPING == 15, "hk_artifact_kind_t numeric values are part of the ABI");
+
+// hk_report_copy_artifacts() etc. are declared but not implemented yet
+// (Milestone 4). Taking their address into a correctly-typed function
+// pointer proves the declarations themselves are well-formed C++ (no
+// implicit-int, no incomplete-type-by-value) without needing to link
+// against an implementation.
+static hk_status_t (*const g_copy_artifacts_fn)(const hk_report_t *, hk_artifact_snapshot_t **) = &hk_report_copy_artifacts;
+static void (*const g_release_snapshot_fn)(hk_artifact_snapshot_t *) = &hk_artifact_snapshot_release;
 
 static hk_memory_target_t make_sample_memory_target() {
     hk_memory_target_t target;
@@ -51,6 +60,9 @@ int main() {
     SEL sel = (SEL)"hk_test_selector";
 
     if (target.address != 0x1000 || sel == nullptr) {
+        return 1;
+    }
+    if (g_copy_artifacts_fn == nullptr || g_release_snapshot_fn == nullptr) {
         return 1;
     }
     return 0;

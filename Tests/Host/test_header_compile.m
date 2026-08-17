@@ -5,6 +5,7 @@
 // specifically to accept them.
 
 #include <stddef.h>
+#include <string.h>
 #include <assert.h>
 
 #import <Foundation/Foundation.h>
@@ -17,6 +18,22 @@ _Static_assert(offsetof(hk_test_struct_t, struct_version) == sizeof(uint32_t), "
 
 _Static_assert(HK_OBJC_ALLOW_INHERITED_OVERRIDE == 1, "hk_objc_inheritance_policy_t numeric values are part of the ABI");
 _Static_assert(HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE == 2, "hk_availability_t numeric values are part of the ABI");
+_Static_assert(HK_ARTIFACT_MEMORY_PROTECTION_TRANSITION == 14, "hk_artifact_kind_t numeric values are part of the ABI");
+
+// Deliberately no real NSString message sends here either (see this
+// file's header comment) -- the fake Foundation.h this host builds
+// against declares NSString with no methods and nothing to link a real
+// ObjC runtime against. A plain C string still exercises the field.
+static hk_image_identity_t make_sample_image_identity(void) {
+    hk_image_identity_t image;
+    image.struct_size = sizeof(image);
+    image.struct_version = HK_ABI_VERSION_3_0;
+    image.path = "/usr/lib/libsystem_kernel.dylib";
+    image.uuid_present = true;
+    memset(image.uuid, 0xAB, sizeof(image.uuid));
+    image.slide = 0;
+    return image;
+}
 
 static hk_objc_target_t make_sample_objc_target(void) {
     hk_objc_target_t target;
@@ -49,6 +66,11 @@ static hk_objc_target_t make_sample_objc_target(void) {
 int main(void) {
     hk_objc_target_t target = make_sample_objc_target();
     if (target.sel == NULL || target.method_kind != HK_OBJC_INSTANCE_METHOD) {
+        return 1;
+    }
+
+    hk_image_identity_t image = make_sample_image_identity();
+    if (!image.uuid_present || image.uuid[0] != 0xAB || strcmp(image.path, "/usr/lib/libsystem_kernel.dylib") != 0) {
         return 1;
     }
     return 0;

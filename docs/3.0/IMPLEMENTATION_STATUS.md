@@ -282,7 +282,7 @@ own description and the tool's code comment.
 | `Headers/HookKit/HookKitPlan.h` | complete | this commit |
 | `Headers/HookKit/HookKit.h` (new umbrella) | complete | this commit |
 | Header compile tests (C, ObjC, C++, ObjC++) | complete | `Tests/Host/test_header_compile.{c,m,cpp,mm}`, wired into `make test` |
-| `HookKitArtifacts.h` | not started | needs real struct design; Milestone 1 deferred this to the JSON schema, which isn't the same as a C struct |
+| `HookKitArtifacts.h` | complete | this commit — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
 | `HookKitObjC.h` | not started | typed Class/SEL convenience wrappers |
 | `HookKitSwift.h` | not started | |
 | `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
@@ -370,6 +370,48 @@ Remaining 5 of the spec's 6 named baselines (`v1.0.1`, `v2.1.1`, `v2.2.5`,
 `v2.3.0`, `v2.4.0`) not yet extracted — same worktree-build-extract
 recipe, straightforward but time-costly (a full framework build per tag);
 left for a future iteration rather than rushed through this one.
+
+**`HookKitArtifacts.h`**, this iteration: written field-for-field from
+`Schemas/hookkit-artifact.schema.json` (re-read in full first, same
+schema-is-source-of-truth discipline as the earlier headers), closing the
+one real gap left in Milestone 3 before Milestone 4's artifact-ledger work
+builds on top of it — an internal ledger producing records of a public
+shape that didn't exist yet would have been backwards. Reuses
+`hk_mapping_kind_t`/`hk_effects_t` from `HookKitResults.h` rather than
+duplicating them. One stated design call: no 3-state
+verified/unverified/failed enum at the artifact level despite the schema
+modeling one — `hk_hook_result_t.verified` is already a plain bool for the
+same concept at the per-hook level, and a 3-state artifact enum a 2-state
+hook-level bool can't fully represent would be a new inconsistency, not a
+refinement; revisit together if a real need for the FAILED distinction
+shows up. The 6 snapshot functions (`hk_report_copy_artifacts`,
+`hk_runtime_copy_artifacts`, `hk_copy_process_artifacts`,
+`hk_artifact_snapshot_count`/`copy_at`/`release`) are declared only, same
+"fix the public shape first" order Milestone 3's other headers were done
+in — no internal artifact ledger exists yet to implement them against.
+
+Added to the umbrella (`Headers/HookKit/HookKit.h`); still not wired into
+`HookKit_PUBLIC_HEADERS` in the Makefile, so `./build.sh all` output is
+unaffected — reconfirmed (64/64 PASS, 4 `.deb`s) after adding it, not
+assumed safe from the pattern alone.
+
+Strengthened all 4 header compile tests (`Tests/Host/test_header_compile.{c,m,cpp,mm}`)
+with real coverage of the new types rather than relying on the umbrella
+include alone: `.c` gets `_Static_assert`s on the 3 new enums' numeric
+values plus a sample `hk_artifact_t` construction; `.cpp` builds a real
+`hk_artifact_mapping_t`/`hk_vm_protection_t` (the one nested struct
+without `HK_STRUCT_HEADER`, previously unexercised); `.m` builds a sample
+`hk_image_identity_t` (real `path`/`uuid` fields, no message sends — this
+host's `tests/fake_headers/Foundation.h` declares `NSString` with no
+methods and nothing to link a real ObjC runtime against, so an earlier
+draft of this test tried bridging through a real `NSString` and had to be
+rewritten to a plain C string once that constraint became concrete rather
+than assumed); `.mm` takes the address of two of the new unimplemented
+snapshot functions into correctly-typed function pointers, proving the
+declarations themselves are well-formed C++ without needing to link an
+implementation. All 4 compile clean under `-Wall -Wextra -Werror`,
+host-verified, both standalone and through `make test-header-compile`.
+Full `make test` and `./build.sh all` re-run clean after these changes.
 
 ## Milestone 4 — Core runtime and fake engines
 **State: in progress.**

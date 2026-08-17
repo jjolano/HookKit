@@ -8,6 +8,7 @@
 // distinct compiler front ends against the exact same headers.
 
 #include <stddef.h>
+#include <string.h>
 #include <assert.h>
 
 #include "../../Headers/HookKit/HookKit.h"
@@ -32,6 +33,27 @@ _Static_assert(HK_OUTCOME_INVALIDATED == 13, "hk_outcome_t numeric values are pa
 _Static_assert(HK_REACH_EXACT_MEMORY == (1ull << 11), "hk_reachability_t bit positions are part of the ABI");
 _Static_assert(HK_EFFECT_UNKNOWN_PROCESS_MUTATION == (1ull << 63), "hk_effects_t bit positions are part of the ABI");
 _Static_assert(HK_FORBID_UNKNOWN_COMMIT_EFFECTS == (1ull << 13), "hk_constraints_t bit positions are part of the ABI");
+
+_Static_assert(HK_ARTIFACT_UNKNOWN_PROCESS_MUTATION == 17, "hk_artifact_kind_t numeric values are part of the ABI");
+_Static_assert(HK_ARTIFACT_OBSERVED_EXISTING == 11, "hk_artifact_state_t numeric values are part of the ABI");
+_Static_assert(HK_BYTE_STORAGE_INLINE_AND_HASH == 3, "hk_byte_storage_representation_t numeric values are part of the ABI");
+_Static_assert(sizeof(((hk_byte_storage_t *)0)->sha256) == 32, "artifact hashes are SHA-256 (spec section 7.4), never a custom checksum");
+
+// An artifact record must be constructible and usable in real (if
+// minimal) C code too -- same bar make_sample_spec() above already holds
+// hk_hook_spec_t to.
+static hk_artifact_t make_sample_artifact(void) {
+    hk_artifact_t artifact;
+    memset(&artifact, 0, sizeof(artifact));
+    artifact.struct_size = sizeof(artifact);
+    artifact.struct_version = HK_ABI_VERSION_3_0;
+    artifact.kind = HK_ARTIFACT_IMPORT_SLOT;
+    artifact.state = HK_ARTIFACT_COMMITTED;
+    artifact.effects = HK_EFFECT_IMPORT_MUTATION;
+    artifact.original_bytes.representation = HK_BYTE_STORAGE_HASH;
+    artifact.original_bytes.length = 8;
+    return artifact;
+}
 
 // A hook spec must be constructible and usable in real (if minimal) C code,
 // not just exist as a type.
@@ -62,6 +84,7 @@ static hk_hook_spec_t make_sample_spec(void) {
 
 int main(void) {
     hk_hook_spec_t spec = make_sample_spec();
+    hk_artifact_t artifact = make_sample_artifact();
     hk_task_fn task_fn_var = NULL;
     hk_executor_submit_fn submit_fn_var = NULL;
     hk_diagnostic_callback_fn diag_fn_var = NULL;
@@ -70,6 +93,10 @@ int main(void) {
     (void)diag_fn_var;
 
     if (spec.target_kind != HK_TARGET_FUNCTION_SYMBOL) {
+        return 1;
+    }
+
+    if (artifact.kind != HK_ARTIFACT_IMPORT_SLOT || artifact.state != HK_ARTIFACT_COMMITTED) {
         return 1;
     }
 

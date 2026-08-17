@@ -18,6 +18,22 @@ static_assert(sizeof(hk_id_t) == 16, "hk_id_t is two uint64_t");
 static_assert(HK_STATUS_OK == 0, "hk_status_t numeric values are part of the ABI");
 static_assert(HK_PLAN_DISCARDED == 9, "hk_plan_state_t numeric values are part of the ABI");
 static_assert(HK_COMPENSATION_REQUIRE_REVERSIBLE_PREFIX == 2, "hk_compensation_policy_t numeric values are part of the ABI");
+static_assert(HK_ARTIFACT_LOADED_PROVIDER_IMAGE == 10, "hk_artifact_kind_t numeric values are part of the ABI");
+
+// hk_artifact_mapping_t/hk_vm_protection_t aren't exercised in
+// test_header_compile.c -- proves the nested (non-HK_STRUCT_HEADER) plain
+// struct aggregate-initializes correctly under a real C++ front end too.
+static hk_artifact_mapping_t make_sample_artifact_mapping(void) {
+    hk_artifact_mapping_t mapping;
+    mapping.struct_size = sizeof(mapping);
+    mapping.struct_version = HK_ABI_VERSION_3_0;
+    mapping.mapping_id = hk_id_t{0, 0};
+    mapping.kind = HK_MAPPING_ANONYMOUS;
+    mapping.base = 0x2000;
+    mapping.size = 0x1000;
+    mapping.protection = hk_vm_protection_t{true, false, true};
+    return mapping;
+}
 
 static hk_domain_spec_t make_sample_domain(void) {
     hk_domain_spec_t domain;
@@ -33,6 +49,7 @@ static hk_domain_spec_t make_sample_domain(void) {
 
 int main() {
     hk_domain_spec_t domain = make_sample_domain();
+    hk_artifact_mapping_t mapping = make_sample_artifact_mapping();
     hk_runtime_config_t config;
     config.struct_size = sizeof(config);
     config.struct_version = HK_ABI_VERSION_3_0;
@@ -43,6 +60,9 @@ int main() {
     config.install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS;
 
     if (!domain.require_all_mandatory_prepared || config.submit != nullptr) {
+        return 1;
+    }
+    if (mapping.kind != HK_MAPPING_ANONYMOUS || !mapping.protection.read) {
         return 1;
     }
     return 0;
