@@ -726,6 +726,104 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
     return HK_STATUS_OK;
 }
 
+// Judgment call, stated: accepts HK_PLAN_PREPARED *or* HK_PLAN_PARTIAL --
+// the spec's DRAFT -> ANALYZED -> PREPARING -> PREPARED -> COMMITTING ->
+// COMMITTED text (section 6.25) only describes the happy path, but a
+// PARTIAL plan has real hooks that DID prepare successfully and are worth
+// committing; refusing commit outright just because some other hook
+// failed to prepare would be less useful than the spec's own domain-gate
+// language (section 15.1) implies is intended once it's implemented.
+//
+// No fallback-after-partial-mutation logic exists here (invariant #4:
+// "another route may be attempted only after HK_MUTATION_NONE") because
+// there IS no fallback mechanism yet -- each hook has exactly one
+// matched_engine, fixed at analyze time, and commit either succeeds or
+// fails with that one engine. The invariant is vacuously satisfied (there
+// is nothing to violate it), which is different from having correctly
+// implemented multi-engine retry -- stated so this isn't mistaken for
+// that once a second engine per hook becomes possible.
+hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
+    if (out_report) {
+        *out_report = NULL;
+    }
+    if (!plan) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+    if (plan->state != HK_PLAN_PREPARED && plan->state != HK_PLAN_PARTIAL) {
+        return HK_STATUS_INVALID_STATE;
+    }
+
+    hk_hook_result_t *results = NULL;
+    if (plan->hook_count > 0) {
+        results = (hk_hook_result_t *)malloc(plan->hook_count * sizeof(hk_hook_result_t));
+        if (!results) {
+            return HK_STATUS_OUT_OF_MEMORY;
+        }
+    }
+
+    size_t attempted = 0, active = 0, failed = 0;
+
+    for (size_t i = 0; i < plan->hook_count; i++) {
+        struct hk_hook *hook = plan->hooks[i];
+        hk_hook_result_t *out = &results[i];
+        *out = hook->result;  // carry forward PREPARE-time outcome unless this hook is actually attempted below
+
+        if (hook->result.outcome != HK_OUTCOME_PREPARED) {
+            continue;  // never prepared -- nothing to commit
+        }
+        attempted++;
+
+        hk_mutation_state_t mutation = (hook->matched_engine && hook->matched_engine->commit_one)
+            ? hook->matched_engine->commit_one(&hook->spec)
+            : HK_MUTATION_UNKNOWN;  // matched_engine gone, or never implemented commit_one -- an
+                                     // engine this inconsistent cannot be trusted to have done
+                                     // nothing, so this is UNKNOWN, not the more optimistic NONE.
+        out->mutation = mutation;
+
+        switch (mutation) {
+        case HK_MUTATION_COMPLETE:
+            out->outcome = HK_OUTCOME_ACTIVE;
+            active++;
+            break;
+        case HK_MUTATION_NONE:
+            out->outcome = HK_OUTCOME_FAILED_SAFE;
+            failed++;
+            break;
+        case HK_MUTATION_PARTIAL:
+            out->outcome = HK_OUTCOME_FAILED_PARTIAL;
+            failed++;
+            break;
+        case HK_MUTATION_UNKNOWN:
+        default:
+            out->outcome = HK_OUTCOME_FAILED_UNKNOWN;
+            failed++;
+            break;
+        }
+        hook->result = *out;
+    }
+
+    hk_report_t *report = hk_report_create(results, plan->hook_count);
+    free(results);
+    if (!report) {
+        return HK_STATUS_OUT_OF_MEMORY;
+    }
+
+    if (failed == 0) {
+        plan->state = HK_PLAN_COMMITTED;
+    } else if (active == 0 && attempted > 0) {
+        plan->state = HK_PLAN_FAILED;
+    } else {
+        plan->state = HK_PLAN_PARTIAL;
+    }
+
+    if (out_report) {
+        *out_report = report;
+    } else {
+        hk_report_release(report);
+    }
+    return HK_STATUS_OK;
+}
+
 // hk_hook_original_slot / hk_original_slot_load / hk_hook_installed_handle
 // / hk_installed_hook_copy_result are declared in HookKitPlan.h but not
 // implemented here yet -- they describe state that doesn't exist before a

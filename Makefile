@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -239,6 +239,16 @@ test-engine-registry:
 .PHONY: test-plan-prepare
 test-plan-prepare:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_prepare Tests/Host/test_plan_prepare.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_prepare$(ECHO_END)
+
+# HookKit 3.0 plan commit test (Milestone 4): real hk_plan_commit. The
+# property under test is the mutation-state -> outcome mapping (spec
+# section 4.4/6.27) -- one of the spec's core invariants -- exercised via
+# 4 distinct fake engines in Tests/Host/fake_engines.h (COMPLETE/NONE/
+# PARTIAL/UNKNOWN, plus a commit_one == NULL case) rather than trusted
+# from reading the switch statement.
+.PHONY: test-plan-commit
+test-plan-commit:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_commit Tests/Host/test_plan_commit.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_commit$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

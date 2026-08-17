@@ -378,14 +378,14 @@ left for a future iteration rather than rushed through this one.
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
-| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook/analyze/prepare complete; commit not started) | this commit — see below |
+| Plan lifecycle (`Sources/Core/HKPlan.c`) | **complete** — full `DRAFT → ANALYZED → PREPARING/PREPARED → COMMITTING/COMMITTED` path now real (`create`/`release`/`state`/`add_hook`/`analyze`/`prepare`/`commit`) | this commit — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
 | Artifact ledger | not started | |
 | Ownership ledger | not started | |
 | Original slots | not started | |
-| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` (ungrouped); `commit_group`/`revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before `hk_plan_commit` exists) | this commit — see below |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one()` (all ungrouped); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
 
@@ -667,6 +667,50 @@ reads `hk_domain_spec_t.require_all_mandatory_prepared` during prepare.
 
 6 host tests (`test-plan-prepare`), all 5 pre-existing suites re-verified
 with zero regressions, all clean under `-fsanitize=address,undefined`.
+
+**`hk_plan_commit`**, this iteration: closes the plan lifecycle end to end
+for the first time. The engine contract grows `commit_one(spec) ->
+hk_mutation_state_t` (ungrouped, same reasoning as `prepare_one`) — a
+`hk_mutation_state_t` return, not `bool`, because the whole point of this
+function is the engine's honest report of what actually happened
+(`NONE`/`COMPLETE`/`PARTIAL`/`UNKNOWN`, spec section 6.27), which a plain
+success/failure boolean can't carry.
+
+The mapping this milestone exists to get right —
+`COMPLETE → HK_OUTCOME_ACTIVE`, `NONE → FAILED_SAFE`,
+`PARTIAL → FAILED_PARTIAL`, `UNKNOWN → FAILED_UNKNOWN` — is one of the
+spec's core invariants (section 4.4: "another route may be attempted only
+after `HK_MUTATION_NONE`"), so it got 4 dedicated fake engines in
+`fake_engines.h` (one per mutation state) rather than trusting the switch
+statement from reading it — each outcome is asserted from a real commit
+call, not inferred. A fifth fake (`commit_one == NULL`, mirroring
+`prepare_one == NULL`'s treatment last commit) confirmed a real judgment
+call: an engine this inconsistent — prepared successfully, then can't even
+be asked what commit did — is mapped to `HK_MUTATION_UNKNOWN`, not the more
+optimistic `NONE`. Trusting "no commit function" to mean "definitely
+touched nothing" would be exactly the kind of unverified-success shortcut
+spec section 1.6 exists to rule out.
+
+Stated honestly rather than presented as more than it is: no
+fallback-after-partial-mutation logic exists, because there is no
+fallback mechanism at all yet — each hook has exactly one `matched_engine`,
+fixed at analyze time. Invariant #4 is vacuously satisfied (nothing exists
+that could violate it), which is a different claim from "multi-engine
+retry is correctly implemented." Also stated as a deliberate judgment
+call: `hk_plan_commit` accepts a plan in `HK_PLAN_PREPARED` *or*
+`HK_PLAN_PARTIAL` — the spec's own state-machine text only describes the
+happy path, but a `PARTIAL` plan has hooks that DID prepare successfully
+and are worth committing, and refusing outright seemed like it would
+under-deliver relative to what the eventual domain-gate language (section
+15.1) implies is intended.
+
+8 host tests (`test-plan-commit`), all 6 pre-existing suites re-verified
+with zero regressions, all clean under `-fsanitize=address,undefined`. A
+plan can now go from an empty `hk_plan_create` all the way to committed
+(fake-)hooks and back through every documented outcome and mutation state
+the spec defines for this path — real coverage of the mechanism the rest
+of Milestone 4 (artifact ledger, ownership ledger, original slots) and
+Milestone 6+'s real engines build on top of.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**

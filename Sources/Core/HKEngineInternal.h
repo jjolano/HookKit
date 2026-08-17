@@ -57,6 +57,18 @@ typedef struct hk_engine_vtable {
     // failure here is the equivalent of HK_OUTCOME_FAILED_SAFE, never
     // FAILED_PARTIAL/FAILED_UNKNOWN.
     bool (*prepare_one)(const hk_hook_spec_t *spec);
+
+    // Attempts commit for one already-prepared hook. Returns the real
+    // mutation state (spec section 6.27/4.4) -- HK_MUTATION_NONE means
+    // commit was refused before touching anything (a clean failure, the
+    // commit-time analogue of prepare_one returning false).
+    // HK_MUTATION_COMPLETE/PARTIAL/UNKNOWN are the engine's honest report
+    // of what actually happened; a fake engine used for router/plan
+    // testing only ever needs to return NONE or COMPLETE (it has no real
+    // target to partially mutate), but the type is hk_mutation_state_t,
+    // not bool, so a future real engine's honest PARTIAL/UNKNOWN reports
+    // fit this same contract without a signature change.
+    hk_mutation_state_t (*commit_one)(const hk_hook_spec_t *spec);
 } hk_engine_vtable_t;
 
 // Eligibility per spec section 9, minimal subset: target kind supported,
