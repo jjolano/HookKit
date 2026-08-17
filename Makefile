@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -188,6 +188,16 @@ test-header-compile:
 .PHONY: test-runtime-lifecycle
 test-runtime-lifecycle:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_runtime_lifecycle Tests/Host/test_runtime_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c -lpthread && $(THEOS_OBJ_DIR)/test_runtime_lifecycle$(ECHO_END)
+
+# HookKit 3.0 plan lifecycle + domain registration test (Milestone 4):
+# real Sources/Core/HKPlan.c. The critical property this exercises is
+# hk_domain_t* pointer stability across the internal array's realloc
+# growth (37 domains, several times past the initial capacity of 4) --
+# see HKPlanInternal.h for why domains are individually heap-allocated
+# rather than stored inline in that array.
+.PHONY: test-plan-lifecycle
+test-plan-lifecycle:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_lifecycle Tests/Host/test_plan_lifecycle.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_lifecycle$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

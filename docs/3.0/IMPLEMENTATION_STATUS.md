@@ -378,8 +378,8 @@ left for a future iteration rather than rushed through this one.
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
-| Plan lifecycle | not started | |
-| Domains | not started | |
+| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state complete; add_hook/analyze/prepare/commit not started) | this commit |
+| Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | this commit — see below |
 | Router | not started | |
 | Results / Reports | not started | `hk_report_t` still has no concrete definition — every `out_report` is `NULL` today |
 | Artifact ledger | not started | |
@@ -431,7 +431,49 @@ Not wired into `HookKit_PUBLIC_HEADERS` or any framework `_FILES` variable
 — same safety-by-construction as Milestone 3's headers. Verified: `./build.sh all`
 still produces the same 64/64 PASS and 4 `.deb` artifacts.
 
-## Milestone 5 — Image catalog and resolvers
+**Plan lifecycle + domains**, this iteration: `hk_plan_create/release/state`
+and `hk_plan_define_domain` (`Sources/Core/HKPlan.c`,
+`HKPlanInternal.h`), real.
+
+The one design problem worth recording: a `hk_domain_t*` returned by
+`hk_plan_define_domain` has to stay valid for the rest of the plan's life,
+since callers hold onto it across many later `hk_plan_add_hook` calls
+(`hk_hook_spec_t.domain`, spec section 6.24). Storing domains inline in a
+growable array — the naive first design — would invalidate every
+previously-returned pointer the moment a later domain triggers a `realloc`
+that moves the array. Fixed by making `hk_plan_t` hold a growable array of
+*pointers* to individually heap-allocated `hk_domain` structs instead: the
+pointer array can move freely, the structs it points to never do. Proven,
+not just designed-around-on-paper: `test_domain_pointers_stable_across_growth`
+adds 37 domains (several times past the initial capacity of 4), then
+re-checks all 37 previously-returned pointers *after* every growth event —
+each must still report its own correct ID, not another domain's data and
+not a freed allocation's garbage.
+
+9 host tests (`test-plan-lifecycle`), covering: the pointer-stability
+property above; `stable_domain_id` is actually deep-copied (mutates the
+caller's buffer after the call, checks the domain's own copy is
+unaffected — same style of real verification as the runtime config test);
+duplicate `stable_domain_id` rejected; `hk_plan_define_domain` refused
+outside `HK_PLAN_DRAFT` state (spec: "Only `HK_PLAN_DRAFT` accepts new
+domains or hooks" — direct quote, not a paraphrase, so the test manufactures
+a non-DRAFT plan by reaching into the internal struct rather than guessing
+at how state transitions might work before `hk_plan_analyze` exists to
+produce one for real); every NULL-tolerant path. Clean under
+`-fsanitize=address,undefined` — meaningful here specifically, since
+LeakSanitizer would have caught it if `hk_plan_release`'s domain-freeing
+loop were wrong.
+
+Real, stated gap: `hk_plan_config_t.debug_label` (a caller-owned string
+pointer) is not deep-copied yet — harmless today because no public getter
+reads it back, but noted in a code comment so it doesn't quietly become a
+dangling-pointer bug the day one is added. `hk_plan_add_hook` and
+everything past `DRAFT` (`analyze`/`prepare`/`commit`) are not implemented
+— hooks need a real deep-copy of `hk_hook_spec_t`'s full target union
+(symbol/address/objc/memory, each with their own nested strings and image
+selectors), which is real additional design work deserving its own pass,
+not something to rush alongside the domain pointer-stability problem in
+the same commit.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
