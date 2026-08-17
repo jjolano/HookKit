@@ -372,7 +372,66 @@ recipe, straightforward but time-costly (a full framework build per tag);
 left for a future iteration rather than rushed through this one.
 
 ## Milestone 4 — Core runtime and fake engines
-**State: not started.**
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
+| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
+| Plan lifecycle | not started | |
+| Domains | not started | |
+| Router | not started | |
+| Results / Reports | not started | `hk_report_t` still has no concrete definition — every `out_report` is `NULL` today |
+| Artifact ledger | not started | |
+| Ownership ledger | not started | |
+| Original slots | not started | |
+| Fake engines | not started | |
+| Fault injection | not started | |
+| Model-based tests | not started | |
+
+First real (not header-only) implementation code this rewrite has shipped.
+`hk_id_generate()`: one process-instance nonce (time+pid+ASLR entropy,
+computed once via `pthread_once` — deliberately not cryptographic, since
+`hk_id_t` only ever promised process-lifetime uniqueness, and reaching for
+`arc4random` would raise an availability question against the legacy lane's
+older deployment floor for no real benefit) plus an atomically-incremented
+monotonic counter starting at 1 (0 stays available as a "no ID" sentinel).
+`hk_runtime_create/shutdown/release/owner_id/drain_pending`: real, and
+honestly minimal for what exists at this slice — shutdown has nothing to
+quiesce and drain_pending has nothing to apply because no plan/domain/
+engine tracking has been written yet (both said explicitly in code
+comments, not left to look like unfinished stubs with no explanation).
+
+Two design calls made and stated, not left implicit: `hk_runtime_create(NULL, ...)`
+is defined to mean "every default" (no executor, no diagnostics,
+`HK_INSTALL_CONTEXT_EARLY_PROCESS`) — the master spec's text never says
+whether `config` is required, so this fills that gap in favor of not
+forcing every caller to zero-construct a struct for the common case.
+`struct_size` smaller than this build's `sizeof(hk_runtime_config_t)` is
+rejected outright (`HK_STATUS_INVALID_ARGUMENT`) rather than tolerated as a
+partial read — "unknown trailing fields are ignored" (spec) only ever means
+a struct *larger* than expected, never smaller.
+
+9 host tests (`Tests/Host/test_runtime_lifecycle.c`), wired into `make test`
+as `test-runtime-lifecycle`. Real verification, not just "did the call
+return OK": includes the internal header directly to check the config was
+actually deep-copied field-by-field, checks two runtimes' IDs share a
+process nonce but have distinct monotonic counters, checks the
+`struct_size`-too-small rejection path, checks every NULL-tolerant entry
+point actually tolerates NULL. Also run once under
+`-fsanitize=address,undefined` (clean, host-verified) given this is real
+allocation/atomics/pthread code, not just a header. Hit one real host-only
+portability bug along the way: `clock_gettime`/`CLOCK_REALTIME` need
+`_POSIX_C_SOURCE` defined before `<time.h>` under strict `-std=c11` on
+glibc (Darwin's libc doesn't gate the same way) — fixed with a feature-test
+macro and a comment explaining it's a host-toolchain concern, not a
+target-platform one.
+
+Not wired into `HookKit_PUBLIC_HEADERS` or any framework `_FILES` variable
+— same safety-by-construction as Milestone 3's headers. Verified: `./build.sh all`
+still produces the same 64/64 PASS and 4 `.deb` artifacts.
+
+## Milestone 5 — Image catalog and resolvers
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
