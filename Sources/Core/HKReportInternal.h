@@ -10,6 +10,7 @@
 
 #include "../../Headers/HookKit/HookKitRuntime.h"
 #include "../../Headers/HookKit/HookKitResults.h"
+#include "HKArtifactLedger.h"
 
 // A flat snapshot of hk_hook_result_t values -- not pointers back into
 // live hk_hook_t objects. hk_hook_result_t itself owns no heap allocations
@@ -18,10 +19,17 @@
 // leaves), so a plain array of value copies is sufficient today. The day
 // a result carries an owned diagnostic string, this struct is where that
 // ownership needs to move to.
+//
+// `artifacts` is the report's owned artifact ledger (spec section 7). It is
+// created empty with the report and stays empty until the commit path is
+// wired to populate it (Commit 2 of Milestone 4's artifact-ledger work) --
+// analyze/prepare reports legitimately carry an empty ledger forever, since
+// those phases make no mutations to produce artifacts from.
 struct hk_report {
     hk_id_t report_id;
     hk_hook_result_t *results;
     size_t result_count;
+    hk_artifact_ledger_t *artifacts;
 };
 
 // Internal constructor (not public API -- callers get reports only via

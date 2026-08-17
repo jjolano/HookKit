@@ -424,7 +424,7 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
-| Artifact ledger | not started | |
+| Artifact ledger | in progress — write side + immutable-snapshot read path complete (`Sources/Core/HKArtifactLedger.{h,c}`, report owns an empty ledger, `hk_report_copy_artifacts` + snapshot accessors real); engine population is the next commit | this commit — see below |
 | Ownership ledger | not started | |
 | Original slots | not started | |
 | Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one()` (all ungrouped); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
@@ -787,6 +787,64 @@ false, a real optional (non-mandatory) hook with no route does NOT trigger
 the gate (only mandatory members count), and the core blocking behavior
 itself. All 7 pre-existing suites re-verified with zero regressions, all
 clean under `-fsanitize=address,undefined`.
+
+**Artifact ledger — write side + snapshot read path**, this iteration
+(`Sources/Core/HKArtifactLedger.{h,c}`): the internal collection engines
+will accumulate `hk_artifact_t` records into, plus the immutable
+`hk_artifact_snapshot_t` the public read path (`hk_report_copy_artifacts`
+and the `hk_artifact_snapshot_count`/`copy_at`/`release` accessors declared
+in `HookKitArtifacts.h` last commit) hands back. This is deliberately the
+first of two commits: an engine has no way to *report* an artifact yet, so
+the ledger is real but every report's ledger is empty. The alternative —
+having `hk_plan_commit` synthesize plausible `hk_artifact_t` records from
+the mutation state and target kind alone — was explicitly rejected: only
+the committing engine knows what it actually mutated (which import slot,
+what address, what original bytes), so anything the commit path invented
+from the outside would be fabricated detail, exactly what the spec's
+section 7 / mission rules forbid. The honest split is ledger-plumbing now,
+engine-population (a `commit_one` signature change to accept an artifact
+sink) next.
+
+`hk_report_copy_artifacts` is now implemented (was declared-only last
+commit); `hk_runtime_copy_artifacts` and `hk_copy_process_artifacts` stay
+deliberately undefined — there is no runtime- or process-level artifact
+accumulation yet (the runtime still doesn't track committed plans), and a
+placeholder body returning an empty snapshot would imply an accumulation
+path that doesn't exist. Same "left undefined rather than given a body that
+would compile but lie" precedent as `hk_hook_original_slot` et al.
+
+Ownership honesty, stated because it is a real limitation not a finished
+property: both `append` and the snapshot copy `hk_artifact_t` **by value**.
+That is a full correct copy of every inline/scalar field (the bulk of the
+struct), but the borrowed-pointer fields (`image.path`, the
+`engine_id`/`mechanism_id` string views, the `*_bytes` inline views) are
+**shared, not deep-copied** — identical to the existing `hk_report_t`
+result-copy precedent, which likewise leaves its view fields as borrowed
+views. Safe today because nothing with a non-static lifetime flows through
+(no producer exists; the direct unit test uses static literals). The
+precise trigger for building owned-copy machinery: the first real engine
+(Milestone 6+) that records an artifact carrying a dynamically-allocated
+string or byte buffer. Deferred until there is a producer to need it, not
+built speculatively now. The snapshot *is* independently allocated at the
+array level, so ledger growth or destruction after a snapshot cannot touch
+it — that independence (spec section 7.5) is real and tested.
+
+7 host tests (`test-artifact-ledger`, all clean under
+`-fsanitize=address,undefined`): empty-ledger snapshot + out-of-range
+`copy_at`; append-and-snapshot with order/field integrity; snapshot
+independence (grow *and destroy* the ledger after snapshotting, old
+snapshot unchanged and still readable); geometric growth to 50 records
+forcing several reallocs with per-record markers to catch corruption;
+`copy_at` out of range leaving the caller's buffer byte-for-byte untouched;
+NULL tolerance across every entry point; and the report-level read path
+returning a valid empty snapshot plus its two argument-error cases
+(including the out-param being cleared on the error path). The link-set
+fix — `HKReport.c` now pulls in `HKArtifactLedger.c`, so the 7 other
+targets linking `HKReport.c` each gained it too — was caught by a real
+`make test` linker failure (`test-runtime-lifecycle` undefined reference),
+the same failure mode the earlier `hk_report_release` move hit; fixed and
+the full suite re-verified green. `./build.sh all` unaffected as expected
+(no `Sources/Core/*.c` is in `HookKit_FILES`) — reconfirmed, not assumed.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
