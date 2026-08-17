@@ -49,32 +49,57 @@ the performance baseline until the release gates in §28.4.
 
 ## Milestone 1 — Architecture documents and schemas
 
-**State: in progress.**
+**State: complete.**
 
 | Task | State | Evidence |
 |---|---|---|
-| `ARCHITECTURE.md` | complete | this commit |
-| `PUBLIC_C_ABI.md` (draft) | complete | this commit |
-| `Schemas/hookkit-artifact.schema.json` | complete | this commit |
-| `Schemas/hookkit-provider-evidence.schema.json` | complete | this commit |
-| `Schemas/shadow-hook-manifest.schema.json` | complete | this commit |
-| `Schemas/shadow-route-report.schema.json` | complete | this commit |
-| `ENGINE_CONTRACT.md` (draft) | not started | next iteration |
-| Legacy compatibility policy doc | not started | next iteration (will become `LEGACY_ABI.md`) |
+| `ARCHITECTURE.md` | complete | commit `59d291c` |
+| `PUBLIC_C_ABI.md` (draft) | complete | commit `59d291c` |
+| `Schemas/hookkit-artifact.schema.json` | complete | commit `53a209f` |
+| `Schemas/hookkit-provider-evidence.schema.json` | complete | commit `53a209f` |
+| `Schemas/shadow-hook-manifest.schema.json` | complete | commit `53a209f` |
+| `Schemas/shadow-route-report.schema.json` | complete | commit `53a209f` |
+| `ENGINE_CONTRACT.md` (draft) | complete | this commit |
+| Legacy compatibility policy doc (`LEGACY_ABI.md`) | complete | this commit |
+| `V1_MODULE_COMPATIBILITY_AUDIT.md` | in progress (trending conclusion recorded; public-source search still open) | this commit |
 
 Schema validation: all four `Schemas/*.json` files verified as both valid
 JSON and structurally valid JSON Schema (draft 2020-12) via Python's
 `jsonschema.validators.validator_for(...).check_schema()` — host-verified,
 not just eyeballed.
 
-Exit gate not yet met: engine contract draft and legacy compatibility policy
-still open.
+Audit progress this iteration: checked every local sibling repo plus
+`ios-repo`'s package metadata (real release notes/depictions, not just
+source) for v1 module API consumers. Found Shadow announced a Modulous
+migration twice (2023) for a "version 4" that was never tagged/released —
+upstream stalled at v3.7.6 — and the current revival's own (superseded)
+plan explicitly deleted Modulous, confirmed against current `shadow` master
+(zero refs). Trending conclusion: v1 `HKSubstitutor` subset only, no full
+module ABI. Not finalized — public-source search beyond local checkouts is
+still open, tracked below.
+
+Exit gate met: every non-negotiable concept from the spec has a named
+representation across `ARCHITECTURE.md`/`PUBLIC_C_ABI.md`/`ENGINE_CONTRACT.md`/
+`LEGACY_ABI.md`/the four schemas, and no native inline implementation work
+has started (nothing under `Sources/Engines/` or `native/` touched this
+milestone).
 
 ---
 
 ## Milestone 2 — Shadow manifest extraction
-**State: not started.** Blocked on Milestone 1 completing (schemas feed the
-extractor's output format) and on user sign-off to work in `shadow/`.
+**State: not started.** Milestone 1 is complete, so the schema the
+extractor writes against (`Schemas/shadow-hook-manifest.schema.json`)
+exists. This milestone's tooling lives entirely in
+`HookKit/Tools/shadow-manifest-extract/` and only *reads* `shadow/` (no
+commits there, ever, for this milestone) — plain reads are already fine, per
+the Milestone 0 audit work that already read `shadow/docs/*` and grepped its
+tree without issue. The thing worth a heads-up before doing, not a thing
+requiring sign-off to even attempt: running the real Logos-preprocessor /
+Clang-AST crawl (spec §18.2) means invoking build tooling against
+`shadow/`'s live source tree, which is a bigger and noisier action than a
+grep — will build the extractor next against synthetic/local fixtures first,
+and flag before the first real run against the live repo so any temp/build
+output path can be pointed safely outside it.
 
 ## Milestone 3 — ABI freeze candidate
 **State: not started.**
@@ -131,6 +156,7 @@ contract, not new integration work.
 
 1. Performance baselines (Milestone 0) deferred pending device access — see
    above.
-2. Milestone 1 split across loop iterations rather than one commit — schemas
-   and the two core docs landed first; engine contract and legacy policy
-   docs are next.
+2. `V1_MODULE_COMPATIBILITY_AUDIT.md` conclusion is provisional — the
+   public-source-search leg of spec §2.3's audit isn't done yet. Must close
+   before Milestone 3's ABI freeze, not before Milestone 1's own exit gate
+   (which only needs the concept named, which it now is).
