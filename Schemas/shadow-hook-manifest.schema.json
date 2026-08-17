@@ -130,8 +130,8 @@
 
         "extraction_method": {
           "type": "string",
-          "enum": ["structured_table", "static_ast", "logos_preprocess", "manual_override"],
-          "description": "manual_override entries must be individually justified in Tools/shadow-manifest-extract/manual_overrides.yaml — this field is what lets validate.py flag manifest entries nobody can re-derive from source. structured_table means the row was parsed directly from a real C array-of-structs (e.g. kSHDWInstallUnits[]) rather than inferred from free-form Objective-C/Logos source — stronger confidence than static_ast, not weaker: added after finding Shadow's actual install-unit table is exactly this shape."
+          "enum": ["structured_table", "static_ast", "pattern_scan", "logos_preprocess", "manual_override"],
+          "description": "manual_override entries must be individually justified in Tools/shadow-manifest-extract/manual_overrides.yaml — this field is what lets validate.py flag manifest entries nobody can re-derive from source. Confidence ordering, strongest first: structured_table (parsed directly from a real C array-of-structs, e.g. kSHDWInstallUnits[]) > static_ast (real Clang-AST-backed semantic extraction, e.g. clang_ast_extract.py — not built yet as of Milestone 2's first pass) > pattern_scan (a comment/string-safe, brace-depth-aware scan for one specific known call shape in free-form source, e.g. [hooks hookFunction:...] sites — real and mechanical, but weaker than a compiler-grade parse: no macro expansion, no preprocessor-conditional awareness) > logos_preprocess (expanded from Logos %hook/%group syntax) > manual_override."
         }
       },
       "additionalProperties": false

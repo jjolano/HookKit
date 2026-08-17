@@ -91,13 +91,59 @@ milestone).
 
 | Task | State | Evidence |
 |---|---|---|
-| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit tier only) | this commit |
-| `Tools/shadow-manifest-extract/validate.py` | complete | this commit |
-| `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, empty — nothing has needed one yet) | this commit |
-| `artifacts/shadow-current-manifest.json` | in progress (22/22 install units, 0 individual hook targets within them) | this commit |
-| `logos_preprocess.py` | not started | needed for per-hook decomposition of units that still use raw Logos `%hook` |
-| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally |
-| Initial route-feasibility report | not started | depends on the above |
+| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit tier + `hookFunction:` pattern-scan tier) | commit `5970255` + this commit |
+| `Tools/shadow-manifest-extract/validate.py` | complete | commit `5970255` |
+| `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, still empty — the pattern-scan pass hasn't needed one yet) | commit `5970255` |
+| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | this commit (added a reused-variable regression test) |
+| `artifacts/shadow-current-manifest.json` | in progress — 113 targets: 22 install units + 91 pattern_scan child targets, from 9/22 units fully decomposed | this commit |
+| `shdw_libc_install_group` descriptor parse | not started | covers 4 more units (libc/libc_lowlevel/libc_antidebugging/envvar) once done — it's a large table inside `libc.x`, not yet read closely |
+| `logos_preprocess.py` | not started | needed for the 7+ files still using raw Logos `%hook` blocks |
+| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on the pattern_scan rows |
+| Initial route-feasibility report | not started | depends on the above being further along |
+
+This iteration deepened extraction past the install-unit tier for real,
+rather than starting the route-feasibility report on top of a manifest that
+was still 0% decomposed. Read every `shadowhook_*` entry function across all
+22 `.x` files by hand first (`awk` survey of each function body) and found
+the real pattern mix is more varied than one file suggested: direct
+`[hooks hookFunction:...]` calls (7 files), delegation to a shared
+`shdw_libc_install_group(hooks, GROUP)` (4 files, libc-family), real Logos
+`%hook`/`%init` blocks (7+ files, confirmed with a comment-excluded `grep`
+for `^%hook`/`^%end`/`^%init`), a descriptor table like DeviceCheck's
+(1 file confirmed, more may exist unchecked), and two genuine special cases
+(`vnode.x` is a pure IPC client with no HookKit substitution at all;
+`objc_methodimpl.x` captures a function pointer directly, not through
+`hookFunction:`).
+
+Built the `hookFunction:` tier for the first pattern (structured, comment/
+string-safe, brace-depth-aware scan — not a naive regex over raw text,
+learned that lesson for real earlier this session). Also parsed
+`kSHDWCoordinatorInstallers[]` (`dylib.x`) — the other real structured table
+spec section 18.2 names — which cross-references cleanly against
+`kSHDWInstallUnits[]` (both tables agree on all 22 unit IDs, a genuine
+consistency check, not assumed) and gives every unit's exact
+`current_implementation` function name mechanically.
+
+validate.py caught two real bugs before either reached a commit: (1) an
+extracted `null` for an optional string field the schema requires be a
+string-or-absent — a bug in the earlier install-unit pass, fixed by omitting
+the field instead of nulling it; (2) `resolve_symbol_variable` resolving
+every reused-variable hook call in a function to the SAME symbol (mach.x
+reuses one `sym` local across 7 resolve-then-hook steps; the first version
+took the first assignment anywhere in the function instead of the nearest
+one before each call site) — this one showed up as real duplicate
+`stable_hook_id`s against the live repo, not a synthetic test failure. Fixed
+and now covered by `test_reused_variable_resolves_to_nearest_preceding_assignment`.
+Spot-checked the fix by hand against `mach.x`'s real 9 hook sites (2 direct
++ 7 via the reused variable) — exact match.
+
+Added `pattern_scan` as a fifth `extraction_method` enum value
+(`shadow-hook-manifest.schema.json`) alongside last iteration's
+`structured_table` addition — a hand-rolled call-site scan over free-form
+source is real evidence, weaker than a compiler-grade parse, and deserves
+its own confidence label rather than being folded into `static_ast` (which
+now specifically means real Clang-AST-backed extraction, not yet built) or
+overstating `structured_table` (which means a literal struct-array parse).
 
 What actually happened this iteration, precisely: read real Shadow source
 (`ShadowCore.dylib/hooks/**/*`, `HookCoordinator.m`,

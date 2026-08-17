@@ -1,6 +1,6 @@
 {
-  "manifest_version": "0.1.0-milestone2-installunits",
-  "generated_at": "2026-08-17T05:52:15Z",
+  "manifest_version": "0.2.0-milestone2-partial-decomposition",
+  "generated_at": "2026-08-17T06:26:50Z",
   "shadow_commit": "efbc732e99432773158322adf47c93e5bd447518",
   "targets": [
     {
@@ -19,10 +19,11 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+        "decomposed into 19 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_dyld() in ShadowCore.dylib/hooks/Runtime/dyld.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_dyld"
     },
     {
       "stable_hook_id": "Hook_Filesystem@c",
@@ -40,11 +41,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDFilesystem"
+        "pref-gated by SHDWHookIDFilesystem",
+        "no [hooks hookFunction:...] call sites found in shadowhook_libc() (ShadowCore.dylib/hooks/FileHiding/libc.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_libc"
     },
     {
       "stable_hook_id": "Hook_EnvVars@c",
@@ -63,10 +65,12 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDEnvVars"
+        "pref-gated by SHDWHookIDEnvVars",
+        "could not locate a definition for shdw_coord_envvars_c() under ShadowCore.dylib/hooks -- may live outside that tree"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shdw_coord_envvars_c"
     },
     {
       "stable_hook_id": "Hook_EnvVars@objc",
@@ -84,10 +88,11 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDEnvVars"
+        "pref-gated by SHDWHookIDEnvVars",
+        "no [hooks hookFunction:...] call sites found in shadowhook_NSProcessInfo() (ShadowCore.dylib/hooks/Environment/AppEnvironment.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_NSProcessInfo"
     },
     {
       "stable_hook_id": "Hook_DeviceCheck",
@@ -105,10 +110,11 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDDeviceCheck"
+        "pref-gated by SHDWHookIDDeviceCheck",
+        "no [hooks hookFunction:...] call sites found in shadowhook_DeviceCheck() (ShadowCore.dylib/hooks/Environment/DeviceCheck.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_DeviceCheck"
     },
     {
       "stable_hook_id": "Hook_MachBootstrap",
@@ -126,11 +132,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDMachBootstrap"
+        "pref-gated by SHDWHookIDMachBootstrap",
+        "decomposed into 9 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_mach() in ShadowCore.dylib/hooks/Runtime/mach.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_mach"
     },
     {
       "stable_hook_id": "Hook_IOKit",
@@ -148,11 +155,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDIOKit"
+        "pref-gated by SHDWHookIDIOKit",
+        "decomposed into 3 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_iokit() in ShadowCore.dylib/hooks/AntiDebug/iokit.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_iokit"
     },
     {
       "stable_hook_id": "Hook_LowLevelC",
@@ -170,11 +178,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDLowLevelC"
+        "pref-gated by SHDWHookIDLowLevelC",
+        "no [hooks hookFunction:...] call sites found in shadowhook_libc_lowlevel() (ShadowCore.dylib/hooks/FileHiding/libc_lowlevel.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_libc_lowlevel"
     },
     {
       "stable_hook_id": "Hook_AntiDebugging",
@@ -192,11 +201,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDAntiDebugging"
+        "pref-gated by SHDWHookIDAntiDebugging",
+        "no [hooks hookFunction:...] call sites found in shadowhook_libc_antidebugging() (ShadowCore.dylib/hooks/AntiDebug/libc_antidebugging.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_libc_antidebugging"
     },
     {
       "stable_hook_id": "objc",
@@ -214,9 +224,10 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+        "decomposed into 5 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_objc() in ShadowCore.dylib/hooks/Runtime/objc.x"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_objc"
     },
     {
       "stable_hook_id": "objc@methodimpl",
@@ -234,9 +245,10 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+        "no [hooks hookFunction:...] call sites found in shadowhook_objc_methodimpl() (ShadowCore.dylib/hooks/Runtime/objc_methodimpl.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "function_symbol"
+      "target_kind": "function_symbol",
+      "current_implementation": "shadowhook_objc_methodimpl"
     },
     {
       "stable_hook_id": "Hook_Syscall",
@@ -254,11 +266,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDSyscall"
+        "pref-gated by SHDWHookIDSyscall",
+        "decomposed into 7 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_syscall() in ShadowCore.dylib/hooks/FileHiding/syscall.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_syscall"
     },
     {
       "stable_hook_id": "Hook_Memory",
@@ -276,11 +289,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDMemory"
+        "pref-gated by SHDWHookIDMemory",
+        "decomposed into 4 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_mem() in ShadowCore.dylib/hooks/Runtime/mem.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_mem"
     },
     {
       "stable_hook_id": "Hook_Sandbox",
@@ -298,11 +312,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDSandbox"
+        "pref-gated by SHDWHookIDSandbox",
+        "decomposed into 26 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_sandbox() in ShadowCore.dylib/hooks/FileHiding/sandbox.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_sandbox"
     },
     {
       "stable_hook_id": "classes",
@@ -320,9 +335,10 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+        "decomposed into 16 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_objc_hidetweakclasses() in ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_objc_hidetweakclasses"
     },
     {
       "stable_hook_id": "symlookup",
@@ -341,10 +357,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs"
+        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
+        "could not locate a definition for shdw_coord_symlookup() under ShadowCore.dylib/hooks -- may live outside that tree"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shdw_coord_symlookup"
     },
     {
       "stable_hook_id": "Hook_DynamicLibrariesExtra",
@@ -362,11 +380,12 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDDynamicLibrariesExtra"
+        "pref-gated by SHDWHookIDDynamicLibrariesExtra",
+        "decomposed into 2 pattern_scan child target(s) via [hooks hookFunction:...] scan of shadowhook_dyld_extra() in ShadowCore.dylib/hooks/Runtime/dyld.x"
       ],
       "target_kind": "function_symbol",
-      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)"
+      "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
+      "current_implementation": "shadowhook_dyld_extra"
     },
     {
       "stable_hook_id": "Hook_Filesystem@objc",
@@ -385,9 +404,11 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDFilesystem"
+        "pref-gated by SHDWHookIDFilesystem",
+        "could not locate a definition for shdw_coord_filesystem_objc() under ShadowCore.dylib/hooks -- may live outside that tree"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shdw_coord_filesystem_objc"
     },
     {
       "stable_hook_id": "Hook_Foundation@objc",
@@ -406,9 +427,11 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDFoundation"
+        "pref-gated by SHDWHookIDFoundation",
+        "could not locate a definition for shdw_coord_foundation_objc() under ShadowCore.dylib/hooks -- may live outside that tree"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shdw_coord_foundation_objc"
     },
     {
       "stable_hook_id": "Hook_HideApps",
@@ -426,10 +449,11 @@
       "availability": "defer_until_available",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDHideApps"
+        "pref-gated by SHDWHookIDHideApps",
+        "no [hooks hookFunction:...] call sites found in shadowhook_LSApplicationWorkspace() (ShadowCore.dylib/hooks/Environment/AppEnvironment.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_LSApplicationWorkspace"
     },
     {
       "stable_hook_id": "Hook_URLScheme",
@@ -447,10 +471,11 @@
       "availability": "defer_until_available",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDURLScheme"
+        "pref-gated by SHDWHookIDURLScheme",
+        "no [hooks hookFunction:...] call sites found in shadowhook_UIApplication() (ShadowCore.dylib/hooks/Environment/AppEnvironment.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_UIApplication"
     },
     {
       "stable_hook_id": "Hook_Foundation@uikit",
@@ -468,10 +493,1948 @@
       "availability": "defer_until_available",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
-        "pref-gated by SHDWHookIDFoundation"
+        "pref-gated by SHDWHookIDFoundation",
+        "no [hooks hookFunction:...] call sites found in shadowhook_UIImage() (ShadowCore.dylib/hooks/Runtime/ThreadImage.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
       ],
-      "target_kind": "objc_method"
+      "target_kind": "objc_method",
+      "current_implementation": "shadowhook_UIImage"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_find_unwind_sections",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2611
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'findUnwindSectionsPtr')"
+      ],
+      "target_symbol": "_dyld_find_unwind_sections"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_get_image_header_containing_address",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2617
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'getImageHeaderContainingAddressPtr')"
+      ],
+      "target_symbol": "_dyld_get_image_header_containing_address"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_get_image_uuid",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2623
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'getImageUuidPtr')"
+      ],
+      "target_symbol": "_dyld_get_image_uuid"
+    },
+    {
+      "stable_hook_id": "dyld::dyld_image_get_installname",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2629
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'getInstallnamePtr')"
+      ],
+      "target_symbol": "dyld_image_get_installname"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_images_for_addresses",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2635
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'images_for_addresses_ptr')"
+      ],
+      "target_symbol": "_dyld_images_for_addresses"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_register_for_image_loads",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2657
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'register_for_image_loads_ptr')"
+      ],
+      "target_symbol": "_dyld_register_for_image_loads"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_register_for_bulk_image_loads",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2674
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'register_for_bulk_ptr')"
+      ],
+      "target_symbol": "_dyld_register_for_bulk_image_loads"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_objc_notify_register",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2688
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'objc_notify_register_ptr')"
+      ],
+      "target_symbol": "_dyld_objc_notify_register"
+    },
+    {
+      "stable_hook_id": "dyld::objc_add_load_image_ptr",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2694
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_add_load_image_ptr"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_create",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2703
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_create_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_create"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_get_images",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2709
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_get_images_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_get_images"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_destroy",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2715
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_destroy_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_destroy"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_get_state",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2723
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_get_state_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_get_state"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_get_image_path",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2729
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_get_image_path_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_get_image_path"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_get_image_uuid",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2735
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_get_image_uuid_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_get_image_uuid"
+    },
+    {
+      "stable_hook_id": "dyld::_dyld_process_info_release",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2741
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'process_info_release_ptr')"
+      ],
+      "target_symbol": "_dyld_process_info_release"
+    },
+    {
+      "stable_hook_id": "dyld::nsaddimage_ptr",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2754
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "nsaddimage_ptr"
+    },
+    {
+      "stable_hook_id": "dyld::nslookupsymbol_ptr",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2760
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "nslookupsymbol_ptr"
+    },
+    {
+      "stable_hook_id": "dyld::nsversion_ptr",
+      "parent_install_unit": "dyld",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2766
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "nsversion_ptr"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::bootstrap_check_in",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 183
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "bootstrap_check_in"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::bootstrap_look_up",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 184
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "bootstrap_look_up"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_bootstrap_check_in2",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 188
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_bootstrap_check_in2"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_bootstrap_check_in3",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 191
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_bootstrap_check_in3"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up2",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 194
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_bootstrap_look_up2"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up3",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 197
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_bootstrap_look_up3"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up_per_user",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 200
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_bootstrap_look_up_per_user"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_pid_for_task",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 203
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_pid_for_task"
+    },
+    {
+      "stable_hook_id": "Hook_MachBootstrap::_mach_port_names",
+      "parent_install_unit": "Hook_MachBootstrap",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mach.x",
+        "line": 206
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_mach_port_names"
+    },
+    {
+      "stable_hook_id": "Hook_IOKit::IOServiceGetMatchingServices",
+      "parent_install_unit": "Hook_IOKit",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/AntiDebug/iokit.x",
+        "line": 153
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "IOServiceGetMatchingServices"
+    },
+    {
+      "stable_hook_id": "Hook_IOKit::IOServiceOpen",
+      "parent_install_unit": "Hook_IOKit",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/AntiDebug/iokit.x",
+        "line": 154
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "IOServiceOpen"
+    },
+    {
+      "stable_hook_id": "Hook_IOKit::_IOServiceGetMatchingService",
+      "parent_install_unit": "Hook_IOKit",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/AntiDebug/iokit.x",
+        "line": 161
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym')"
+      ],
+      "target_symbol": "_IOServiceGetMatchingService"
+    },
+    {
+      "stable_hook_id": "objc::class_getImageName",
+      "parent_install_unit": "objc",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc.x",
+        "line": 341
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "class_getImageName"
+    },
+    {
+      "stable_hook_id": "objc::objc_copyClassNamesForImage",
+      "parent_install_unit": "objc",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc.x",
+        "line": 342
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_copyClassNamesForImage"
+    },
+    {
+      "stable_hook_id": "objc::objc_copyImageNames",
+      "parent_install_unit": "objc",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc.x",
+        "line": 343
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_copyImageNames"
+    },
+    {
+      "stable_hook_id": "objc::class_getMethodImplementation",
+      "parent_install_unit": "objc",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc.x",
+        "line": 344
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "class_getMethodImplementation"
+    },
+    {
+      "stable_hook_id": "objc::imp_getBlock_ptr",
+      "parent_install_unit": "objc",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc.x",
+        "line": 348
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "imp_getBlock_ptr"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::syscall",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 775
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "syscall"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::csops",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 776
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "csops"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::___syscall",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 784
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym___syscall')"
+      ],
+      "target_symbol": "___syscall"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::_sysctlbyname",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 790
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_sysctlbyname"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::___sysctlbyname",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 795
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "___sysctlbyname"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::_csops_audittoken",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 800
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_csops_audittoken"
+    },
+    {
+      "stable_hook_id": "Hook_Syscall::_NSGetEnviron",
+      "parent_install_unit": "Hook_Syscall",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/syscall.x",
+        "line": 805
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_NSGetEnviron"
+    },
+    {
+      "stable_hook_id": "Hook_Memory::vm_region_64",
+      "parent_install_unit": "Hook_Memory",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mem.x",
+        "line": 122
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "vm_region_64"
+    },
+    {
+      "stable_hook_id": "Hook_Memory::vm_region_recurse_64",
+      "parent_install_unit": "Hook_Memory",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mem.x",
+        "line": 123
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "vm_region_recurse_64"
+    },
+    {
+      "stable_hook_id": "Hook_Memory::mach_vm_region",
+      "parent_install_unit": "Hook_Memory",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mem.x",
+        "line": 124
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "mach_vm_region"
+    },
+    {
+      "stable_hook_id": "Hook_Memory::mach_vm_region_recurse",
+      "parent_install_unit": "Hook_Memory",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/mem.x",
+        "line": 125
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "mach_vm_region_recurse"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::sandbox_check",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 809
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "sandbox_check"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::fcntl",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 810
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "fcntl"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::host_get_special_port",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 811
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "host_get_special_port"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::task_get_special_port",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 812
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "task_get_special_port"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::task_for_pid",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 814
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "task_for_pid"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::sigaction",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 815
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "sigaction"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execle",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 817
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execle"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execlp",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 818
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execlp"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execl",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 819
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execl"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execve",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 820
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execve"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execvp",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 821
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execvp"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::execv",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 822
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "execv"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::posix_spawn",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 823
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "posix_spawn"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::posix_spawnp",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 824
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "posix_spawnp"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::fork",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 825
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "fork"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::vfork",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 826
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "vfork"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_signal",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 831
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_signal')"
+      ],
+      "target_symbol": "_signal"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_bsd_signal",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 836
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_signal')"
+      ],
+      "target_symbol": "_bsd_signal"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::___signal_nobind",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 841
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_signal')"
+      ],
+      "target_symbol": "___signal_nobind"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::___sigaction",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 846
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_signal')"
+      ],
+      "target_symbol": "___sigaction"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_system",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 852
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_system"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_popen",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 857
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_popen"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_wordexp",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 862
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_wordexp"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_sandbox_check_by_audit_token",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 867
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_sandbox_check_by_audit_token"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_task_get_exception_ports",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 872
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_misc')"
+      ],
+      "target_symbol": "_task_get_exception_ports"
+    },
+    {
+      "stable_hook_id": "Hook_Sandbox::_connect",
+      "parent_install_unit": "Hook_Sandbox",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/sandbox.x",
+        "line": 878
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'sym_connect')"
+      ],
+      "target_symbol": "_connect"
+    },
+    {
+      "stable_hook_id": "classes::NSClassFromString",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 443
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "NSClassFromString"
+    },
+    {
+      "stable_hook_id": "classes::objc_getClass",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 448
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_getClass"
+    },
+    {
+      "stable_hook_id": "classes::objc_lookUpClass",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 449
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_lookUpClass"
+    },
+    {
+      "stable_hook_id": "classes::objc_getMetaClass",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 450
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_getMetaClass"
+    },
+    {
+      "stable_hook_id": "classes::objc_getClassList",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 451
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_getClassList"
+    },
+    {
+      "stable_hook_id": "classes::objc_copyClassList",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 452
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "objc_copyClassList"
+    },
+    {
+      "stable_hook_id": "classes::enumerateClassesPtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 457
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "enumerateClassesPtr"
+    },
+    {
+      "stable_hook_id": "classes::class_copyMethodList",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 469
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "class_copyMethodList"
+    },
+    {
+      "stable_hook_id": "classes::class_getInstanceMethod",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 470
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "class_getInstanceMethod"
+    },
+    {
+      "stable_hook_id": "classes::class_getClassMethod",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 471
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "class_getClassMethod"
+    },
+    {
+      "stable_hook_id": "classes::methodImplAndNamePtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 476
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "methodImplAndNamePtr"
+    },
+    {
+      "stable_hook_id": "classes::stretPtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 482
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "stretPtr"
+    },
+    {
+      "stable_hook_id": "classes::copyClassesForImagePtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 488
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "copyClassesForImagePtr"
+    },
+    {
+      "stable_hook_id": "classes::copyClassNamesForImageHeaderPtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 494
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "copyClassNamesForImageHeaderPtr"
+    },
+    {
+      "stable_hook_id": "classes::setHookGetImageNamePtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 517
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "setHookGetImageNamePtr"
+    },
+    {
+      "stable_hook_id": "classes::setHookGetClassPtr",
+      "parent_install_unit": "classes",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/objc_hidetweakclasses.x",
+        "line": 530
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_always",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "setHookGetClassPtr"
+    },
+    {
+      "stable_hook_id": "Hook_DynamicLibrariesExtra::__ZL15dlopen_internalPKciPv",
+      "parent_install_unit": "Hook_DynamicLibrariesExtra",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2790
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_escalation",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [
+        "resolved at runtime via findSymbolInImage (local var 'dlopen_internal_ptr')"
+      ],
+      "target_symbol": "__ZL15dlopen_internalPKciPv"
+    },
+    {
+      "stable_hook_id": "Hook_DynamicLibrariesExtra::dlopen_from_ptr",
+      "parent_install_unit": "Hook_DynamicLibrariesExtra",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/Runtime/dyld.x",
+        "line": 2796
+      },
+      "target_kind": "function_symbol",
+      "role": "mandatory",
+      "commit_domain": "phase_escalation",
+      "required_reach": [
+        "existing_imports"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "pattern_scan",
+      "known_compatibility_risks": [],
+      "target_symbol": "dlopen_from_ptr"
     }
   ]
 }

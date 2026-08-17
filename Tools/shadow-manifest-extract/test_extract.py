@@ -7,7 +7,14 @@ covers NULL vs identifier prefKey, line-number accuracy, and the
 malformed-row-count error path.
 """
 
-from extract import parse_install_units_from_text, unit_to_manifest_target
+from extract import (
+    parse_install_units_from_text,
+    unit_to_manifest_target,
+    strip_comments_preserve_lines,
+    find_hook_function_calls,
+    resolve_symbol_variable,
+    hook_call_to_manifest_target,
+)
 
 FIXTURE = '''#import <Shadow/HookConfiguration.h>
 
@@ -69,6 +76,50 @@ def test_target_mapping_reasoned_not_fabricated():
     assert t1["role"] == "optional"  # prefKey present
     assert "verification_method" not in t1  # verify bit was clear
     assert any("SHDWHookIDFilesystem" in r for r in t1["known_compatibility_risks"])
+
+
+REUSED_VAR_FIXTURE = '''
+void shadowhook_mach(HKSubstitutor* hooks) {
+    void* sym = [hooks findSymbolInImage:NULL symbolName:@"_bootstrap_check_in2"];
+    if(sym) [hooks hookFunction:sym withReplacement:replaced_a outOldPtr:(void **) &original_a];
+
+    sym = [hooks findSymbolInImage:NULL symbolName:@"_bootstrap_check_in3"];
+    if(sym) [hooks hookFunction:sym withReplacement:replaced_b outOldPtr:(void **) &original_b];
+
+    sym = [hooks findSymbolInImage:NULL symbolName:@"_pid_for_task"];
+    if(sym) [hooks hookFunction:sym withReplacement:replaced_c outOldPtr:(void **) &original_c];
+}
+'''
+
+
+def test_reused_variable_resolves_to_nearest_preceding_assignment():
+    # Regression test: mach.x reuses `sym` for 7 consecutive
+    # resolve-then-hook steps. resolve_symbol_variable() used to take the
+    # FIRST assignment anywhere in the function, which resolved every one
+    # of those 7 calls to the same first symbol -- validate.py caught it as
+    # duplicate stable_hook_ids against the real repo.
+    clean = strip_comments_preserve_lines(REUSED_VAR_FIXTURE)
+    calls = find_hook_function_calls(clean, 1)
+    assert len(calls) == 3, calls
+
+    resolved = [
+        resolve_symbol_variable(clean, "sym", c["body_offset"])
+        for c in calls
+    ]
+    assert resolved == ["_bootstrap_check_in2", "_bootstrap_check_in3", "_pid_for_task"], resolved
+
+    targets = [hook_call_to_manifest_target(c, "Hook_MachBootstrap", "phase_tier1", "mach.x", clean)
+               for c in calls]
+    ids = [t["stable_hook_id"] for t in targets]
+    assert len(ids) == len(set(ids)), f"duplicate stable_hook_ids: {ids}"
+    assert ids == [
+        "Hook_MachBootstrap::_bootstrap_check_in2",
+        "Hook_MachBootstrap::_bootstrap_check_in3",
+        "Hook_MachBootstrap::_pid_for_task",
+    ], ids
+    for t in targets:
+        assert t["required_reach"] == ["existing_imports", "private_address"]
+        assert t["original_requirement"] == "direct_predecessor"  # all three pass outOldPtr:
 
 
 def test_malformed_row_rejected():
