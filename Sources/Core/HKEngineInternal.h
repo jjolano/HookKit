@@ -27,6 +27,7 @@
 #include "../../Headers/HookKit/HookKitPlan.h"
 #include "../../Headers/HookKit/HookKitResults.h"
 #include "../../Headers/HookKit/HookKitTargets.h"
+#include "HKArtifactLedger.h"  // hk_artifact_sink_t
 
 // One bit per hk_target_kind_t value -- lets a descriptor say "I handle
 // symbol and address targets" without a variable-length list.
@@ -68,7 +69,14 @@ typedef struct hk_engine_vtable {
     // target to partially mutate), but the type is hk_mutation_state_t,
     // not bool, so a future real engine's honest PARTIAL/UNKNOWN reports
     // fit this same contract without a signature change.
-    hk_mutation_state_t (*commit_one)(const hk_hook_spec_t *spec);
+    //
+    // On any mutation other than NONE, the engine records what it produced
+    // into `sink` (hk_artifact_sink_record) -- one call per artifact. The
+    // engine fills only the mechanism facts; the sink stamps the contextual
+    // IDs (see HKArtifactLedger.h). `sink` is never NULL when commit_one is
+    // called. An engine that refuses (returns NONE) records nothing.
+    hk_mutation_state_t (*commit_one)(const hk_hook_spec_t *spec,
+                                      hk_artifact_sink_t *sink);
 } hk_engine_vtable_t;
 
 // Eligibility per spec section 9, minimal subset: target kind supported,

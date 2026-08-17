@@ -424,10 +424,10 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
-| Artifact ledger | in progress — write side + immutable-snapshot read path complete (`Sources/Core/HKArtifactLedger.{h,c}`, report owns an empty ledger, `hk_report_copy_artifacts` + snapshot accessors real); engine population is the next commit | this commit — see below |
+| Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | this commit — see below |
 | Ownership ledger | not started | |
 | Original slots | not started | |
-| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one()` (all ungrouped); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
 
@@ -845,6 +845,67 @@ targets linking `HKReport.c` each gained it too — was caught by a real
 the same failure mode the earlier `hk_report_release` move hit; fixed and
 the full suite re-verified green. `./build.sh all` unaffected as expected
 (no `Sources/Core/*.c` is in `HookKit_FILES`) — reconfirmed, not assumed.
+
+**Artifact ledger — engines actually populate it now**, this iteration
+(Commit 2 of the two the previous section set up): the write path is wired
+end to end, so a committed hook's engine records real `hk_artifact_t`
+records that reach the report's snapshot. The central design decision — who
+fills which fields — is settled by what each party can actually know. The
+engine's `commit_one` only ever receives an `hk_hook_spec_t`; it has no
+access to the plan, the hook, or the runtime, so it *cannot* know the
+operation's contextual identity (`artifact_id`, `plan_id`, `request_id`,
+`runtime_owner_id`). Those are stamped centrally by `hk_artifact_sink_record`
+from context the commit loop holds; the engine fills only mechanism facts
+(kind, effects, `engine_id`, addresses, bytes, reversibility). This is
+exactly why a sink exists rather than handing the engine the raw ledger: an
+engine must not, and structurally cannot, forge those IDs. `commit_one`
+gained a `hk_artifact_sink_t *sink` parameter (internal vtable only —
+`hk_runtime_register_engine_for_testing`, so the blast radius is
+`Sources/Core/*.c` + the shared fakes, nothing public); its old
+mutation-state return is unchanged.
+
+Wiring: `hk_plan_commit` builds a ledger before its commit loop, sets the
+sink's fixed `plan_id`/`runtime_owner_id` once and its `request_id` per hook
+(each artifact's originating request is *its own* hook, not a shared value),
+then hands the populated ledger to the report via a new
+`hk_report_adopt_artifact_ledger` that swaps out the empty ledger the report
+was born with. The swap approach was chosen over changing `hk_report_create`'s
+signature specifically to leave the analyze/prepare call sites and last
+commit's `test-artifact-ledger` untouched — a smaller diff that keeps the
+"report always has a ledger" invariant true at every point. OOM paths kept
+honest: if the report can't be built after the loop, the commit path
+destroys the ledger it owns rather than leaking it.
+
+Fake engines: `fake_rebind` now produces a real import-slot artifact
+(`HK_ARTIFACT_IMPORT_SLOT` / `HK_EFFECT_IMPORT_MUTATION`, reversible, a
+fake nonzero slot address, `engine_id` a borrowed view of a string
+literal), leaving the four contextual IDs zeroed precisely because the sink
+owns them. The other three commit fakes (`none`/`partial`/`unknown`) record
+nothing and say so in a comment — they exist for the mutation-state→outcome
+mapping test, not the ledger; `NONE` genuinely made nothing to record, and
+modeling a partial/unknown artifact is not their job (the pipe is already
+proven end to end by `fake_rebind`).
+
+3 new host tests in `test-plan-commit` (11 total now, all clean under
+`-fsanitize=address,undefined`): the end-to-end proof — commit a rebind
+hook, then read the report's artifact snapshot and check both the engine's
+mechanism facts survived *and* all four contextual IDs were stamped
+correctly (`plan_id` == the plan's, `request_id` == the hook's,
+`runtime_owner_id` == the runtime's, `artifact_id` a real generated
+nonzero); a refused (`NONE`) commit records **zero** artifacts (no phantom
+record for an operation that touched nothing); and two hooks through one
+engine each stamp *their own* `request_id` and get *distinct* `artifact_id`s
+— an adversarial check that would fail if `request_id` were set once outside
+the commit loop or `artifact_id` weren't freshly generated per record. Full
+`make test` and `./build.sh all` (all 4 lanes) verified clean; the ledger's
+own 7 tests re-verified green with the sink's `hk_artifact_sink_record`
+added underneath them.
+
+Still absent, stated: `hk_runtime_copy_artifacts` / `hk_copy_process_artifacts`
+remain undefined — there is still no runtime- or process-level
+accumulation, only per-report. Aggregating a runtime's committed plans'
+artifacts is its own task, gated on the runtime tracking committed plans at
+all (it doesn't yet).
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**

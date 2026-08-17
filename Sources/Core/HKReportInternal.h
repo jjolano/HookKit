@@ -34,6 +34,14 @@ struct hk_report {
 
 // Internal constructor (not public API -- callers get reports only via
 // hk_plan_analyze/prepare/commit/hk_runtime_drain_pending). NULL on OOM.
+// The report starts with an empty artifact ledger; the commit path swaps a
+// populated one in with hk_report_adopt_artifact_ledger below.
 hk_report_t *hk_report_create(const hk_hook_result_t *results, size_t count);
+
+// Replaces the report's (empty) ledger with `ledger`, taking ownership of
+// it and destroying the one the report was created with. For the commit
+// path, which builds and populates a ledger during its commit loop (before
+// the report exists) and hands it over here. `report` must be non-NULL.
+void hk_report_adopt_artifact_ledger(hk_report_t *report, hk_artifact_ledger_t *ledger);
 
 #endif // HK_CORE_REPORT_INTERNAL_H

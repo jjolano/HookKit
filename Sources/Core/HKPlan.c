@@ -26,6 +26,7 @@
 // silently handled wrong.
 
 #include "HKIDs.h"
+#include "HKArtifactLedger.h"
 #include "HKPlanInternal.h"
 #include "HKReportInternal.h"
 #include "HKRuntimeInternal.h"
@@ -824,6 +825,19 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         }
     }
 
+    // The artifact ledger engines record into during this commit. Built now
+    // (before the report exists) and adopted into the report at the end.
+    hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+    if (!ledger) {
+        free(results);
+        return HK_STATUS_OUT_OF_MEMORY;
+    }
+    hk_artifact_sink_t sink;
+    sink.ledger = ledger;
+    sink.plan_id = plan->plan_id;
+    sink.runtime_owner_id = hk_runtime_owner_id(plan->runtime);
+    sink.request_id = (hk_id_t){0};  // set per hook below
+
     size_t attempted = 0, active = 0, failed = 0;
 
     for (size_t i = 0; i < plan->hook_count; i++) {
@@ -836,8 +850,9 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         }
         attempted++;
 
+        sink.request_id = hook->hook_id;  // this hook is the artifact's originating request
         hk_mutation_state_t mutation = (hook->matched_engine && hook->matched_engine->commit_one)
-            ? hook->matched_engine->commit_one(&hook->spec)
+            ? hook->matched_engine->commit_one(&hook->spec, &sink)
             : HK_MUTATION_UNKNOWN;  // matched_engine gone, or never implemented commit_one -- an
                                      // engine this inconsistent cannot be trusted to have done
                                      // nothing, so this is UNKNOWN, not the more optimistic NONE.
@@ -868,8 +883,10 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
     hk_report_t *report = hk_report_create(results, plan->hook_count);
     free(results);
     if (!report) {
+        hk_artifact_ledger_destroy(ledger);  // report didn't take it; don't leak
         return HK_STATUS_OUT_OF_MEMORY;
     }
+    hk_report_adopt_artifact_ledger(report, ledger);  // report now owns the populated ledger
 
     if (failed == 0) {
         plan->state = HK_PLAN_COMMITTED;

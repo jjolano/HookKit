@@ -41,6 +41,33 @@ extern "C" {
 
 typedef struct hk_artifact_ledger hk_artifact_ledger_t;
 
+// The recorder an engine's commit_one writes artifacts into. The engine
+// fills only the MECHANISM facts it actually knows -- kind, effects,
+// engine_id/mechanism_id, address/size/bytes, the mechanism-specific
+// pointers, protection, reversibility. It has no access to the CONTEXTUAL
+// identity of the operation (it only receives an hk_hook_spec_t, not the
+// plan/hook/runtime), so hk_artifact_sink_record stamps those centrally: a
+// fresh artifact_id plus the plan_id/request_id/runtime_owner_id the commit
+// path holds. This split is exactly why the sink exists rather than handing
+// the engine the raw ledger -- an engine must not (and cannot) forge those
+// IDs itself. plan_id/runtime_owner_id are fixed for a commit; request_id
+// is updated by the commit loop before each engine call.
+typedef struct {
+    hk_artifact_ledger_t *ledger;
+    hk_id_t plan_id;
+    hk_id_t runtime_owner_id;
+    hk_id_t request_id;
+} hk_artifact_sink_t;
+
+// Stamps the contextual IDs onto a copy of *artifact (overwriting any the
+// engine left set -- the sink is authoritative for those four fields) and
+// appends it to the sink's ledger. Returns false on a NULL argument or on
+// the ledger's OOM. A false return means "not recorded", never "the
+// mutation did not happen"; how a production engine reacts to losing a
+// record (its mutation is real but now untracked) is deferred until a real
+// engine exists -- fake engines here cannot OOM.
+bool hk_artifact_sink_record(hk_artifact_sink_t *sink, const hk_artifact_t *artifact);
+
 // Creates an empty ledger. NULL on OOM.
 hk_artifact_ledger_t *hk_artifact_ledger_create(void);
 

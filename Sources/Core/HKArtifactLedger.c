@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "HKIDs.h"
+
 // Mutable, append-only. Grows geometrically -- the same array-doubling the
 // plan's hook array uses (HKPlan.c). Stores hk_artifact_t by value, not a
 // pointer array, because unlike hooks/domains these records are never
@@ -61,6 +63,22 @@ bool hk_artifact_ledger_append(hk_artifact_ledger_t *ledger,
 
 size_t hk_artifact_ledger_count(const hk_artifact_ledger_t *ledger) {
     return ledger ? ledger->count : 0;
+}
+
+bool hk_artifact_sink_record(hk_artifact_sink_t *sink, const hk_artifact_t *artifact) {
+    if (!sink || !artifact) {
+        return false;
+    }
+    // Copy the engine's mechanism facts, then overwrite the four contextual
+    // IDs -- the sink is authoritative for those, the engine cannot know
+    // them (see the header). artifact_id is freshly generated per record;
+    // two artifacts from one commit get distinct ids.
+    hk_artifact_t stamped = *artifact;
+    stamped.artifact_id = hk_id_generate();
+    stamped.plan_id = sink->plan_id;
+    stamped.request_id = sink->request_id;
+    stamped.runtime_owner_id = sink->runtime_owner_id;
+    return hk_artifact_ledger_append(sink->ledger, &stamped);
 }
 
 hk_status_t hk_artifact_snapshot_from_ledger(const hk_artifact_ledger_t *ledger,

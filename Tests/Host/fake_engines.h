@@ -6,6 +6,8 @@
 #ifndef HK_TEST_FAKE_ENGINES_H
 #define HK_TEST_FAKE_ENGINES_H
 
+#include <string.h>
+
 #include "../../Sources/Core/HKEngineInternal.h"
 
 // Handles function-symbol targets needing only existing-imports reach,
@@ -23,8 +25,26 @@ static inline bool fake_rebind_prepare_one(const hk_hook_spec_t *spec) {
     (void)spec;
     return true;
 }
-static inline hk_mutation_state_t fake_rebind_commit_one(const hk_hook_spec_t *spec) {
+// Mimics the rebind engine's real product: one import-slot rewrite. Fills
+// only mechanism facts -- the sink stamps artifact_id/plan_id/request_id/
+// runtime_owner_id (which is exactly why those are left zeroed here). The
+// engine_id view points at a string literal (static lifetime), matching the
+// borrowed-view ownership the ledger currently assumes.
+static inline hk_mutation_state_t fake_rebind_commit_one(const hk_hook_spec_t *spec,
+                                                         hk_artifact_sink_t *sink) {
     (void)spec;
+    hk_artifact_t a;
+    memset(&a, 0, sizeof(a));
+    a.struct_size = sizeof(a);
+    a.struct_version = HK_ABI_VERSION_3_0;
+    a.kind = HK_ARTIFACT_IMPORT_SLOT;
+    a.state = HK_ARTIFACT_COMMITTED;
+    a.effects = HK_EFFECT_IMPORT_MUTATION;
+    a.engine_id.data = "fake-rebind";
+    a.engine_id.length = strlen("fake-rebind");
+    a.import_slot_address = 0xF00D1000;  // a fake but nonzero slot address
+    a.mechanically_reversible = true;
+    (void)hk_artifact_sink_record(sink, &a);  // fakes cannot OOM; see contract
     return HK_MUTATION_COMPLETE;
 }
 static const hk_engine_vtable_t fake_rebind_engine = {
@@ -89,8 +109,16 @@ static inline hk_engine_capabilities_t fake_commit_none_describe(void) {
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
     return caps;
 }
-static inline hk_mutation_state_t fake_commit_none_commit_one(const hk_hook_spec_t *spec) {
+// These three record no artifact: they exist to exercise commit's
+// mutation-state-to-outcome mapping, not the ledger. NONE genuinely made
+// nothing to record; PARTIAL/UNKNOWN could in principle record something,
+// but modeling a partial/unknown artifact is not what these fakes are for
+// (the artifact pipe is proven end-to-end by fake_rebind above). Left as a
+// stated scope line, not an oversight.
+static inline hk_mutation_state_t fake_commit_none_commit_one(const hk_hook_spec_t *spec,
+                                                              hk_artifact_sink_t *sink) {
     (void)spec;
+    (void)sink;
     return HK_MUTATION_NONE;  // refused cleanly, nothing touched
 }
 static const hk_engine_vtable_t fake_commit_none_engine = {
@@ -106,8 +134,10 @@ static inline hk_engine_capabilities_t fake_commit_partial_describe(void) {
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
     return caps;
 }
-static inline hk_mutation_state_t fake_commit_partial_commit_one(const hk_hook_spec_t *spec) {
+static inline hk_mutation_state_t fake_commit_partial_commit_one(const hk_hook_spec_t *spec,
+                                                                 hk_artifact_sink_t *sink) {
     (void)spec;
+    (void)sink;
     return HK_MUTATION_PARTIAL;
 }
 static const hk_engine_vtable_t fake_commit_partial_engine = {
@@ -123,8 +153,10 @@ static inline hk_engine_capabilities_t fake_commit_unknown_describe(void) {
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
     return caps;
 }
-static inline hk_mutation_state_t fake_commit_unknown_commit_one(const hk_hook_spec_t *spec) {
+static inline hk_mutation_state_t fake_commit_unknown_commit_one(const hk_hook_spec_t *spec,
+                                                                 hk_artifact_sink_t *sink) {
     (void)spec;
+    (void)sink;
     return HK_MUTATION_UNKNOWN;
 }
 static const hk_engine_vtable_t fake_commit_unknown_engine = {

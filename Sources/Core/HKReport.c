@@ -46,6 +46,18 @@ void hk_report_release(hk_report_t *report) {
     free(report);
 }
 
+// Swaps a populated ledger in for the empty one the report was born with,
+// destroying the empty one. Ownership of `ledger` moves to the report.
+void hk_report_adopt_artifact_ledger(hk_report_t *report, hk_artifact_ledger_t *ledger) {
+    if (!report) {
+        return;
+    }
+    if (report->artifacts != ledger) {
+        hk_artifact_ledger_destroy(report->artifacts);
+        report->artifacts = ledger;
+    }
+}
+
 // Public (HookKitArtifacts.h). Deep-copies the report's artifact ledger
 // into an immutable snapshot -- empty until the commit path populates the
 // ledger (see HKReportInternal.h). Independent of the report: releasing the

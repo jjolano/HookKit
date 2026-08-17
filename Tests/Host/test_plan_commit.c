@@ -13,6 +13,10 @@
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "fake_engines.h"
 
+static bool ids_equal(hk_id_t a, hk_id_t b) {
+    return a.high == b.high && a.low == b.low;
+}
+
 static hk_hook_spec_t symbol_spec(const char *id, const char *symbol) {
     hk_hook_spec_t spec;
     memset(&spec, 0, sizeof(spec));
@@ -221,6 +225,114 @@ static void test_partial_when_some_hooks_fail_commit(void) {
     printf("  partial-when-some-hooks-fail-commit: PASS\n");
 }
 
+static void test_commit_records_artifact_with_stamped_ids(void) {
+    // The real end-to-end proof of the artifact ledger: a committed hook's
+    // engine records an artifact, and it reaches the report's snapshot with
+    // the engine's mechanism facts intact AND the four contextual IDs
+    // stamped by the sink (which the engine could not have forged -- it
+    // only ever saw an hk_hook_spec_t).
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    hk_hook_t *hook = prepared_hook(rt, plan, &fake_rebind_engine, "hook.a");
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 1);
+
+    hk_artifact_t a;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &a) == HK_STATUS_OK);
+    // Mechanism facts the engine filled.
+    assert(a.kind == HK_ARTIFACT_IMPORT_SLOT);
+    assert(a.state == HK_ARTIFACT_COMMITTED);
+    assert(a.effects == HK_EFFECT_IMPORT_MUTATION);
+    assert(a.import_slot_address == 0xF00D1000);
+    assert(a.mechanically_reversible);
+    assert(a.engine_id.length == strlen("fake-rebind"));
+    assert(memcmp(a.engine_id.data, "fake-rebind", a.engine_id.length) == 0);
+    // Contextual IDs the sink stamped -- the actual point of the test.
+    assert(a.artifact_id.high != 0 || a.artifact_id.low != 0);  // a real generated id
+    assert(ids_equal(a.plan_id, plan->plan_id));
+    assert(ids_equal(a.request_id, hook->hook_id));
+    assert(ids_equal(a.runtime_owner_id, hk_runtime_owner_id(rt)));
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  commit-records-artifact-with-stamped-ids: PASS\n");
+}
+
+static void test_refused_commit_records_no_artifact(void) {
+    // HK_MUTATION_NONE means the engine touched nothing -- so it must have
+    // recorded nothing. No phantom artifact for a refused commit.
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    prepared_hook(rt, plan, &fake_commit_none_engine, "hook.a");
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 0);
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  refused-commit-records-no-artifact: PASS\n");
+}
+
+static void test_each_hook_stamps_its_own_request_id(void) {
+    // Two hooks, same engine. Each artifact's request_id must be ITS OWN
+    // hook's id -- catches a request_id set once outside the commit loop
+    // (all artifacts would share the last hook's id).
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt, &fake_rebind_engine));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec0 = symbol_spec("hook.0", "getpid");
+    hk_hook_t *hook0 = NULL;
+    assert(hk_plan_add_hook(plan, &spec0, &hook0) == HK_STATUS_OK);
+    hk_hook_spec_t spec1 = symbol_spec("hook.1", "getppid");
+    hk_hook_t *hook1 = NULL;
+    assert(hk_plan_add_hook(plan, &spec1, &hook1) == HK_STATUS_OK);
+
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 2);
+
+    // Ledger append order follows commit-loop (hook) order.
+    hk_artifact_t a0, a1;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &a0) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_copy_at(snap, 1, &a1) == HK_STATUS_OK);
+    assert(ids_equal(a0.request_id, hook0->hook_id));
+    assert(ids_equal(a1.request_id, hook1->hook_id));
+    assert(!ids_equal(a0.request_id, a1.request_id));       // distinct, not a shared stale id
+    assert(!ids_equal(a0.artifact_id, a1.artifact_id));     // each got its own fresh id
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  each-hook-stamps-its-own-request-id: PASS\n");
+}
+
 int main(void) {
     test_commit_requires_prepared_or_partial_state();
     test_complete_mutation_becomes_active();
@@ -230,6 +342,9 @@ int main(void) {
     test_missing_commit_one_treated_as_unknown_not_none();
     test_not_prepared_hook_left_untouched();
     test_partial_when_some_hooks_fail_commit();
+    test_commit_records_artifact_with_stamped_ids();
+    test_refused_commit_records_no_artifact();
+    test_each_hook_stamps_its_own_request_id();
     printf("all plan commit tests passed\n");
     return 0;
 }
