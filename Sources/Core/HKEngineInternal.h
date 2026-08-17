@@ -2,14 +2,16 @@
 // deliberately minimal subset of spec section 8's full hk_engine_vtable_t.
 //
 // What's here: enough for hk_plan_analyze to ask "does any registered
-// engine claim it can serve this hook" and get a real answer instead of
-// always HK_OUTCOME_NO_ROUTE. What's NOT here, on purpose: prepare_group/
-// commit_group/revalidate_group/verify_group/compensate_group/
-// inspect_continuation (section 8.1) -- those matter once
-// hk_plan_prepare/commit exist to call them, which they don't yet. This
-// header grows into the real contract incrementally, the same way
-// HookKitResults.h grew from "just enough for hk_plan_analyze" to the
-// full result struct across several commits -- not redesigned from
+// engine claim it can serve this hook" (describe()) and enough for
+// hk_plan_prepare to actually attempt preparation (prepare_one()). What's
+// NOT here, on purpose: prepare_GROUP/commit_group/revalidate_group/
+// verify_group/compensate_group/inspect_continuation (section 8.1) use
+// *grouped* operations for batching (one image walk covering many hooks at
+// once) -- real engines will need that (Milestone 6+), but no fake engine
+// in this codebase's tests has anything to batch, so prepare_one takes one
+// hook at a time. This header grows into the real contract incrementally,
+// the same way HookKitResults.h grew from "just enough for hk_plan_analyze"
+// to the full result struct across several commits -- not redesigned from
 // scratch each time.
 //
 // Not public API: no engine outside this codebase registers against this
@@ -45,6 +47,16 @@ typedef struct {
 
 typedef struct hk_engine_vtable {
     hk_engine_capabilities_t (*describe)(void);
+
+    // Attempts preparation for one hook (spec section 4.2: request-
+    // permitted non-target effects only, never a target mutation -- a
+    // fake engine honors this by construction since it has no target to
+    // touch in the first place). Returns true on success. False means
+    // preparation failed cleanly before anything was reserved -- there is
+    // no partial-preparation concept at this minimal a contract, so every
+    // failure here is the equivalent of HK_OUTCOME_FAILED_SAFE, never
+    // FAILED_PARTIAL/FAILED_UNKNOWN.
+    bool (*prepare_one)(const hk_hook_spec_t *spec);
 } hk_engine_vtable_t;
 
 // Eligibility per spec section 9, minimal subset: target kind supported,

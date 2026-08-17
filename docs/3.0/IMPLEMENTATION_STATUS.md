@@ -378,14 +378,14 @@ left for a future iteration rather than rushed through this one.
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
-| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook complete; analyze/prepare/commit not started) | this commit — see below |
+| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook/analyze/prepare complete; commit not started) | this commit — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
 | Artifact ledger | not started | |
 | Ownership ledger | not started | |
 | Original slots | not started | |
-| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — minimal `describe()`-only contract; `prepare_group`/`commit_group`/etc. not modeled yet (nothing calls them before `hk_plan_prepare` exists) | this commit — see below |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` (ungrouped); `commit_group`/`revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before `hk_plan_commit` exists) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
 
@@ -626,6 +626,47 @@ literal in every fake engine defined so far) survives being read back out
 of the result after the local `hk_engine_capabilities_t` that received it
 has gone out of scope — safe by construction since literals aren't
 stack-allocated, verified rather than assumed.
+
+**`hk_plan_prepare`**, this iteration: the engine contract grows a real
+`prepare_one(spec) -> bool` (ungrouped — real engines will need `prepare_GROUP`
+for batching, spec section 8.1, but no fake engine here has anything to
+batch), and `hk_hook_t` grows a `matched_engine` field so prepare calls the
+*same* engine analyze found eligible rather than re-searching the registry
+(which could legitimately return a different answer if engines were
+registered/removed between the two calls — a real correctness concern, not
+paranoia, given the registry is mutable runtime state).
+
+Extracted `Tests/Host/fake_engines.h` once a second test file
+(`test_plan_prepare.c`) needed the same fakes `test_engine_registry.c`
+already had, rather than duplicating them again — three fakes now: a
+rebind-style engine that always prepares successfully, an
+always-fails-to-prepare engine (a second engine, not a mutable toggle flag
+on a shared one, to keep tests order-independent), and the objc-style
+engine with `prepare_one` deliberately left `NULL`.
+
+That last one exercises a real judgment call: an engine that's eligible
+for `describe()` purposes but never implemented `prepare_one` is a genuine
+inconsistency, not a "does nothing" case to skip past silently — treated
+as a preparation failure (`HK_OUTCOME_FAILED_SAFE`), covered by its own
+test. Per-hook outcomes are precise (`HK_OUTCOME_PREPARED` /
+`HK_OUTCOME_FAILED_SAFE` only — no `FAILED_PARTIAL`/`FAILED_UNKNOWN` at
+this minimal a contract, since there's no partial-preparation concept
+yet), and the plan-level rollup (`HK_PLAN_PREPARED`/`PARTIAL`/`FAILED`)
+is derived from real attempted/prepared/failed counts, tested for a
+genuine mixed outcome — two hooks in the same plan, one forced (via
+direct internal-struct access, the same pattern `test_plan_lifecycle.c`
+already uses) onto the failing engine so the PARTIAL path is exercised
+for real rather than assumed correct from the FAILED and PREPARED cases
+alone.
+
+Real, stated gap: no domain-level gating yet (spec section 15.1's "domain
+preparation gate" — one failed mandatory member should block its whole
+domain). Each hook's own outcome is accurate regardless; only the
+cross-hook, domain-aware blocking behavior is missing, because nothing yet
+reads `hk_domain_spec_t.require_all_mandatory_prepared` during prepare.
+
+6 host tests (`test-plan-prepare`), all 5 pre-existing suites re-verified
+with zero regressions, all clean under `-fsanitize=address,undefined`.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**

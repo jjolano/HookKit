@@ -8,6 +8,7 @@
 
 #include "../../Headers/HookKit/HookKitPlan.h"
 #include "../../Headers/HookKit/HookKitRuntime.h"
+#include "HKEngineInternal.h"
 
 // Individually heap-allocated, never stored inline in a growable array.
 // hk_plan_t hands out `const hk_domain_t *`/`hk_domain_t *` pointers to
@@ -62,6 +63,14 @@ struct hk_hook {
     // array here. The hk_hook_t* elements themselves are references to
     // other hooks this plan already owns, not deep-copied targets.
     const hk_hook_t **owned_commit_after;
+
+    // Set by hk_hook_analyze_one when a route is found (NULL otherwise).
+    // Not owned: points at a caller/test-registered vtable that outlives
+    // the hook, same non-ownership convention as hk_runtime_t.engines[].
+    // hk_plan_prepare reads this to call the SAME engine that analysis
+    // found eligible, rather than re-searching (and potentially finding a
+    // different one if the registry changed between analyze and prepare).
+    const hk_engine_vtable_t *matched_engine;
 
     hk_hook_result_t result;
 };

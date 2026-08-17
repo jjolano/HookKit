@@ -13,30 +13,7 @@
 #include "../../Sources/Core/HKPlanInternal.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
-
-// A fake "rebind-style" engine: handles function-symbol targets needing
-// only existing-imports reach. Mirrors the real rebind engine's eventual
-// shape (Milestone 6) closely enough to be a meaningful stand-in, without
-// pretending to implement anything beyond describe().
-static hk_engine_capabilities_t fake_rebind_describe(void) {
-    hk_engine_capabilities_t caps;
-    caps.engine_id = "fake-rebind";
-    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
-    caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
-    return caps;
-}
-static const hk_engine_vtable_t fake_rebind_engine = { .describe = fake_rebind_describe };
-
-// A fake "objc-message-style" engine, to test that first-eligible-wins
-// correctly skips an ineligible engine before finding an eligible one.
-static hk_engine_capabilities_t fake_objc_describe(void) {
-    hk_engine_capabilities_t caps;
-    caps.engine_id = "fake-objc";
-    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
-    caps.achievable_reach = HK_REACH_OBJC_DISPATCH;
-    return caps;
-}
-static const hk_engine_vtable_t fake_objc_engine = { .describe = fake_objc_describe };
+#include "fake_engines.h"
 
 static hk_hook_spec_t symbol_spec(const char *id, hk_reachability_t required, hk_reachability_t preferred) {
     hk_hook_spec_t spec;

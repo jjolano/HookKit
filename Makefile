@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -229,6 +229,16 @@ test-plan-analyze:
 .PHONY: test-engine-registry
 test-engine-registry:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_engine_registry Tests/Host/test_engine_registry.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_engine_registry$(ECHO_END)
+
+# HookKit 3.0 plan preparation test (Milestone 4): real hk_plan_prepare.
+# Covers the per-hook outcome transitions (ANALYZED -> PREPARED/
+# FAILED_SAFE, NO_ROUTE left untouched), the plan-level PREPARED/PARTIAL/
+# FAILED rollup, and that prepare calls the same engine analyze matched
+# (hook->matched_engine) rather than re-searching the registry. Shares
+# Tests/Host/fake_engines.h with test-engine-registry.
+.PHONY: test-plan-prepare
+test-plan-prepare:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_prepare Tests/Host/test_plan_prepare.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c -lpthread && $(THEOS_OBJ_DIR)/test_plan_prepare$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is

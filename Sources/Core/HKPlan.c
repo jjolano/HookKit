@@ -530,7 +530,7 @@ hk_status_t hk_plan_add_hook(
 // 8.3) -- not mechanically enforced yet (that needs the interposition-
 // based analysis side-effect tests in spec section 21.2, not written),
 // but every fake engine this codebase defines honors it by construction.
-static void hk_hook_analyze_one(const hk_plan_t *plan, const struct hk_hook *hook, hk_hook_result_t *out) {
+static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_hook_result_t *out) {
     memset(out, 0, sizeof(*out));
     out->struct_size = sizeof(*out);
     out->struct_version = HK_ABI_VERSION_3_0;
@@ -566,6 +566,10 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, const struct hk_hook *hoo
         out->retryable = false;  // a real route exists now; nothing to retry
         out->diagnostic_engine_id.data = caps.engine_id;
         out->diagnostic_engine_id.length = caps.engine_id ? strlen(caps.engine_id) : 0;
+        // Remembered so hk_plan_prepare calls the SAME engine analysis
+        // found, rather than re-searching (and risking a different result
+        // if the registry changed between analyze and prepare).
+        hook->matched_engine = plan->runtime->engines[i];
         return;
     }
 
@@ -582,6 +586,7 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, const struct hk_hook *hoo
     out->retryable = true;
     out->diagnostic_engine_id.data = NULL;
     out->diagnostic_engine_id.length = 0;
+    hook->matched_engine = NULL;
 }
 
 hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {
@@ -635,6 +640,89 @@ hk_status_t hk_hook_copy_result(const hk_hook_t *hook, hk_hook_result_t *out_res
         return HK_STATUS_INVALID_ARGUMENT;
     }
     *out_result = hook->result;  // flat copy: hk_hook_result_t owns no heap allocations today
+    return HK_STATUS_OK;
+}
+
+// Attempts preparation for every hook that got a route at analyze time
+// (HK_OUTCOME_ANALYZED). Hooks that stayed NO_ROUTE are left untouched --
+// there is nothing to prepare without a matched engine. No domain-level
+// gating yet (spec section 15.1's "domain preparation gate": one failed
+// mandatory member should block its whole domain) -- real, stated gap,
+// not implemented because nothing yet reads hk_domain_spec_t's
+// require_all_mandatory_prepared during prepare. Each hook's own outcome
+// is still accurate regardless; only the cross-hook domain-blocking
+// behavior is missing.
+hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
+    if (out_report) {
+        *out_report = NULL;
+    }
+    if (!plan) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+    if (plan->state != HK_PLAN_ANALYZED) {
+        return HK_STATUS_INVALID_STATE;
+    }
+
+    hk_hook_result_t *results = NULL;
+    if (plan->hook_count > 0) {
+        results = (hk_hook_result_t *)malloc(plan->hook_count * sizeof(hk_hook_result_t));
+        if (!results) {
+            return HK_STATUS_OUT_OF_MEMORY;
+        }
+    }
+
+    size_t attempted = 0, prepared = 0, failed = 0;
+
+    for (size_t i = 0; i < plan->hook_count; i++) {
+        struct hk_hook *hook = plan->hooks[i];
+        hk_hook_result_t *out = &results[i];
+        *out = hook->result;  // carry forward NO_ROUTE (or whatever analyze left) unchanged by default
+
+        if (hook->result.outcome != HK_OUTCOME_ANALYZED) {
+            continue;  // no route -- nothing to prepare
+        }
+        attempted++;
+
+        // An engine that was eligible for describe() but never implemented
+        // prepare_one is a real inconsistency, not a silent skip -- treated
+        // as a preparation failure, the same as prepare_one() itself
+        // returning false.
+        bool ok = hook->matched_engine && hook->matched_engine->prepare_one
+                && hook->matched_engine->prepare_one(&hook->spec);
+
+        if (ok) {
+            out->outcome = HK_OUTCOME_PREPARED;
+            prepared++;
+        } else {
+            // Preparation failing before anything was reserved is exactly
+            // what HK_OUTCOME_FAILED_SAFE means -- this minimal contract
+            // has no partial-preparation concept yet, so it's never
+            // FAILED_PARTIAL/FAILED_UNKNOWN here.
+            out->outcome = HK_OUTCOME_FAILED_SAFE;
+            failed++;
+        }
+        hook->result = *out;
+    }
+
+    hk_report_t *report = hk_report_create(results, plan->hook_count);
+    free(results);
+    if (!report) {
+        return HK_STATUS_OUT_OF_MEMORY;
+    }
+
+    if (failed == 0) {
+        plan->state = HK_PLAN_PREPARED;
+    } else if (prepared == 0 && attempted > 0) {
+        plan->state = HK_PLAN_FAILED;
+    } else {
+        plan->state = HK_PLAN_PARTIAL;
+    }
+
+    if (out_report) {
+        *out_report = report;
+    } else {
+        hk_report_release(report);
+    }
     return HK_STATUS_OK;
 }
 
