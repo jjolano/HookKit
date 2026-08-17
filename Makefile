@@ -163,3 +163,33 @@ test-inline-guard:
 .PHONY: test-original-publication
 test-original-publication:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -x objective-c -IHeaders -I$(CURDIR)/tests/fake_headers -I$(CURDIR)/Internal -o $(THEOS_OBJ_DIR)/test_original_publication tests/test_original_publication.m Internal/HKOriginalPublication.m && $(THEOS_OBJ_DIR)/test_original_publication$(ECHO_END)
+
+# Device smoke binary. NOT part of `make test`: it links the built framework
+# and has to run on a jailbroken device, where the trampoline-page check is
+# the only thing that can observe the allocator's real behaviour. Build the
+# framework first, then:
+#
+#   make device-smoke
+#   ssh device 'rm -f /var/mobile/device_smoke'
+#   scp $(THEOS_OBJ_DIR)/device_smoke device:/var/mobile/
+#
+# The rm is NOT optional. Overwriting a Mach-O in place that has already been
+# executed leaves the kernel's cached code signature stale for that vnode, and
+# the next exec is SIGKILLed by AMFI with no output and no crash report — it
+# looks exactly like the binary itself being rejected. Delete, then copy.
+# Point SDK/MIN at the lane you built, or expect a deployment-version warning
+# from the linker (harmless — the smoke binary uses no versioned API).
+#
+# -O0 -fno-inline is load-bearing, not laziness: at -O2 the compiler inlines or
+# devirtualizes the calls to the hook targets, so the call never reaches the
+# patched entry and the test measures nothing. The entitlements grant
+# dynamic-codesigning, which is what lets the native engine obtain W^X outside
+# an injected process.
+DEVICE_SMOKE_SDK ?= $(THEOS)/sdks/iPhoneOS13.7.sdk
+DEVICE_SMOKE_ARCH ?= arm64
+DEVICE_SMOKE_MIN ?= 13.0
+DEVICE_SMOKE_LDID ?= ldid
+
+.PHONY: device-smoke
+device-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(SDKBINPATH)/clang -Wall -Wextra -O0 -fno-inline -fobjc-arc -target $(DEVICE_SMOKE_ARCH)-apple-ios$(DEVICE_SMOKE_MIN) -isysroot $(DEVICE_SMOKE_SDK) -F$(THEOS_OBJ_DIR) -framework Foundation -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_smoke tests/device_smoke.m && $(DEVICE_SMOKE_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_smoke$(ECHO_END)

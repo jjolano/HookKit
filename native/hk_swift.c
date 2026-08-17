@@ -343,10 +343,13 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
     // directly would bake stale PAC bits in under the slot discriminator.
     void *new_value = hk_sign_code(hk_strip_code(replacement), disc);
 
-    // Single aligned pointer store via hk_native_patch_memory, which handles
-    // read-only __DATA_CONST by breaking the COW (VM_PROT_COPY) or remapping
-    // a private copy.
-    if(!hk_native_patch_memory(slot, &new_value, sizeof(new_value))) {
+    // Single aligned pointer store. Deliberately NOT hk_native_patch_memory:
+    // this is LIVE class metadata that other threads dispatch through, and
+    // that path's arm64e fallback swaps the entire __DATA_CONST page mapping
+    // when the protection flip is refused. hk_native_patch_pointer breaks the
+    // COW and stores atomically, or fails — a vtable slot is never worth a
+    // page swap.
+    if(!hk_native_patch_pointer(slot, new_value)) {
         hk_swift_errno = HK_SWIFT_ERR_WRITE;
         return false;
     }

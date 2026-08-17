@@ -8,6 +8,7 @@
 #import "HKInlinePreflight.h"
 
 #include <errno.h>
+#include <pthread.h>
 
 #if __has_include(<ptrauth.h>)
 #import <ptrauth.h>
@@ -93,6 +94,27 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
 }
 
 hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
+    // Thread gate, first because it is the cheapest check. The two backends
+    // behind this validator (Dobby, litehook) patch a fixed prologue window
+    // with no atomicity and no peer-thread quiescing, so a hook installed
+    // once other threads are running can catch one mid-prologue. The main
+    // thread is the practical proxy for "still at load time" — the same
+    // contract the native engine enforces (HKNativeBackends.m).
+    //
+    // Deliberately NOT in hk_inline_preflight_basic: that gates ElleKit,
+    // Substrate, Substitute and Frida too, and those ship production
+    // relocators the codebase already trusts to be reached without this
+    // validator. Gating here instead means an off-main-thread inline hook
+    // skips the weak engines and routes to a strong one, which is the right
+    // fallback rather than a blanket refusal.
+    if(!pthread_main_np()) {
+        if(outErrno) {
+            *outErrno = EPERM;
+        }
+
+        return HK_ERR_NOT_SUPPORTED;
+    }
+
     // The fixed-window rules below apply on top of the generic checks: the
     // window scanners dereference the prologue, and the generic checks make
     // sure a bogus address fails cleanly first.

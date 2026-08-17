@@ -53,13 +53,15 @@ static int g_patch_calls = 0;
 static void *g_patch_dst = NULL;
 static uint8_t g_patch_bytes[8];
 
-// Fake hk_native_patch_memory: records the write instead of touching memory.
-// The engine's own definition (native/hk_native.c) is not linked here.
-bool hk_native_patch_memory(void *target, const void *data, size_t size) {
+// Fake hk_native_patch_pointer: records the store instead of touching memory.
+// The engine's own definition (native/hk_native.c) is not linked here. The
+// engine uses the pointer-store entry point, not hk_native_patch_memory —
+// a live vtable slot must not go through the page-remap fallback.
+bool hk_native_patch_pointer(void *slot, void *value) {
     g_patch_calls += 1;
-    g_patch_dst = target;
+    g_patch_dst = slot;
     memset(g_patch_bytes, 0, sizeof(g_patch_bytes));
-    memcpy(g_patch_bytes, data, size < sizeof(g_patch_bytes) ? size : sizeof(g_patch_bytes));
+    memcpy(g_patch_bytes, &value, sizeof(value) < sizeof(g_patch_bytes) ? sizeof(value) : sizeof(g_patch_bytes));
     return true;
 }
 

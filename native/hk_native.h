@@ -11,9 +11,26 @@
 // tweak-injected process that already holds: the injector had to relax it to
 // load this dylib at all. Where it does not, every call fails cleanly.
 //
-// Not thread-safe against running code: the patch is not atomic, so hooks must
-// be installed at load time, before other threads can enter the target. Same
-// assumption ElleKit and Substrate make.
+// Hooks are still a load-time operation, the same assumption ElleKit and
+// Substrate make, but the engine no longer relies on that alone:
+//
+//  - The entry patch is a single 4-byte B whenever a trampoline page can be
+//    placed within +/-128MB of the target, so a thread ENTERING the function
+//    mid-install sees either the old first instruction or the new branch.
+//    Out of range it degrades to the 16-byte sequence, which is torn-visible.
+//  - A thread already INSIDE the prologue is unrecoverable either way: no
+//    non-quiescing inline hooker can fix that, and this one does not suspend
+//    peer threads.
+//  - Published trampolines are never made non-executable to build the next
+//    one, so installing a hook cannot fault an unrelated hook that is running.
+//  - Writes to live mappings are serialized process-wide, so concurrent
+//    patches cannot race each other's protection flips.
+//
+// The load-time rule is stricter than "do not hook a running function": do not
+// hook a function whose PAGE holds anything that is running. hk_write flips
+// the target's page to read-write to get write access, dropping EXECUTE for
+// the window, so an unrelated function sharing that page faults on instruction
+// fetch too. Inherent — see the comment on hk_write.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -61,7 +78,20 @@ HK_INTERNAL bool hk_native_hook_function(void *target, void *replacement, void *
 
 // Raw memory patch, no relocation. The region's original protection is restored
 // afterwards, so this is safe on data as well as code.
+//
+// Note the blast radius when the protection flip is refused (arm64e under
+// PPL): the fallback rebuilds the whole page and swaps the mapping with
+// vm_remap, so the unit of change is a page, not `size`. Fine for code being
+// patched at load time; use hk_native_patch_pointer for anything live.
 HK_INTERNAL bool hk_native_patch_memory(void *target, const void *data, size_t size);
+
+// Single-copy-atomic store of one pointer into an aligned slot, for live
+// metadata (the Swift vtable engine). Readers see either the old or the new
+// pointer, never a mix and never an unmapped page — which is exactly what
+// hk_native_patch_memory cannot promise, since its arm64e fallback swaps the
+// whole page mapping out from under them. Fails rather than falling back to
+// the remap, and fails on a misaligned slot.
+HK_INTERNAL bool hk_native_patch_pointer(void *slot, void *value);
 
 // Symbol lookup. Images must already be loaded -- an unloaded image has no
 // runtime addresses to report.

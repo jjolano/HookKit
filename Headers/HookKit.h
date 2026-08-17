@@ -91,11 +91,18 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * executeHooks — concurrent executeHooks calls are not serialized, so do not
  * issue them from more than one thread. Not synchronized: last-error state —
  * getLibErrno: reports the last hook call's per-backend detail; read it
- * immediately on the same thread that made the call, not cross-thread. The
- * native Substitute API additionally requires the main thread, and the native
- * engine requires it too for function and memory patching — it does not
- * suspend peer threads, so off the main thread those return
- * HK_ERR_NOT_SUPPORTED without patching.
+ * immediately on the same thread that made the call, not cross-thread.
+ *
+ * Main-thread-only operations: the native Substitute API; the native engine's
+ * function and memory patching; and the Dobby and litehook inline techniques.
+ * None of them suspend peer threads and all patch a prologue window without
+ * atomicity, so off the main thread each returns HK_ERR_NOT_SUPPORTED without
+ * writing anything — which, on an implicit or auto-cover route, falls through
+ * to the next candidate rather than failing the hook. ElleKit, Substrate,
+ * Substitute's MS-compatible path and Frida are not gated: they ship their own
+ * production relocators, so an off-main-thread inline hook is better served by
+ * reaching them. The Swift vtable engine is not gated either — its slot write
+ * is a single-copy-atomic pointer store, not a code patch.
  * Image handles are ordinary owned handles: use them on one thread, close
  * each exactly once, and never use one after closeImage: returns.
  *
@@ -172,7 +179,11 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * leaves the target intact; they are check-then-act — another thread could
  * mutate the window between scan and patch, an accepted ceiling, as only
  * Substitute suspends threads. Hooks must still be installed at load time,
- * before the target can run elsewhere.
+ * before the target can run elsewhere: a thread already executing inside a
+ * prologue when it is patched cannot be rescued by any engine here. (The
+ * native engine does make the ENTRY patch a single atomic store where it can,
+ * so a thread merely *entering* the target mid-install is safe; see
+ * native/hk_native.h.)
  *
  * Arch gates: litehook's inline technique is arm64/arm64e-only — its
  * trampoline emits AArch64 opcodes — so setStrategy: refuses HKStrategyInline
