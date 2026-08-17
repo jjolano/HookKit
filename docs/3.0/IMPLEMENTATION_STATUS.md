@@ -378,8 +378,8 @@ left for a future iteration rather than rushed through this one.
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
 | Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
-| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state complete; add_hook/analyze/prepare/commit not started) | this commit |
-| Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | this commit — see below |
+| Plan lifecycle (`Sources/Core/HKPlan.c`) | in progress (create/release/state/add_hook complete; analyze/prepare/commit not started) | this commit — see below |
+| Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | not started | |
 | Results / Reports | not started | `hk_report_t` still has no concrete definition — every `out_report` is `NULL` today |
 | Artifact ledger | not started | |
@@ -467,13 +467,54 @@ loop were wrong.
 Real, stated gap: `hk_plan_config_t.debug_label` (a caller-owned string
 pointer) is not deep-copied yet — harmless today because no public getter
 reads it back, but noted in a code comment so it doesn't quietly become a
-dangling-pointer bug the day one is added. `hk_plan_add_hook` and
-everything past `DRAFT` (`analyze`/`prepare`/`commit`) are not implemented
-— hooks need a real deep-copy of `hk_hook_spec_t`'s full target union
-(symbol/address/objc/memory, each with their own nested strings and image
-selectors), which is real additional design work deserving its own pass,
-not something to rush alongside the domain pointer-stability problem in
-the same commit.
+dangling-pointer bug the day one is added.
+
+**`hk_plan_add_hook`**, this iteration: the deep-copy of the full target
+union the previous entry deferred, done as its own focused pass.
+Dispatches on `target_kind` to one of four branches (symbol/address/objc/
+memory) — deliberately not `HK_TARGET_SWIFT_VTABLE` (rejected with
+`HK_STATUS_UNAVAILABLE`, per `HookKitTargets.h`'s design note that Swift
+goes through its own entry point, never this union) — each repointing the
+copied target struct's string/bytes fields at the hook's own owned
+allocations, same pattern as the domain work.
+
+A real bug caught by *reasoning through the code before running it*, not
+by a failing test: the memory-target branch only copies `base_image` when
+`address_is_image_relative` is true, but the initial whole-struct copy
+(`*dst = *src`) still copies whatever raw, non-owned `base_image.path`
+pointer the caller happened to leave set regardless — a dangling-pointer
+trap the moment the caller's spec goes out of scope, even though the field
+is documented as "meaningful only when `address_is_image_relative`." Fixed
+by explicitly zeroing `base_image` in the non-relative branch instead of
+trusting a field the contract says not to read. Now has its own regression
+test (`test_memory_target_non_relative_base_image_zeroed`) that
+deliberately sets a stray `base_image.path` on a non-relative target and
+checks it comes back `NULL`.
+
+Real validation added beyond pure transcription, each checked by its own
+test: `stable_hook_id` uniqueness within the plan (mirrors the domain
+check); the `HK_ORIGINAL_CALLABLE_CONTINUATION` +
+`HK_CONTINUATION_FORBIDDEN` contradiction rejected at add time — spec
+section 6.7 says this "is rejected as contradictory before route analysis
+even runs," and add_hook is the earliest point that can actually do that,
+so it does, rather than deferring to the not-yet-written
+`hk_plan_analyze`; a `spec->domain` pointer that doesn't belong to *this*
+plan is rejected (a foreign or garbage pointer, never silently accepted);
+a `commit_after` entry referencing a hook not yet added to this plan is
+rejected (`hk_hook_spec_t` is deep-copied once at add time with no update
+API, so a forward reference could never resolve to anything real later).
+
+14 host tests (`test-hook-add`), covering all of the above plus: deep-copy
+verification for each of the 4 supported target kinds (mutate the caller's
+buffer after the call, check the hook's own copy is unaffected — symbol
+name, objc class/selector names, memory replacement/expected/mask byte
+buffers); `commit_after` array deep-copied the same way; `hk_hook_t*`
+pointer stability across growth (37 hooks, same style as the domain
+stress test). Clean under `-fsanitize=address,undefined` — this is the
+test that matters most for that, given how many `malloc`/`free` paths and
+error-unwinding branches this code has. Not tested yet (no fault-injection
+harness exists — that's its own later Milestone 4 deliverable): the
+out-of-memory paths themselves.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**

@@ -25,6 +25,47 @@ struct hk_domain {
     hk_domain_spec_t spec;          // .stable_domain_id repointed at stable_domain_id_owned
 };
 
+// Same individually-heap-allocated reasoning as hk_domain above:
+// hk_hook_t* is returned from hk_plan_add_hook and reused later (e.g. as
+// an element of another hook's commit_after array), so it must survive
+// the hooks array reallocating as more hooks are added.
+//
+// Deep-copy ownership is tracked with explicit named fields rather than
+// one packed buffer -- verbose, but each field's lifetime is obvious at
+// the free site, and hk_hook_t is one heap object per hook, not something
+// stored inline in a hot array where the extra fields would cost anything
+// that matters. Which fields are populated depends on spec.target_kind;
+// unused ones stay NULL/zero (calloc'd).
+struct hk_hook {
+    hk_id_t hook_id;
+    char *stable_hook_id_owned;
+
+    hk_hook_spec_t spec;  // deep-copied; target's string/bytes pointers repointed at the owned_* fields below
+
+    char *owned_symbol_name;
+    char *owned_symbol_defining_image_path;
+    char *owned_symbol_caller_image_scope_path;
+
+    char *owned_address_expected_image_path;
+    uint8_t *owned_address_expected_initial_bytes;
+
+    char *owned_objc_class_name;
+    char *owned_objc_selector_name;
+
+    char *owned_memory_base_image_path;
+    uint8_t *owned_memory_replacement_bytes;
+    uint8_t *owned_memory_expected_bytes;
+    uint8_t *owned_memory_expected_mask;
+
+    // commit_after in the public spec is an array of hk_hook_t* the
+    // caller's buffer need not outlive the call -- copied into an owned
+    // array here. The hk_hook_t* elements themselves are references to
+    // other hooks this plan already owns, not deep-copied targets.
+    const hk_hook_t **owned_commit_after;
+
+    hk_hook_result_t result;
+};
+
 struct hk_plan {
     hk_id_t plan_id;
     hk_runtime_t *runtime;   // not owned; caller keeps the runtime alive
@@ -34,6 +75,10 @@ struct hk_plan {
     struct hk_domain **domains;
     size_t domain_count;
     size_t domain_capacity;
+
+    struct hk_hook **hooks;
+    size_t hook_count;
+    size_t hook_capacity;
 };
 
 #endif // HK_CORE_PLAN_INTERNAL_H
