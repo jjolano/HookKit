@@ -286,7 +286,7 @@ own description and the tool's code comment.
 | `HookKitObjC.h` | not started | typed Class/SEL convenience wrappers |
 | `HookKitSwift.h` | not started | |
 | `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
-| ABI symbol manifest | not started | |
+| ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet) | `Tools/abi/extract_abi.py`, this commit — see below |
 
 Deliberately safe by construction, not just by intent: the Makefile's
 `HookKit_PUBLIC_HEADERS` still lists only the legacy `Headers/HookKit.h` —
@@ -325,6 +325,51 @@ time, which this host has no runtime to satisfy, the same constraint the
 existing `test-substitute-classifier`/`test-original-publication` targets
 already work within. All 4 compile clean under `-Wall -Wextra -Werror`
 with zero warnings, host-verified.
+
+**ABI symbol manifest / baseline extraction**, this iteration:
+`Tools/abi/extract_abi.py` + `Schemas/hookkit-abi-baseline.schema.json`,
+closing the loop on Milestone 0's still-open "ABI baseline manifests" task
+at the same time as Milestone 3's own "ABI symbol manifest" deliverable —
+one real tool serving both. Tool discovery (Mach-O-aware `nm`/`otool`/
+`lipo`, via `$THEOS`'s toolchain layout) replicates
+`scripts/check_compat.sh`'s `find_tool()` search order rather than
+reinventing it — reused because that script isn't sourceable, not because
+the logic was worth rederiving.
+
+Extracted (real, from real binaries): install name, current/compatibility
+version (parsed from `otool -l`'s `LC_ID_DYLIB` block — the regex proven
+against an actual captured sample, with a regression test for
+over-greedy matching across two `LC_ID_DYLIB`-shaped blocks in one file),
+architectures, and exported symbols per arch. Cross-checked the extractor's
+own output against ground truth it had no way to cheat from:
+`scripts/export-HookKit.list` (the real, independently-maintained allowlist)
+lists exactly `_OBJC_CLASS_$_HKSubstitutor`/`_OBJC_METACLASS_$_HKSubstitutor`
+— exactly what `extract_abi.py` found. **Not implemented**, stated in the
+schema and the tool's own docstring rather than faked empty: Objective-C
+class/method/property metadata and historical enum numeric values — real
+Mach-O ObjC metadata parsing is a meaningfully bigger task than load-command/
+symbol-table reads, tracked as open work.
+
+Produced one real baseline: `Tests/LegacyABI/Baselines/v2.5.0.json`,
+schema-valid, from an actual `v2.5.0`-tagged build — not current HEAD
+mislabeled as the release tag (HEAD has diverged from that tag by 9 commits,
+even though none touch compiled source, so extracting from HEAD and calling
+it "v2.5.0" would have been dishonest labeling for a claim this document is
+supposed to be careful about). Used `git worktree add` to build the tagged
+commit in complete isolation rather than `git checkout`-and-back in the main
+tree — a plain checkout would have deleted `Tools/abi/extract_abi.py` itself
+from the working directory the moment HEAD moved to a commit that predates
+it, since it's a tracked file that doesn't exist in that tree. Worktree
+removed cleanly afterward (`git worktree list` back to just the main tree);
+`build/`/`.theos/` were touched by the interim `rootful-modern`-only builds
+this required, so re-ran `make test` and `./build.sh all` afterward to
+restore and reconfirm the full green baseline (64/64 PASS, 4 `.deb`s) —
+not assumed still valid after the worktree detour.
+
+Remaining 5 of the spec's 6 named baselines (`v1.0.1`, `v2.1.1`, `v2.2.5`,
+`v2.3.0`, `v2.4.0`) not yet extracted — same worktree-build-extract
+recipe, straightforward but time-costly (a full framework build per tag);
+left for a future iteration rather than rushed through this one.
 
 ## Milestone 4 — Core runtime and fake engines
 **State: not started.**

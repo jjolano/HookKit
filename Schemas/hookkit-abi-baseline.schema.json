@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hookkit.dev/schemas/hookkit-abi-baseline.schema.json",
+  "title": "HookKit ABI Baseline",
+  "description": "One release's ABI baseline (spec section 17.1), stored under Tests/LegacyABI/Baselines/<tag>.json. Tools/abi/extract_abi.py produces these from a built framework; Tools/abi/compare_abi.py (not built yet) diffs two of them for scripts/check_legacy_abi.sh's CI gate. Fields the extractor could not populate for a given baseline (e.g. Objective-C metadata, not implemented as of the first version of extract_abi.py) are omitted, not fabricated as empty/null -- see each field's description for what \"absent\" means.",
+  "type": "object",
+  "required": ["tag", "generated_at", "install_name", "architectures", "exported_symbols"],
+  "properties": {
+    "tag": { "type": "string", "description": "Git tag or commit this baseline was extracted from, e.g. \"v2.5.0\"." },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "extractor_version": { "type": "string" },
+
+    "install_name": { "type": "string" },
+    "current_version": { "type": "string" },
+    "compatibility_version": { "type": "string" },
+
+    "architectures": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["armv7", "armv7s", "arm64", "arm64e"] },
+      "minItems": 1
+    },
+
+    "exported_symbols": {
+      "description": "Exported symbol names, per architecture -- two builds can differ per-slice (e.g. an old-ABI arm64e lane exporting a narrower set), so this is never flattened into one arch-agnostic list.",
+      "type": "object",
+      "propertyNames": { "enum": ["armv7", "armv7s", "arm64", "arm64e"] },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+
+    "objc": {
+      "description": "Classes, methods, and type encodings. Omitted entirely (not an empty object) when the extractor that produced this baseline didn't implement Mach-O ObjC metadata parsing yet -- check extractor_version / the ledger before treating an absent objc field as \"this release has no ObjC classes\".",
+      "type": "object",
+      "properties": {
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "class_methods": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/method" }
+              },
+              "instance_methods": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/method" }
+              },
+              "properties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "getter_encoding": { "type": "string" },
+                    "setter_encoding": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "enum_values": {
+      "description": "Historical enum name -> numeric value, for the enums spec section 2.2 requires exact preservation of (hookkit_status_t, hookkit_lib_t, hookkit_cat_t, HKStrategy, ...). Sourced from header parsing, not the binary -- omitted (not {}) until that parser exists.",
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+
+    "header_checksums": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{64}$",
+        "description": "SHA-256 of the header file at this path, relative to the repo root."
+      }
+    }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "method": {
+      "type": "object",
+      "required": ["selector"],
+      "properties": {
+        "selector": { "type": "string" },
+        "type_encoding": {
+          "description": "Per-architecture type encoding, since encodings can differ by arch (e.g. NSInteger width).",
+          "type": "object",
+          "propertyNames": { "enum": ["armv7", "armv7s", "arm64", "arm64e"] },
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
