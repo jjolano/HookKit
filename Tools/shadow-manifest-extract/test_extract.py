@@ -14,6 +14,9 @@ from extract import (
     find_hook_function_calls,
     resolve_symbol_variable,
     hook_call_to_manifest_target,
+    parse_group_mask_expr,
+    parse_libc_descriptor_table,
+    libc_row_to_manifest_target,
 )
 
 FIXTURE = '''#import <Shadow/HookConfiguration.h>
@@ -120,6 +123,45 @@ def test_reused_variable_resolves_to_nearest_preceding_assignment():
     for t in targets:
         assert t["required_reach"] == ["existing_imports", "private_address"]
         assert t["original_requirement"] == "direct_predecessor"  # all three pass outOldPtr:
+
+
+LIBC_TABLE_FIXTURE = '''
+static const shdw_hook_desc_t shdw_libc_hooks[] = {
+    { "access",  (void*)&replaced_access, (void**)&original_access, LIBC,       LIBC },
+    { "close",   (void*)&replaced_close,  (void**)&original_close,  LIBC | LOW, LOW  },
+};
+'''
+
+
+def test_group_mask_split():
+    # "close" is claimed by two groups in the real table -- must produce two
+    # units, not a comma-joined string or just the first one.
+    assert parse_group_mask_expr("LIBC") == ["Hook_Filesystem@c"]
+    assert parse_group_mask_expr("LIBC | LOW") == ["Hook_Filesystem@c", "Hook_LowLevelC"]
+    assert parse_group_mask_expr("0") == []
+
+
+def test_libc_descriptor_table_dual_group_row():
+    rows = parse_libc_descriptor_table(LIBC_TABLE_FIXTURE, source_label="fixture")
+    assert len(rows) == 2
+    access, close = rows
+    assert access["symbol"] == "access"
+    assert access["install_units"] == ["Hook_Filesystem@c"]
+    assert access["verify_units"] == ["Hook_Filesystem@c"]
+
+    assert close["symbol"] == "close"
+    assert close["install_units"] == ["Hook_Filesystem@c", "Hook_LowLevelC"]
+    assert close["verify_units"] == ["Hook_LowLevelC"]  # LOW only, per the real table
+
+    # Two manifest targets for "close", correctly reflecting that only the
+    # LowLevelC parent actually verify-checks it (matches the real
+    # shdw_libc_verify_group semantics read from libc.x).
+    t_fs = libc_row_to_manifest_target(close, "Hook_Filesystem@c", "phase_tier1", "libc.x")
+    t_low = libc_row_to_manifest_target(close, "Hook_LowLevelC", "phase_tier1", "libc.x")
+    assert t_fs["stable_hook_id"] == "Hook_Filesystem@c::close"
+    assert t_low["stable_hook_id"] == "Hook_LowLevelC::close"
+    assert "verification_method" not in t_fs
+    assert "verification_method" in t_low
 
 
 def test_malformed_row_rejected():

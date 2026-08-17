@@ -91,15 +91,49 @@ milestone).
 
 | Task | State | Evidence |
 |---|---|---|
-| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit tier + `hookFunction:` pattern-scan tier) | commit `5970255` + this commit |
+| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit + `hookFunction:` pattern-scan + `shdw_libc_hooks[]` structured-table tiers) | commits `5970255`, `bd52025`, this commit |
 | `Tools/shadow-manifest-extract/validate.py` | complete | commit `5970255` |
-| `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, still empty — the pattern-scan pass hasn't needed one yet) | commit `5970255` |
-| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | this commit (added a reused-variable regression test) |
-| `artifacts/shadow-current-manifest.json` | in progress — 113 targets: 22 install units + 91 pattern_scan child targets, from 9/22 units fully decomposed | this commit |
-| `shdw_libc_install_group` descriptor parse | not started | covers 4 more units (libc/libc_lowlevel/libc_antidebugging/envvar) once done — it's a large table inside `libc.x`, not yet read closely |
+| `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, still empty — nothing's needed one yet) | commit `5970255` |
+| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | 8 tests total as of this commit |
+| `artifacts/shadow-current-manifest.json` | in progress — 186 targets: 22 install units + 164 children (91 pattern_scan + 73 structured_table), 13/22 units decomposed | this commit |
+| `shdw_libc_install_group` descriptor parse | **complete** | this commit — see below |
+| `shdw_coord_*` composite units (symlookup, filesystem_objc, foundation_objc, hideapps) | not started | real finding this iteration: several units are coordinator-side composites calling 2+ named functions, not 1:1 with a single shadowhook_ body — see below, needs its own (bounded) resolution pass, not a full call-graph walker |
 | `logos_preprocess.py` | not started | needed for the 7+ files still using raw Logos `%hook` blocks |
-| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on the pattern_scan rows |
-| Initial route-feasibility report | not started | depends on the above being further along |
+| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on both pattern_scan and structured_table rows |
+| Initial route-feasibility report | not started | manifest coverage (13/22 units, 59%) is high enough now to be worth starting next, still not complete |
+
+**`shdw_libc_hooks[]` decomposition**, done this iteration: another real,
+clean `shdw_hook_desc_t` array (72 rows: symbol, replacement, original,
+installGroups bitmask, verifyGroups bitmask) in `libc.x`, shared across 4
+install units (`Hook_Filesystem@c`, `Hook_LowLevelC`, `Hook_AntiDebugging`,
+`Hook_EnvVars@c`) via the bitmask. The unit-to-group mapping is hand-verified
+against real source, not inferred — cited per-constant in `extract.py`'s
+`GROUP_TO_UNIT` comment, including the one indirect case
+(`Hook_EnvVars@c`'s installer, `shdw_coord_envvars_c` in `dylib.x`, does its
+own `unsetenv`/`setenv` scrubbing directly — not through HookKit at all —
+*and* calls `shadowhook_libc_envvar(hooks)`, which is what actually reaches
+`shdw_libc_install_group`). One symbol (`close`) is claimed by two groups
+with different verify requirements (`LIBC | LOW` install, `LOW`-only
+verify) — represented as two separate manifest rows
+(`Hook_Filesystem@c::close`, `Hook_LowLevelC::close`), each with the correct
+verification_method presence/absence, not collapsed into one. Covered by
+`test_group_mask_split` / `test_libc_descriptor_table_dual_group_row`.
+
+**Real finding not yet acted on**: reading `dylib.x`'s coordinator wrappers
+closely turned up units whose installer is a composite function calling
+*other* named `shadowhook_*` functions (`shdw_coord_symlookup` calls
+`shadowhook_dyld_symlookup` + `shadowhook_dyld_symaddrlookup`;
+`shdw_coord_filesystem_objc` calls 4 NSFile*-family functions) rather than
+containing `[hooks hookFunction:...]` calls itself. The current pass
+correctly reports these as "no call sites found... likely delegates"
+(honest, not silently wrong) but doesn't follow the delegation. A bounded
+one-level "if the body is just calls to other named functions, recurse into
+each" pass would close this — deliberately not built yet this iteration to
+avoid open-ended call-graph resolution; likely worth it as a small, scoped
+next step rather than jumping straight to full Clang AST for it. Also
+surfaced: `shadowhook_envpolicy` (called from `shdw_coord_envvars_c`) was
+not found anywhere under `ShadowCore.dylib/hooks` — real gap, noted, not
+silently dropped.
 
 This iteration deepened extraction past the install-unit tier for real,
 rather than starting the route-feasibility report on top of a manifest that

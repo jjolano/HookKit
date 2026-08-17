@@ -53,6 +53,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 
 MANIFEST_VERSION = "0.2.0-milestone2-partial-decomposition"
@@ -475,6 +476,116 @@ def find_function_definition_file(shadow_repo: str, func_name: str):
     return None
 
 
+# shdw_libc_hooks[] (ShadowCore.dylib/hooks/FileHiding/libc.x) uses local
+# macro aliases for the real SHADW_HOOK_GROUP_* bitmask constants (#define
+# LIBC SHADW_HOOK_GROUP_LIBC etc., right above the table). Recorded here
+# rather than re-derived, since #define isn't something this script's
+# tokenizer resolves generically.
+LIBC_GROUP_ALIASES = {
+    "LIBC": "SHADW_HOOK_GROUP_LIBC",
+    "ENVVAR": "SHADW_HOOK_GROUP_ENVVAR",
+    "LOW": "SHADW_HOOK_GROUP_LOWLEVEL",
+    "ANTIDBG": "SHADW_HOOK_GROUP_ANTIDEBUG",
+}
+
+# Which install unit each real group constant belongs to. Verified by hand,
+# not inferred: SHADW_HOOK_GROUP_LIBC/LOWLEVEL/ANTIDEBUG are each installed
+# by a shadowhook_libc_*(hooks) wrapper that calls
+# shdw_libc_install_group(hooks, THIS_CONSTANT) as its only statement
+# (confirmed reading iokit.x-style one-liners in libc_lowlevel.x,
+# libc_antidebugging.x, libc.x itself). SHADW_HOOK_GROUP_ENVVAR is one step
+# further: "Hook_EnvVars@c"'s installer is shdw_coord_envvars_c (dylib.x),
+# which does its own unsetenv/setenv scrubbing AND calls
+# shadowhook_libc_envvar(hooks) AND shadowhook_envpolicy(hooks) -- the
+# middle call is the one that reaches shdw_libc_install_group(hooks,
+# SHADW_HOOK_GROUP_ENVVAR). shadowhook_envpolicy itself was not found under
+# ShadowCore.dylib/hooks -- noted as a real gap, not silently dropped.
+GROUP_TO_UNIT = {
+    "SHADW_HOOK_GROUP_LIBC": "Hook_Filesystem@c",
+    "SHADW_HOOK_GROUP_LOWLEVEL": "Hook_LowLevelC",
+    "SHADW_HOOK_GROUP_ANTIDEBUG": "Hook_AntiDebugging",
+    "SHADW_HOOK_GROUP_ENVVAR": "Hook_EnvVars@c",
+}
+
+
+def parse_group_mask_expr(expr: str):
+    """'LIBC' -> ['Hook_Filesystem@c']; 'LIBC | LOW' -> both units. Unknown
+    macro names are returned as-is (surfaced as a risk by the caller) rather
+    than silently dropped."""
+    units = []
+    for part in expr.split("|"):
+        name = part.strip()
+        if not name or name == "0":
+            continue
+        real = LIBC_GROUP_ALIASES.get(name, name)
+        units.append(GROUP_TO_UNIT.get(real, f"<unknown group {real}>"))
+    return units
+
+
+def parse_libc_descriptor_table(raw: str, source_label: str = "<text>"):
+    """Parses shdw_libc_hooks[] -- a real, clean shdw_hook_desc_t array (see
+    the struct just above the table: symbol, replacement, original,
+    installGroups, verifyGroups) that shdw_libc_install_group() walks,
+    filtering by group bitmask. One symbol can belong to more than one group
+    (e.g. "close" is LIBC | LOW) -- parse_group_mask_expr splits that into
+    one manifest target per contributing unit, not one shared row, matching
+    how the source itself treats group membership as independent claims
+    (shdw_close_hooked is what actually dedupes the runtime install)."""
+    clean = strip_comments_preserve_lines(raw)
+    body, body_start_line = find_c_array_body(clean, "shdw_libc_hooks", source_label)
+
+    rows = []
+    for row_match in ROW_RE.finditer(body):
+        row_line = body_start_line + body.count("\n", 0, row_match.start())
+        fields = parse_row_fields(row_match.group(1))
+        if len(fields) != 5:
+            raise ValueError(
+                f"{source_label}:{row_line}: expected 5 fields "
+                f"(symbol, replacement, original, installGroups, verifyGroups), "
+                f"got {len(fields)}: {fields!r}"
+            )
+        symbol_f, _replacement_f, _original_f, install_groups_f, verify_groups_f = fields
+        rows.append({
+            "symbol": parse_string_literal(symbol_f),
+            "install_units": parse_group_mask_expr(install_groups_f),
+            "verify_units": parse_group_mask_expr(verify_groups_f),
+            "source_line": row_line,
+        })
+    return rows
+
+
+def libc_row_to_manifest_target(row, parent_id, parent_domain, source_file_rel):
+    risks = []
+    if any(u.startswith("<unknown") for u in row["install_units"] + row["verify_units"]):
+        risks.append("references a group macro this script doesn't have a unit mapping for")
+    verified = parent_id in row["verify_units"]
+    if verified:
+        risks.append("required: shdw_libc_verify_group treats a NULL original here as a failure")
+    else:
+        risks.append("optional/best-effort: alias-validated via dladdr at install time, not verify-checked")
+
+    target = {
+        "stable_hook_id": f"{parent_id}::{row['symbol']}",
+        "parent_install_unit": parent_id,
+        "source": {"file": source_file_rel, "line": row["source_line"]},
+        "target_kind": "function_symbol",
+        "target_symbol": row["symbol"],
+        "role": "mandatory",
+        "commit_domain": parent_domain,
+        # dlsym(RTLD_DEFAULT, ...) resolution, same reach class as the
+        # findSymbolInImage-resolved pattern_scan children.
+        "required_reach": ["existing_imports", "private_address"],
+        "original_requirement": "direct_predecessor",  # outOldPtr: is always d->original
+        "continuation_policy": "any",
+        "availability": "required_now",
+        "extraction_method": "structured_table",
+        "known_compatibility_risks": risks,
+    }
+    if verified:
+        target["verification_method"] = "shdw_libc_verify_group (see libc.x)"
+    return target
+
+
 def load_manual_overrides(path):
     if not os.path.exists(path):
         return {}
@@ -601,6 +712,37 @@ def main():
                 "%init block; needs a follow-up pass to classify, not yet done"
             )
 
+    # shdw_libc_hooks[] (libc.x): the other real descriptor table found this
+    # iteration, shared by 4 units (Hook_Filesystem@c, Hook_LowLevelC,
+    # Hook_AntiDebugging, Hook_EnvVars@c) via a group bitmask -- see
+    # GROUP_TO_UNIT's citation for how each was verified against real source.
+    libc_x = os.path.join(shadow_repo, "ShadowCore.dylib", "hooks", "FileHiding", "libc.x")
+    if os.path.exists(libc_x):
+        with open(libc_x, "r", encoding="utf-8") as f:
+            libc_rows = parse_libc_descriptor_table(f.read(), source_label=libc_x)
+        libc_rel = os.path.relpath(libc_x, shadow_repo)
+        decomposed_by_libc = set()
+        for row in libc_rows:
+            for unit_id in row["install_units"]:
+                t = target_by_id.get(unit_id)
+                if not t:
+                    continue
+                child_targets.append(libc_row_to_manifest_target(
+                    row, unit_id, t["commit_domain"], libc_rel))
+                decomposed_by_libc.add(unit_id)
+        for unit_id in decomposed_by_libc:
+            t = target_by_id[unit_id]
+            t["known_compatibility_risks"] = [
+                r for r in t["known_compatibility_risks"]
+                if not (r.startswith("unit-level only") or r.startswith("no [hooks hookFunction:...] call sites"))
+            ]
+            n = sum(1 for row in libc_rows if unit_id in row["install_units"])
+            t["known_compatibility_risks"].append(
+                f"decomposed into {n} structured_table child target(s) from "
+                f"shdw_libc_hooks[] in {libc_rel}"
+            )
+            decomposed.append(unit_id)
+
     targets.extend(child_targets)
 
     overrides_path = os.path.join(os.path.dirname(__file__), "manual_overrides.yaml")
@@ -631,9 +773,11 @@ def main():
         json.dump(manifest, f, indent=2)
         f.write("\n")
 
-    print(f"wrote {len(targets)} targets ({len(units)} install units, "
-          f"{len(child_targets)} pattern_scan child targets from "
-          f"{len(decomposed)} decomposed unit(s)) to {out_path}")
+    method_counts = Counter(t["extraction_method"] for t in targets)
+    print(f"wrote {len(targets)} targets to {out_path}")
+    print(f"  {len(units)} install units, {len(child_targets)} child targets "
+          f"from {len(set(decomposed))} decomposed unit(s)")
+    print(f"  by extraction_method: {dict(method_counts)}")
     print(f"  ({len(applied)} overridden by manual_overrides.yaml: {applied})" if applied
           else "  (no manual overrides applied)")
     return 0

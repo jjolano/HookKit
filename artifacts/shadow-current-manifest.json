@@ -1,6 +1,6 @@
 {
   "manifest_version": "0.2.0-milestone2-partial-decomposition",
-  "generated_at": "2026-08-17T06:26:50Z",
+  "generated_at": "2026-08-17T06:57:01Z",
   "shadow_commit": "efbc732e99432773158322adf47c93e5bd447518",
   "targets": [
     {
@@ -42,7 +42,7 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "pref-gated by SHDWHookIDFilesystem",
-        "no [hooks hookFunction:...] call sites found in shadowhook_libc() (ShadowCore.dylib/hooks/FileHiding/libc.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
+        "decomposed into 52 structured_table child target(s) from shdw_libc_hooks[] in ShadowCore.dylib/hooks/FileHiding/libc.x"
       ],
       "target_kind": "function_symbol",
       "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
@@ -64,9 +64,9 @@
       "availability": "required_now",
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
-        "unit-level only: does not yet decompose into the individual function/selector targets this install unit installs",
         "pref-gated by SHDWHookIDEnvVars",
-        "could not locate a definition for shdw_coord_envvars_c() under ShadowCore.dylib/hooks -- may live outside that tree"
+        "could not locate a definition for shdw_coord_envvars_c() under ShadowCore.dylib/hooks -- may live outside that tree",
+        "decomposed into 1 structured_table child target(s) from shdw_libc_hooks[] in ShadowCore.dylib/hooks/FileHiding/libc.x"
       ],
       "target_kind": "function_symbol",
       "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
@@ -179,7 +179,7 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "pref-gated by SHDWHookIDLowLevelC",
-        "no [hooks hookFunction:...] call sites found in shadowhook_libc_lowlevel() (ShadowCore.dylib/hooks/FileHiding/libc_lowlevel.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
+        "decomposed into 12 structured_table child target(s) from shdw_libc_hooks[] in ShadowCore.dylib/hooks/FileHiding/libc.x"
       ],
       "target_kind": "function_symbol",
       "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
@@ -202,7 +202,7 @@
       "extraction_method": "structured_table",
       "known_compatibility_risks": [
         "pref-gated by SHDWHookIDAntiDebugging",
-        "no [hooks hookFunction:...] call sites found in shadowhook_libc_antidebugging() (ShadowCore.dylib/hooks/AntiDebug/libc_antidebugging.x) -- likely delegates to a descriptor table, shdw_libc_install_group, or a Logos %hook/%init block; needs a follow-up pass to classify, not yet done"
+        "decomposed into 8 structured_table child target(s) from shdw_libc_hooks[] in ShadowCore.dylib/hooks/FileHiding/libc.x"
       ],
       "target_kind": "function_symbol",
       "verification_method": "shdw verify function (ctor-run, see HookConfiguration.h SHDWInstallUnit.verify)",
@@ -2435,6 +2435,1745 @@
       "extraction_method": "pattern_scan",
       "known_compatibility_risks": [],
       "target_symbol": "dlopen_from_ptr"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::access",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1480
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "access",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::chdir",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1481
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "chdir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::chroot",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1482
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "chroot",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::creat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1483
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "creat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::statfs",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1484
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "statfs",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fstatfs",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1485
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstatfs",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::statvfs",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1486
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "statvfs",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fstatvfs",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1487
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstatvfs",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::stat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1488
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "stat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::lstat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1489
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "lstat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::faccessat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1490
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "faccessat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::readdir_r",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1491
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "readdir_r",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::readdir",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1492
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "readdir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::closedir",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1493
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "closedir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fopen",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1494
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fopen",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::freopen",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1495
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "freopen",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::realpath",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1496
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "realpath",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::readlink",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1497
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "readlink",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::readlinkat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1498
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "readlinkat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::link",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1499
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "link",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getmntinfo",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1500
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getmntinfo",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getattrlist",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1501
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getattrlist",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fs_snapshot_list",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1502
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fs_snapshot_list",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getxattr",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1503
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getxattr",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::listxattr",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1504
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "listxattr",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fgetxattr",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1505
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fgetxattr",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::flistxattr",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1506
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "flistxattr",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fgetattrlist",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1507
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fgetattrlist",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getattrlistat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1508
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getattrlistat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getattrlistbulk",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1509
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getattrlistbulk",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::symlink",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1510
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "symlink",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::rename",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1511
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "rename",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::remove",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1512
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "remove",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::unlink",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1513
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "unlink",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::unlinkat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1514
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "unlinkat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::linkat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1515
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "linkat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::symlinkat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1516
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "symlinkat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::renameat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1517
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "renameat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::mkdirat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1518
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "mkdirat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fchmodat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1519
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fchmodat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::rmdir",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1520
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "rmdir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::pathconf",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1521
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "pathconf",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fpathconf",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1522
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fpathconf",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::utimes",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1523
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "utimes",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::futimes",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1524
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "futimes",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fchdir",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1525
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fchdir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getfsstat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1526
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getfsstat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fstat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1527
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::fstatat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1528
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstatat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::utimensat",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1531
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "utimensat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::getmntinfo_r_np",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1532
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getmntinfo_r_np",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_EnvVars@c::getenv",
+      "parent_install_unit": "Hook_EnvVars@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1535
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getenv",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::open",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1538
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "open",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::openat",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1539
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "openat",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::opendir",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1540
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "opendir",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::__opendir2",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1541
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "__opendir2",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::open_dprotected_np",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1542
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "open_dprotected_np",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::openat_dprotected_np",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1543
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "openat_dprotected_np",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::openat_authenticated_np",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1544
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "openat_authenticated_np",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::stat64",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1545
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "stat64",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::lstat64",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1546
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "lstat64",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::fstat64",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1547
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstat64",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::fstatat64",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1548
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "fstatat64",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_Filesystem@c::close",
+      "parent_install_unit": "Hook_Filesystem@c",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1551
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "close",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_LowLevelC::close",
+      "parent_install_unit": "Hook_LowLevelC",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1551
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "close",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::ptrace",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1554
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "ptrace",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::sysctl",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1555
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "sysctl",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::getppid",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1556
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getppid",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::getrusage",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1557
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getrusage",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::getrlimit",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1558
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "getrlimit",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "required: shdw_libc_verify_group treats a NULL original here as a failure"
+      ],
+      "verification_method": "shdw_libc_verify_group (see libc.x)"
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::proc_listpids",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1559
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "proc_listpids",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::proc_listallpids",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1560
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "proc_listallpids",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
+    },
+    {
+      "stable_hook_id": "Hook_AntiDebugging::proc_pidinfo",
+      "parent_install_unit": "Hook_AntiDebugging",
+      "source": {
+        "file": "ShadowCore.dylib/hooks/FileHiding/libc.x",
+        "line": 1561
+      },
+      "target_kind": "function_symbol",
+      "target_symbol": "proc_pidinfo",
+      "role": "mandatory",
+      "commit_domain": "phase_tier1",
+      "required_reach": [
+        "existing_imports",
+        "private_address"
+      ],
+      "original_requirement": "direct_predecessor",
+      "continuation_policy": "any",
+      "availability": "required_now",
+      "extraction_method": "structured_table",
+      "known_compatibility_risks": [
+        "optional/best-effort: alias-validated via dladdr at install time, not verify-checked"
+      ]
     }
   ]
 }
