@@ -1,0 +1,3917 @@
+{
+  "report_version": "0.1.0-milestone2-modeled",
+  "generated_at": "2026-08-17T07:29:28Z",
+  "manifest_version": "0.2.0-milestone2-partial-decomposition",
+  "lanes": [
+    {
+      "lane": "all",
+      "targets": [
+        {
+          "stable_hook_id": "dyld",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_EnvVars@c",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_EnvVars@objc",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_DeviceCheck",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_IOKit",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc@methodimpl",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Memory",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "symlookup",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_DynamicLibrariesExtra",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@objc",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Foundation@objc",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_HideApps",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_URLScheme",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Foundation@uikit",
+          "eligible_routes": [
+            {
+              "engine_id": "objc-message",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "arbitrary_runtime",
+              "achieved_reach": [
+                "objc_dispatch"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "objc-message",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "arbitrary_runtime",
+            "achieved_reach": [
+              "objc_dispatch"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_find_unwind_sections",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_get_image_header_containing_address",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_get_image_uuid",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::dyld_image_get_installname",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_images_for_addresses",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_register_for_image_loads",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_register_for_bulk_image_loads",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_objc_notify_register",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::objc_add_load_image_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_create",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_get_images",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_destroy",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_get_state",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_get_image_path",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_get_image_uuid",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::_dyld_process_info_release",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "dyld::nsaddimage_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "dyld::nslookupsymbol_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "dyld::nsversion_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::bootstrap_check_in",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::bootstrap_look_up",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_bootstrap_check_in2",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_bootstrap_check_in3",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up2",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up3",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_bootstrap_look_up_per_user",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_pid_for_task",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_MachBootstrap::_mach_port_names",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_IOKit::IOServiceGetMatchingServices",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_IOKit::IOServiceOpen",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_IOKit::_IOServiceGetMatchingService",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "objc::class_getImageName",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc::objc_copyClassNamesForImage",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc::objc_copyImageNames",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc::class_getMethodImplementation",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "objc::imp_getBlock_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::syscall",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::csops",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::___syscall",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::_sysctlbyname",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::___sysctlbyname",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::_csops_audittoken",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Syscall::_NSGetEnviron",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Memory::vm_region_64",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Memory::vm_region_recurse_64",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Memory::mach_vm_region",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Memory::mach_vm_region_recurse",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::sandbox_check",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::fcntl",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::host_get_special_port",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::task_get_special_port",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::task_for_pid",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::sigaction",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execle",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execlp",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execl",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execve",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execvp",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::execv",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::posix_spawn",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::posix_spawnp",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::fork",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::vfork",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_signal",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_bsd_signal",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::___signal_nobind",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::___sigaction",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_system",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_popen",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_wordexp",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_sandbox_check_by_audit_token",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_task_get_exception_ports",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Sandbox::_connect",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "classes::NSClassFromString",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::objc_getClass",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::objc_lookUpClass",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::objc_getMetaClass",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::objc_getClassList",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::objc_copyClassList",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::enumerateClassesPtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::class_copyMethodList",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::class_getInstanceMethod",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::class_getClassMethod",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::methodImplAndNamePtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::stretPtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::copyClassesForImagePtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::copyClassNamesForImageHeaderPtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::setHookGetImageNamePtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "classes::setHookGetClassPtr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_DynamicLibrariesExtra::__ZL15dlopen_internalPKciPv",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_DynamicLibrariesExtra::dlopen_from_ptr",
+          "eligible_routes": [
+            {
+              "engine_id": "import-rebind",
+              "provider_family": "none",
+              "continuation_kind": "direct_predecessor",
+              "required_install_context": "early_process",
+              "achieved_reach": [
+                "existing_imports"
+              ]
+            }
+          ],
+          "selected_route": {
+            "engine_id": "import-rebind",
+            "provider_family": "none",
+            "continuation_kind": "direct_predecessor",
+            "required_install_context": "early_process",
+            "achieved_reach": [
+              "existing_imports"
+            ]
+          },
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": false,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": null,
+          "disposition": "routable"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::access",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::chdir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::chroot",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::creat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::statfs",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fstatfs",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::statvfs",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fstatvfs",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::stat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::lstat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::faccessat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::readdir_r",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::readdir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::closedir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fopen",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::freopen",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::realpath",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::readlink",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::readlinkat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::link",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getmntinfo",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getattrlist",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fs_snapshot_list",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getxattr",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::listxattr",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fgetxattr",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::flistxattr",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fgetattrlist",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getattrlistat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getattrlistbulk",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::symlink",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::rename",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::remove",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::unlink",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::unlinkat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::linkat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::symlinkat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::renameat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::mkdirat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fchmodat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::rmdir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::pathconf",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fpathconf",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::utimes",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::futimes",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fchdir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getfsstat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fstat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::fstatat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::utimensat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::getmntinfo_r_np",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_EnvVars@c::getenv",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::open",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::openat",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::opendir",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::__opendir2",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::open_dprotected_np",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::openat_dprotected_np",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::openat_authenticated_np",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::stat64",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::lstat64",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::fstat64",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::fstatat64",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_Filesystem@c::close",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_LowLevelC::close",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::ptrace",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::sysctl",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::getppid",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::getrusage",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::getrlimit",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::proc_listpids",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::proc_listallpids",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        },
+        {
+          "stable_hook_id": "Hook_AntiDebugging::proc_pidinfo",
+          "eligible_routes": [],
+          "selected_route": null,
+          "missing_preferred_reach": [],
+          "requires_dobby": false,
+          "requires_gum": false,
+          "requires_private_symbols": true,
+          "requires_terminal_inline": false,
+          "requires_dynamic_continuation": false,
+          "requires_static_continuation": false,
+          "blocking_reason": "resolved via runtime private-symbol lookup; which certified HK3 engine serves this (native inline / ElleKit private-symbol path / Dobby / litehook) is undetermined until Milestone 6/7/10 engine certification exists -- modeled pass does not guess a specific one",
+          "disposition": "needs_platform_decision"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "dobby_required": false,
+    "gum_required": false,
+    "unclassified_mandatory_targets": 114
+  }
+}

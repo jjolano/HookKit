@@ -38,7 +38,8 @@
       "properties": {
         "lane": {
           "type": "string",
-          "enum": ["rootful-legacy", "rootful-modern", "rootless", "roothide"]
+          "enum": ["rootful-legacy", "rootful-modern", "rootless", "roothide", "all"],
+          "description": "\"all\" is a lane-agnostic shorthand for passes with no real per-lane differentiation yet (e.g. a modeled classification not yet backed by per-lane ProviderEvidence) — one entry instead of four identical ones. A generator must switch to the 4 real lane names as soon as its classification can actually differ between them; \"all\" is for genuinely uniform results, not a permanent shortcut."
         },
         "targets": {
           "type": "array",

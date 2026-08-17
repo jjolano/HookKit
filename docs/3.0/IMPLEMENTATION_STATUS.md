@@ -100,7 +100,7 @@ milestone).
 | `shdw_coord_*` composite units (symlookup, filesystem_objc, foundation_objc, hideapps) | not started | real finding this iteration: several units are coordinator-side composites calling 2+ named functions, not 1:1 with a single shadowhook_ body — see below, needs its own (bounded) resolution pass, not a full call-graph walker |
 | `logos_preprocess.py` | not started | needed for the 7+ files still using raw Logos `%hook` blocks |
 | `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on both pattern_scan and structured_table rows |
-| Initial route-feasibility report | not started | manifest coverage (13/22 units, 59%) is high enough now to be worth starting next, still not complete |
+| Initial route-feasibility report | **complete (modeled pass)** | this commit — `Tools/route-feasibility/hk_route_report.py`, `artifacts/shadow-route-feasibility.json`, `docs/3.0/SHADOW_ROUTE_FEASIBILITY.md` |
 
 **`shdw_libc_hooks[]` decomposition**, done this iteration: another real,
 clean `shdw_hook_desc_t` array (72 rows: symbol, replacement, original,
@@ -222,6 +222,53 @@ Clang AST tooling against `shadow/`'s tree (needed for the per-hook
 decomposition pass) is a bigger, noisier action than a source read and will
 get its own heads-up before it happens, per the standing boundary at the
 top of this file.
+
+**Initial route-feasibility report**, this iteration: built
+`Tools/route-feasibility/hk_route_report.py` per spec §18.4, deliberately
+scoped to what the spec's own Milestone 2 language allows — "initial route
+report using **modeled** engine capabilities," since no real
+`hk_engine_vtable_t` exists yet (that's Milestones 4–10). The classifier is
+a small, hand-authored table keyed on `(target_kind, required_reach)`,
+against what's already true and working in HookKit 2.x
+(`docs/3.0/ENGINE_CONTRACT.md`'s citations), not a reimplementation of the
+real router — deliberately not attempting that, to avoid two divergent
+router logics existing at once.
+
+Result against the current 186-target manifest: 72 targets **routable**
+(63 via plain import-rebind, 9 via the ObjC message engine — both
+mechanisms HookKit 2.x already does today), 114 **needs_platform_decision**
+— every one of those 114 resolved via runtime private-symbol lookup
+(`findSymbolInImage`/`dlsym`), correctly *not* claimed as routable by a
+specific engine, since which certified HK3 engine ends up serving
+private-symbol-resolved targets is genuinely undetermined before Milestone
+6/7/10 exist. `requires_dobby`/`requires_gum` both **false** — nothing
+extracted so far demonstrates a need only those two specifically satisfy,
+and the tool says so explicitly rather than guessing either way. Verified
+the "all 114 unclassified targets share the identical blocking_reason"
+claim in the generated doc against the actual JSON rather than asserting it
+from the round numbers matching by coincidence. Output validated against
+`Schemas/shadow-route-report.schema.json` (host-verified). 5 self-tests in
+`Tools/route-feasibility/test_hk_route_report.py`.
+
+Caveat stated in the report's own Markdown output, not just here: this
+covers all 186 currently-extracted targets, but 9/22 Shadow install units
+are still unit-level only (not yet decomposed into individual targets) —
+so this is a first read, not the final answer spec §18.5's ABI-freeze gate
+needs.
+
+Caught before it shipped, not after: the first working version of the tool
+literally repeated the same 186-target classification once per packaging
+lane (`classify_target()` takes no lane argument, so it structurally cannot
+differ per lane yet) — 15,632 lines of `artifacts/shadow-route-feasibility.json`
+for 186 real targets, checked with `wc -l` on a hunch before committing.
+Added `"all"` as a lane-agnostic shorthand to `shadow-route-report.schema.json`
+(alongside `structured_table`/`pattern_scan` from earlier iterations — same
+pattern of refining the schema against what actually turns out to be true,
+not designing it perfectly upfront) and switched the tool to emit one `"all"`
+entry instead of four identical ones. 3,917 lines now, same summary numbers,
+still schema-valid. The fix is what real per-lane differentiation should
+eventually replace, not a permanent shortcut — noted in both the schema's
+own description and the tool's code comment.
 
 ## Milestone 3 — ABI freeze candidate
 **State: not started.**
