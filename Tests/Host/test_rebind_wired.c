@@ -1,0 +1,240 @@
+// End-to-end: the Milestone 4 plan lifecycle driving the real Milestone 6
+// rebind engine through its runtime adapter (HKRebindVtable.h), against a
+// synthetic image with a buffer-backed writer. This is the join the whole
+// stack was built toward -- analyze/prepare/commit on a real plan, real
+// resolvers finding real slots, real writes, and real artifacts in the report.
+// Nothing here is a fake engine.
+
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKReportInternal.h"
+#include "../../Sources/Core/HKRuntimeInternal.h"
+#include "../../Sources/Engines/HKRebindVtable.h"
+
+// Same loaded-layout image as test_rebind_engine.c: __got with two slots both
+// binding "_malloc", tables in __LINKEDIT at translated offsets.
+#define V_BASE      0x100000000ull
+#define IMG_SIZE    0x600u
+#define GOT_OFF     0x180u
+#define ORIGINAL    0xAAAA0001ull
+#define REPLACEMENT 0xBBBB2222ull
+
+static void put_u32(uint8_t *b, size_t o, uint32_t v) { memcpy(b + o, &v, sizeof(v)); }
+static void put_u64(uint8_t *b, size_t o, uint64_t v) { memcpy(b + o, &v, sizeof(v)); }
+
+static void build_image(uint8_t *img) {
+    memset(img, 0, IMG_SIZE);
+    const uint32_t seg_data = 32, sect = 104, seg_le = 184, symtab = 256, dysym = 280;
+    put_u32(img, 0, HK_MH_MAGIC_64);
+    put_u32(img, 16, 4);
+    put_u32(img, 20, 152 + 72 + 24 + 80);
+
+    put_u32(img, seg_data, HK_LC_SEGMENT_64);
+    put_u32(img, seg_data + 4, 152);
+    memcpy(img + seg_data + 8, "__DATA", 6);
+    put_u64(img, seg_data + 24, V_BASE + GOT_OFF);
+    put_u32(img, seg_data + 64, 1);
+
+    memcpy(img + sect, "__got", 5);
+    memcpy(img + sect + 16, "__DATA", 6);
+    put_u64(img, sect + 32, V_BASE + GOT_OFF);
+    put_u64(img, sect + 40, 16);
+    put_u32(img, sect + 64, HK_S_NON_LAZY_SYMBOL_POINTERS);
+    put_u32(img, sect + 68, 0);
+
+    put_u32(img, seg_le, HK_LC_SEGMENT_64);
+    put_u32(img, seg_le + 4, 72);
+    memcpy(img + seg_le + 8, "__LINKEDIT", 10);
+    put_u64(img, seg_le + 24, V_BASE + 0x240);
+    put_u64(img, seg_le + 32, 0x400);
+    put_u64(img, seg_le + 40, 0x40);
+    put_u64(img, seg_le + 48, 0x400);
+
+    put_u32(img, symtab, HK_LC_SYMTAB);
+    put_u32(img, symtab + 4, HK_SYMTAB_COMMAND_SIZE);
+    put_u32(img, symtab + 8, 0x40);
+    put_u32(img, symtab + 12, 2);
+    put_u32(img, symtab + 16, 0x60);
+    put_u32(img, symtab + 20, 32);
+
+    put_u32(img, dysym, HK_LC_DYSYMTAB);
+    put_u32(img, dysym + 4, HK_DYSYMTAB_COMMAND_SIZE);
+    put_u32(img, dysym + 56, 0x80);
+    put_u32(img, dysym + 60, 2);
+
+    put_u32(img, 0x240, 1);      img[0x244] = 0x01;   // "_malloc"
+    put_u32(img, 0x250, 9);      img[0x254] = 0x01;   // "_free"
+    memcpy(img + 0x260, "\0_malloc\0_free", 15);
+
+    put_u32(img, 0x280, 0);      // both slots -> symbol 0 ("_malloc")
+    put_u32(img, 0x284, 0);
+
+    put_u64(img, GOT_OFF, ORIGINAL);
+    put_u64(img, GOT_OFF + 8, ORIGINAL);
+}
+
+static bool buffer_write(void *ctx, uintptr_t address, uint64_t value) {
+    (void)ctx;
+    memcpy((void *)address, &value, sizeof(value));
+    return true;
+}
+
+static uint64_t slot(const uint8_t *img, size_t off) {
+    uint64_t v; memcpy(&v, img + off, sizeof(v)); return v;
+}
+
+static hk_hook_spec_t symbol_spec(const char *id, const char *symbol, void *replacement) {
+    hk_hook_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.struct_size = sizeof(spec);
+    spec.struct_version = HK_ABI_VERSION_3_0;
+    spec.stable_hook_id = id;
+    spec.target_kind = HK_TARGET_FUNCTION_SYMBOL;
+    spec.target.symbol.name = symbol;
+    spec.target.symbol.name_convention = HK_SYMBOL_NAME_C;
+    spec.replacement = replacement;
+    spec.required_reach = HK_REACH_EXISTING_IMPORTS;
+    spec.original_requirement = HK_ORIGINAL_NONE;
+    spec.continuation_policy = HK_CONTINUATION_ANY;
+    spec.availability = HK_AVAILABILITY_REQUIRED_NOW;
+    spec.role = HK_OPERATION_MANDATORY;
+    return spec;
+}
+
+static void set_env(uint8_t *img) {
+    hk_rebind_binding_env_t env;
+    env.image_base = img;
+    env.image_size = IMG_SIZE;
+    env.slide = (uintptr_t)img - (uintptr_t)V_BASE;
+    env.write = buffer_write;
+    env.write_ctx = NULL;
+    hk_rebind_vtable_set_environment_for_testing(&env);
+}
+
+// ---- tests --------------------------------------------------------------
+
+static void test_full_lifecycle_rebinds_and_reports(void) {
+    uint8_t *img = (uint8_t *)aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    set_env(img);
+
+    hk_hook_spec_t spec = symbol_spec("hook.malloc", "malloc", (void *)(uintptr_t)REPLACEMENT);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+
+    // The real router matches the rebind engine on target kind + reach.
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_ANALYZED);
+    assert(hook->matched_engine == hk_rebind_vtable());
+
+    // Prepare runs the engine's prepare: captures originals, mutates nothing.
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(slot(img, GOT_OFF) == ORIGINAL && slot(img, GOT_OFF + 8) == ORIGINAL);
+
+    // Commit writes. Both slots bind _malloc, so both are rewritten.
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+    assert(hk_plan_state(plan) == HK_PLAN_COMMITTED);
+    assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(hook->result.mutation == HK_MUTATION_COMPLETE);
+    assert(slot(img, GOT_OFF) == REPLACEMENT);
+    assert(slot(img, GOT_OFF + 8) == REPLACEMENT);
+
+    // The report carries the engine's real artifacts (two slots).
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 2);
+    hk_artifact_t a;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &a) == HK_STATUS_OK);
+    assert(a.kind == HK_ARTIFACT_IMPORT_SLOT);
+    assert(a.effects == HK_EFFECT_IMPORT_MUTATION);
+    assert((uint64_t)(uintptr_t)a.replacement_pointer == REPLACEMENT);
+    assert((uint64_t)(uintptr_t)a.original_pointer == ORIGINAL);
+    // The sink stamped the contextual id (request_id == the hook's id).
+    assert(a.request_id.high == hook->hook_id.high && a.request_id.low == hook->hook_id.low);
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    hk_rebind_vtable_reset_for_testing();
+    free(img);
+    printf("  full-lifecycle-rebinds-and-reports: PASS\n");
+}
+
+static void test_absent_symbol_fails_at_prepare(void) {
+    // The router still routes it (describe() eligibility is target-kind + reach,
+    // it does not know the symbol), so the honest failure surfaces at prepare.
+    uint8_t *img = (uint8_t *)aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    set_env(img);
+
+    hk_hook_spec_t spec = symbol_spec("hook.absent", "not_imported", (void *)0x1);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hook->matched_engine == hk_rebind_vtable());  // routed...
+
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);  // ...but preparation refused
+    assert(hk_plan_state(plan) == HK_PLAN_FAILED);
+
+    // Nothing was written, and committing a non-prepared plan-with-no-prepared
+    // -hooks leaves the image untouched.
+    assert(slot(img, GOT_OFF) == ORIGINAL);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    hk_rebind_vtable_reset_for_testing();
+    free(img);
+    printf("  absent-symbol-fails-at-prepare: PASS\n");
+}
+
+static void test_no_environment_fails_cleanly(void) {
+    // With no environment set, prepare has no image to work on and must fail
+    // cleanly rather than crash -- the router routed on capability alone.
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    hk_rebind_vtable_reset_for_testing();  // explicitly no environment
+
+    hk_hook_spec_t spec = symbol_spec("hook.x", "malloc", (void *)0x1);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  no-environment-fails-cleanly: PASS\n");
+}
+
+int main(void) {
+    test_full_lifecycle_rebinds_and_reports();
+    test_absent_symbol_fails_at_prepare();
+    test_no_environment_fails_cleanly();
+    printf("all rebind wired tests passed\n");
+    return 0;
+}

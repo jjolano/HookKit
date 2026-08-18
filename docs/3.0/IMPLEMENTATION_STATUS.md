@@ -1721,7 +1721,8 @@ device-verified.
 
 | Task | State | Evidence |
 |---|---|---|
-| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | this commit — see below |
+| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
+| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts | this commit — see below |
 | ObjC engine | not started | |
 | Memory engine | not started | |
 | Swift engine | not started | native/hk_swift.c exists (2.x), a reuse candidate |
@@ -1780,6 +1781,45 @@ depending on how far the write got); and absent-symbol / argument handling.
 **Verified to have teeth:** dropping the `+slide` in the slot-address
 computation makes the test fault on a bad address rather than pass — the
 address assertions are load-bearing.
+
+**Rebind engine wired into the runtime**, this iteration
+(`Sources/Engines/HKRebindVtable.{h,c}`) — the join the whole stack was built
+toward. A real `hk_engine_vtable_t` adapter registers the rebind engine with
+the runtime, so a real plan's analyze → prepare → commit drives it: the router
+matches it on target kind + reach, `prepare_one` runs the engine's
+non-mutating prepare (capturing originals), and `commit_one` runs the write,
+recording real artifacts into the report's sink. This replaces a fake engine
+with a real one on the same registration path — the path
+`HKRuntimeInternal.h` already noted Milestone 6+ engines would populate for
+real.
+
+The wiring surfaced a genuine limitation of the minimal engine vtable, and how
+it was handled is the honest part: the vtable is **context-free** —
+`prepare_one(spec)` / `commit_one(spec, sink)` carry no per-engine environment
+and thread no prepared state from prepare to commit — yet a real engine needs
+both (the image and writer, and prepare's captured originals at commit, per
+invariant #5). Rather than widen that shared signature (which would touch
+every fake engine, and carries more conflict risk while another agent is
+active in the repo), the adapter supplies both through a **file-scoped
+environment** set before the plan runs, stashing prepare's plan keyed by
+`stable_hook_id`. Stated as a ceiling, not the finished design: one environment
+at a time, fixed-size stash. It is enough to prove the wiring host-side and it
+**preserves the two-phase invariant** — prepare genuinely runs first and
+captures, commit uses that. The proper fix (per-engine context + a per-hook
+state handoff in the vtable) is separate, wider work, deferred rather than
+faked.
+
+On device the environment is not a fixture: `image_base`/`slide` come from the
+image catalog (dyld populator, still unbuilt) and the writer is the
+VM-protection-changing, arm64e-re-signing store. **Not device-verified.**
+
+3 host tests (`test-rebind-wired`, clean under `-fsanitize=address,undefined`):
+the full lifecycle rebinds both slots of a synthetic image and the report
+carries two real import-slot artifacts with the right original/replacement
+pointers and a `request_id` stamped to the hook; an absent symbol is routed by
+the capability-only router but refused at prepare (`FAILED_SAFE`, plan
+`FAILED`), with the image left untouched; and no environment set fails cleanly
+rather than crashing. `make test` and `./build.sh all` (all 4 lanes) clean.
 
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
