@@ -174,6 +174,15 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  * Substitute suspends threads. Hooks must still be installed at load time,
  * before the target can run elsewhere.
  *
+ * Fail-soft on trap stubs: the dyld shared cache builds dyld's private APIs
+ * (dyld_image_get_installname and friends) as stubs whose entry instruction
+ * raises SIGTRAP when executed — they exist for symbolication, not for
+ * calling. Dispatching one to a hooking backend crashes the process (SIGTRAP)
+ * instead of returning an error, so hookFunction: detects the trap entry
+ * before any backend runs and returns HK_ERR: the target is permanently
+ * unhookable (there is no real "original" to chain to), so retrying is
+ * pointless. Both the auto-cover and the direct path are guarded.
+ *
  * Arch gates: litehook's inline technique is arm64/arm64e-only — its
  * trampoline emits AArch64 opcodes — so setStrategy: refuses HKStrategyInline
  * on 32-bit, hookFunction:'s inline branch refuses, and the registry's
@@ -331,7 +340,12 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // Locates private symbols within a given image, and outputs results to outSymbols (missing symbols are NULL entries). image == NULL is supported if the hooking library implements MSFindSymbol. Returns HK_OK if all symbols were found, HK_ERR_PARTIAL if some, HK_ERR if none.
 - (hookkit_status_t)findSymbolsInImage:(HKImageRef)image symbolNames:(NSArray<NSString *> *)symbolNames outSymbols:(NSArray<NSValue *> **)outSymbols;
 
-// Just like findSymbolsInImage, but for one symbol. Returns the symbol address, or NULL if not found.
+// Just like findSymbolsInImage, but for one symbol. Returns the symbol address,
+// or NULL if not found. image == NULL is fast: exported symbols resolve via
+// dlsym (microseconds), then private symbols via the dyld shared cache's
+// local-symbols table (one scan over the loaded cache dylibs' already-mapped
+// nlist ranges — no per-image walk), and only a symbol no loaded image carries
+// falls through to the backend's own lookup.
 - (void *)findSymbolInImage:(HKImageRef)image symbolName:(NSString *)symbolName;
 
 // Installs every hook queued while batching was enabled (queue-always: every

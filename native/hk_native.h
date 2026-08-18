@@ -71,6 +71,14 @@ HK_INTERNAL hk_image *hk_native_open_image(const char *path);
 HK_INTERNAL void hk_native_close_image(hk_image *image);
 HK_INTERNAL void *hk_native_find_symbol(hk_image *image, const char *name);
 
+// Fast NULL-image private-symbol lookup: one scan over the dyld shared
+// cache's local-symbols table (all cached dylibs at once), instead of the
+// per-image walk backends use. Returns the runtime address, or NULL when the
+// symbol is not in the cache (exported symbols should be resolved with
+// dlsym first — this covers only the private/non-exported ones). The table
+// is mapped once for the process lifetime, so the scan is safe concurrently.
+HK_INTERNAL void *hk_native_find_cache_symbol(const char *name);
+
 // Scan-path variant of hk_native_open_image: same lookup minus the dlopen
 // fallback handle (dlsym already missed before a NULL-image scan runs, and
 // dlopen+dlclose per image dominated the scan's cost). For the NULL-image

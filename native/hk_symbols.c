@@ -657,6 +657,178 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
     return NULL;
 }
 
+#pragma mark - Loaded cache entries (fast NULL-image lookup)
+
+// The NULL-image private-symbol lookup used to open every loaded image one at
+// a time (find_loaded_image strcmp walk + bind_cache_symbols bsearch +
+// collect_section_flags + linear nlist scan per image) — hundreds of images
+// per lookup. The dyld shared cache's local-symbols table is already mapped
+// once for the process (cache_symbols), so the fast path binds each LOADED
+// cache image's nlist range ONCE and answers later lookups with a scan of the
+// bound ranges only, no per-image open/scan/close. Non-cache images
+// (jailbreak dylibs) are not covered here — the caller falls back to the
+// backend walk for those.
+//
+// Only loaded entries are scanned: a symbol in an unloaded cache dylib has no
+// runtime address (the old per-image walk could not find it either).
+// ponytail: this is a linear scan over the loaded ranges per lookup (~100k
+// nlists), not an index; a name hash table is the upgrade if profiling ever
+// shows the scan is the hot spot.
+
+struct hk_cache_loaded_entry {
+    uint32_t nlist_start;
+    uint32_t nlist_count;
+    intptr_t slide;                  // this dylib's slide (cache images slide as one region)
+    uint32_t *sect_flags;            // section flags in n_sect order (NULL if uncollected)
+    uint32_t sect_count;
+};
+
+static struct hk_cache_loaded_entry *hk_cache_loaded = NULL;
+static uint32_t hk_cache_loaded_count = 0;
+
+// Binds every loaded cache image's nlist range + section flags once. Static
+// while the process lives (the cache file never changes; entries keyed by
+// dylib offset, which is slide-independent). dispatch_once: the same
+// once-semantics as cache_symbols() — a concurrent NULL-image lookup must not
+// double-build.
+static void build_loaded_entries(void) {
+    static dispatch_once_t once = 0;
+
+    dispatch_once(&once, ^{
+        const struct hk_cache_symbols *symbols = cache_symbols();
+
+        if(symbols) {
+            // Preallocate generously: at most one loaded entry per cache dylib,
+            // and there cannot be more loaded images than _dyld_image_count().
+            uint32_t image_count = _dyld_image_count();
+            struct hk_cache_loaded_entry *entries =
+                calloc((size_t)image_count, sizeof(struct hk_cache_loaded_entry));
+
+            if(entries) {
+                uint32_t used = 0;
+
+                for(uint32_t i = 0; i < image_count; i++) {
+                    const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(i);
+                    uint64_t offset = 0;
+
+                    if(!header || !cache_image_offset(header, &offset)) {
+                        continue;   // not a cache image
+                    }
+
+                    // Find the entry for this dylib offset: binary search the
+                    // sorted index when present, linear scan otherwise.
+                    int found = -1;
+
+                    if(symbols->entry_index) {
+                        size_t lo = 0;
+                        size_t hi = symbols->entry_index_count;
+
+                        while(lo < hi) {
+                            size_t mid = (lo + hi) / 2;
+
+                            if(symbols->entry_index[mid].dylib_offset < offset) {
+                                lo = mid + 1;
+                            } else {
+                                hi = mid;
+                            }
+                        }
+
+                        if(lo < symbols->entry_index_count
+                           && symbols->entry_index[lo].dylib_offset == offset) {
+                            found = (int)symbols->entry_index[lo].entry_index;
+                        }
+                    } else {
+                        for(uint32_t e = 0; e < symbols->entries_count; e++) {
+                            const uint8_t *entry = symbols->entries + ((size_t)e * symbols->entry_stride);
+
+                            if(entry_dylib_offset(entry, symbols->entry_stride) == offset) {
+                                found = (int)e;
+                                break;
+                            }
+                        }
+                    }
+
+                    if(found < 0) {
+                        continue;
+                    }
+
+                    const uint8_t *entry = symbols->entries + ((size_t)found * symbols->entry_stride);
+                    struct hk_cache_loaded_entry *le = &entries[used++];
+                    le->nlist_start = entry_nlist_start(entry, symbols->entry_stride);
+                    le->nlist_count = entry_nlist_count(entry, symbols->entry_stride);
+                    le->slide = _dyld_get_image_vmaddr_slide(i);
+                    le->sect_flags = collect_section_flags(header, &le->sect_count);
+                }
+
+                if(used > 0) {
+                    hk_cache_loaded = entries;
+                    hk_cache_loaded_count = used;
+                } else {
+                    free(entries);
+                }
+            }
+        }
+    });
+}
+
+// Fast NULL-image private-symbol lookup: one scan over the nlist ranges of
+// the LOADED cache dylibs (bound once), with the same filters, slide math and
+// code-symbol signing as hk_native_find_symbol. Exported symbols are served
+// by dlsym at the call site; this covers the private/non-exported ones.
+HK_INTERNAL void *hk_native_find_cache_symbol(const char *name) {
+    if(!name || !*name) {
+        return NULL;
+    }
+
+    build_loaded_entries();   // dispatch_once: safe to call concurrently
+
+    if(!hk_cache_loaded) {
+        return NULL;
+    }
+
+    const struct hk_cache_symbols *symbols = cache_symbols();
+
+    if(!symbols) {
+        return NULL;
+    }
+
+    for(uint32_t e = 0; e < hk_cache_loaded_count; e++) {
+        const struct hk_cache_loaded_entry *le = &hk_cache_loaded[e];
+
+        if((uint64_t)le->nlist_start + le->nlist_count > symbols->nlist_count) {
+            continue;   // defensive; the parser validated the ranges
+        }
+
+        for(uint32_t i = 0; i < le->nlist_count; i++) {
+            const struct nlist_64 *symbol = &symbols->nlist[le->nlist_start + i];
+
+            if(symbol->n_un.n_strx == 0 || symbol->n_un.n_strx >= symbols->strings_size) {
+                continue;
+            }
+
+            if((symbol->n_type & N_TYPE) != N_SECT || symbol->n_value == 0) {
+                continue;
+            }
+
+            if(symbol_matches(symbols->strings + symbol->n_un.n_strx, name)) {
+                void *addr = (void *)(uintptr_t)((intptr_t)symbol->n_value + le->slide);
+
+                // Same code-symbol signing rule as hk_native_find_symbol.
+                if(symbol->n_sect > 0 && symbol->n_sect <= le->sect_count
+                   && le->sect_flags
+                   && (le->sect_flags[symbol->n_sect - 1]
+                       & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS))) {
+                    addr = hk_sym_sign(hk_sym_strip(addr));
+                }
+
+                return addr;
+            }
+        }
+    }
+
+    return NULL;
+}
+
 #else   // !arm64
 
 hk_image *hk_native_open_image(const char *path) {
@@ -675,6 +847,11 @@ void hk_native_close_image(hk_image *image) {
 
 void *hk_native_find_symbol(hk_image *image, const char *name) {
     (void)image; (void)name;
+    return NULL;
+}
+
+void *hk_native_find_cache_symbol(const char *name) {
+    (void)name;
     return NULL;
 }
 

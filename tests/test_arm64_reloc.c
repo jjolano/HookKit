@@ -152,6 +152,31 @@ static void test_terminators(void) {
     assert(!hk_arm64_is_terminator(0x54000100));    // B.cond falls through
 }
 
+static void test_traps(void) {
+    // BRK: 1101 0100 001 imm16 00000
+    assert(hk_arm64_insn_is_trap(0xD4200000));      // BRK #0
+    assert(hk_arm64_insn_is_trap(0xD4200020));      // BRK #1 (dyld's cache stub trap / __builtin_trap)
+    assert(hk_arm64_insn_is_trap(0xD4212340));      // BRK #0x91A
+
+    // HLT: 1101 0100 010 imm16 00000
+    assert(hk_arm64_insn_is_trap(0xD4400000));      // HLT #0
+    assert(hk_arm64_insn_is_trap(0xD4400020));      // HLT #1
+
+    // UDF: 0000 0000 0000 0000 imm16
+    assert(hk_arm64_insn_is_trap(0x00000000));      // UDF #0
+    assert(hk_arm64_insn_is_trap(0x0000DEAD));      // UDF #0xDEAD
+
+    // Non-traps: real instructions must never classify as traps.
+    assert(!hk_arm64_insn_is_trap(0xD65F03C0));     // RET
+    assert(!hk_arm64_insn_is_trap(0xD503201F));     // NOP
+    assert(!hk_arm64_insn_is_trap(0x14000010));     // B
+    assert(!hk_arm64_insn_is_trap(0x90000010));     // ADRP
+    assert(!hk_arm64_insn_is_trap(0x58000000));     // LDR literal
+    assert(!hk_arm64_insn_is_trap(0xD2800000));     // MOV X0, #0 (0xD2800000 top bits)
+    assert(!hk_arm64_insn_is_trap(0xD63F0200));     // BLR
+    assert(!hk_arm64_insn_is_trap(0xF9400000));     // LDR X0, [X0]
+}
+
 static void test_has_early_terminator(void) {
     // Empty / too-short windows are not "early terminator".
     assert(!hk_arm64_has_early_terminator(NULL, 0));
@@ -314,6 +339,7 @@ int main(void) {
     test_cond_branch();
     test_load_literal();
     test_terminators();
+    test_traps();
     test_has_early_terminator();
     test_has_literal_load();
     test_branch_emit();

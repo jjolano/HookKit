@@ -45,6 +45,13 @@ HK_INTERNAL bool hk_arm64_has_early_terminator(const void *win, size_t len);
 // costs a declined backend, a false negative costs a crash.
 HK_INTERNAL bool hk_arm64_has_aarch64_literal_load(const void *win, size_t len);
 
+// True if `insn` is an unconditional trap (BRK / HLT / UDF). The dyld shared
+// cache builds its private-API stubs (e.g. dyld_image_get_installname) as
+// trap stubs whose entry instruction raises SIGTRAP when executed; hooking
+// such a target is never meaningful (the "original" is a trap), so it must be
+// refused before a backend can dispatch it.
+HK_INTERNAL bool hk_arm64_insn_is_trap(uint32_t insn);
+
 // Bytes a branch from `from` to `to` will occupy: 4 when a plain B reaches
 // (+/-128MB), otherwise 16.
 HK_INTERNAL size_t hk_arm64_branch_size(uint64_t from, uint64_t to);

@@ -52,4 +52,13 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
 // or a literal load / ADR(ADRP) sits in it).
 hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno);
 
+// True when the target's entry instruction is an unconditional trap
+// (BRK/HLT/UDF on arm64; dyld's shared-cache private-API stubs such as
+// dyld_image_get_installname are trap stubs). Such a target can never be
+// hooked meaningfully — the "original" would be the trap itself — and some
+// vendors raise SIGTRAP while attempting it, so the facade refuses it with
+// HK_ERR before any backend is dispatched. Side-effect-free: reads only the
+// entry instruction. Always false on non-arm64 (no AArch64 decode exists).
+bool hk_inline_target_is_trap_stub(void *function);
+
 #endif
