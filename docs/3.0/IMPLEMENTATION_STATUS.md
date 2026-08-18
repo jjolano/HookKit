@@ -1480,13 +1480,70 @@ Also generalized in `HKMachO`: section walking is now a real iterator
 the walk rather than being reported under an aliased `n_sect`, since an nlist's
 `n_sect` is a `uint8_t` and could not name them.
 
+**Chained fixups — metadata half**, this iteration
+(`Sources/Resolvers/HKChainedFixups.{h,c}`). This matters more than its size
+suggests: `LC_DYLD_CHAINED_FIXUPS` is the **modern iOS 15+ import mechanism**,
+and the `LC_DYSYMTAB` indirect-symbol path added last commit does not cover it
+at all. On a current image that path simply finds nothing, so without this,
+import resolution would silently miss rather than fail loudly.
+
+**Deliberately split, and this is the split, not a deferral.** This commit is
+the metadata side — the payload header, the imports table, and the symbol
+string pool, answering "what does this image import, by name and ordinal".
+The traversal side — walking page starts and fixup chains to find *which slot*
+holds each bind — is the next piece: it needs per-pointer-format decoding for
+five formats and cycle guards of its own, and keeping them apart means each is
+actually tested rather than plausibly written.
+
+*Reuse survey, with a genuinely different outcome this time.*
+`vendor/litehook/fixup-chains.h` vendors **Apple's own definitions** and
+includes only `<stdint.h>`, so unlike every other Apple header in this tree it
+builds on this host. It is used as an authoritative **cross-check**: the test
+includes it and `_Static_assert`s this parser's constants, structure sizes and
+field offsets against Apple's enums and structs. Better still, the test builds
+import entries *through Apple's bitfield structs* and decodes them with the
+parser's shifts and masks, so the two must agree on the actual bit layout.
+The parser deliberately does **not** use those bitfield structs directly:
+bitfield layout is an ABI detail, and a parser should not depend on the host
+compiler agreeing with the target's. The cross-check is what keeps the
+transcription honest without taking on that dependency.
+
+One correctness detail worth naming, because a naive parse gets it wrong:
+`lib_ordinal` is documented as "-15 .. 240", meaning the top of the unsigned
+range encodes the special `BIND_SPECIAL_DYLIB_*` ordinals as **negatives**. It
+is sign-extended here (from 8 bits for the two 32-bit formats, 16 for
+`ADDEND64`), and asserted — reading it unsigned would report the flat-lookup
+ordinal as 254 rather than -2.
+
+Unsupported inputs get **distinct** statuses rather than a generic failure, so
+a caller can tell "I cannot read this" from "this is broken": a newer
+`fixups_version` (refused rather than misparsed as version 0), a
+zlib-compressed symbol pool (would need a decompressor), and an unknown
+`imports_format`. That last one only fails when `imports_count > 0` — an
+unknown format with nothing to decode is harmless and parses, which the test
+pins.
+
+10 host tests (`test-chained-fixups`, clean under
+`-fsanitize=address,undefined`), plus the compile-time cross-checks. **Verified
+to have teeth:** removing the symbol-pool bound and termination check turns an
+unterminated pool at the end of an exactly-sized allocation into an ASan
+`heap-buffer-overflow` (`READ of size 21`), while the real code returns
+`HK_CHAINED_MALFORMED`. `hk_chained_imports_find` reuses
+`hk_symbol_build_candidates`, so the normalization rule now has three users and
+still exactly one implementation.
+
+Note the cycle-safety proof this milestone's guidance calls for belongs to the
+**traversal** half, not here: nothing in the metadata parser loops over
+attacker-controlled links. That guard and its timeout-based proof come with the
+chain walking.
+
 ### Milestone 5 stock-take — what is host-testable vs device-gated
 
 Taken deliberately, because the loop is approaching a real boundary and it is
 better to name it than to drift into writing unverifiable code.
 
 **Still genuinely host-testable** (pure buffer logic, synthetic fixtures):
-chained fixups (`LC_DYLD_CHAINED_FIXUPS`, the modern iOS import mechanism);
+chained-fixup **chain traversal** (the metadata half is now done — see above);
 bind opcodes (`LC_DYLD_INFO`'s bind streams, the older one); ObjC metadata
 sections (`__objc_classlist` and friends parse as plain data, though the
 practical hooking path is the runtime API, not static parsing); and Swift

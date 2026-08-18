@@ -706,3 +706,104 @@ hk_macho_status_t hk_macho_export_trie_for_loaded_image(const void *header,
     *out_size = len;
     return HK_MACHO_OK;
 }
+
+// ---- chained fixups location -------------------------------------------
+
+typedef struct {
+    const uint8_t *base;
+    uint32_t data_off;
+    uint32_t data_size;
+    bool found;
+    bool malformed;
+} linkedit_data_ctx_t;
+
+static bool linkedit_data_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
+    linkedit_data_ctx_t *d = (linkedit_data_ctx_t *)ctx;
+    if (cmd != HK_LC_DYLD_CHAINED_FIXUPS) {
+        return true;
+    }
+    if (cmdsize < HK_LINKEDIT_DATA_CMD_SIZE) {
+        d->malformed = true;
+        return false;
+    }
+    d->data_off = read_u32(d->base + offset + 8);   // dataoff
+    d->data_size = read_u32(d->base + offset + 12); // datasize
+    d->found = true;
+    return false;
+}
+
+// Shared load-command half; what the range must be validated against differs
+// between file and loaded layouts, exactly as for the export trie.
+static hk_macho_status_t chained_fixups_file_range(const void *image, size_t size,
+                                                   uint32_t *out_off, uint32_t *out_size) {
+    linkedit_data_ctx_t d;
+    d.base = (const uint8_t *)image;
+    d.data_off = 0;
+    d.data_size = 0;
+    d.found = false;
+    d.malformed = false;
+
+    hk_macho_status_t status =
+        hk_macho_iterate_load_commands(image, size, linkedit_data_visit, &d);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (d.malformed) {
+        return HK_MACHO_MALFORMED;
+    }
+    if (!d.found || d.data_size == 0) {
+        return HK_MACHO_NOT_FOUND;
+    }
+    *out_off = d.data_off;
+    *out_size = d.data_size;
+    return HK_MACHO_OK;
+}
+
+hk_macho_status_t hk_macho_find_chained_fixups(const void *image, size_t size,
+                                               size_t *out_offset, size_t *out_size) {
+    if (!image || !out_offset || !out_size) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    uint32_t off = 0, len = 0;
+    hk_macho_status_t status = chained_fixups_file_range(image, size, &off, &len);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (off > size || len > size - off) {
+        return HK_MACHO_MALFORMED;
+    }
+    *out_offset = off;
+    *out_size = len;
+    return HK_MACHO_OK;
+}
+
+hk_macho_status_t hk_macho_chained_fixups_for_loaded_image(const void *header,
+                                                           size_t header_region_size,
+                                                           uintptr_t slide,
+                                                           const void **out_blob,
+                                                           size_t *out_size) {
+    if (!header || !out_blob || !out_size) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    uint32_t off = 0, len = 0;
+    hk_macho_status_t status =
+        chained_fixups_file_range(header, header_region_size, &off, &len);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+
+    hk_macho_segment_t linkedit;
+    uintptr_t linkedit_base = 0;
+    uint64_t file_start = 0, file_end = 0;
+    status = linkedit_mapping(header, header_region_size, slide, &linkedit,
+                              &linkedit_base, &file_start, &file_end);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (!within_linkedit(off, len, file_start, file_end)) {
+        return HK_MACHO_MALFORMED;
+    }
+    *out_blob = (const void *)(linkedit_base + (uintptr_t)off);
+    *out_size = len;
+    return HK_MACHO_OK;
+}

@@ -57,6 +57,7 @@ extern "C" {
 #define HK_LC_DYLD_INFO          0x22u
 #define HK_LC_DYLD_INFO_ONLY     0x80000022u
 #define HK_LC_DYLD_EXPORTS_TRIE  0x80000033u
+#define HK_LC_DYLD_CHAINED_FIXUPS 0x80000034u
 
 // On-disk sizes of the structures parsed here. Asserted against the real
 // Apple layouts in Tests/Host/test_macho.c.
@@ -243,6 +244,19 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
 // hk_macho_symtab_view_for_loaded_image performs.
 hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
                                             size_t *out_offset, size_t *out_size);
+
+// Locates the LC_DYLD_CHAINED_FIXUPS payload -- the modern (iOS 15+) import
+// mechanism, which the LC_DYSYMTAB indirect-symbol path does not cover.
+// HK_MACHO_NOT_FOUND if the image uses the older mechanism instead.
+hk_macho_status_t hk_macho_find_chained_fixups(const void *image, size_t size,
+                                               size_t *out_offset, size_t *out_size);
+
+// Loaded-image counterpart, translating through __LINKEDIT like the others.
+hk_macho_status_t hk_macho_chained_fixups_for_loaded_image(const void *header,
+                                                           size_t header_region_size,
+                                                           uintptr_t slide,
+                                                           const void **out_blob,
+                                                           size_t *out_size);
 
 // Loaded-image counterpart: the trie's declared offset is __LINKEDIT-relative,
 // so it needs the same translation hk_macho_symtab_view_for_loaded_image
