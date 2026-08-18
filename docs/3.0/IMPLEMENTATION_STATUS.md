@@ -428,8 +428,8 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Ownership ledger | not started — deferred deliberately (see note below); an exclusivity/refusal gate was tried and reverted | commit `2cc4c3e`, reverted |
 | Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | this commit — see below |
 | Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
-| Fault injection | not started | |
-| Model-based tests | in progress — plan lifecycle state machine cross-checked against an independent reference model over random op sequences with full (state × op) coverage (`Tests/Host/test_plan_model.c`); success path only | this commit — see below |
+| Fault injection | in progress — OOM sweep failing every allocation site (23) across the lifecycle exactly once (`Tests/Host/test_fault_injection.c`, linker `--wrap`); enforces OOM never advances plan state; ASan-clean | this commit — see below |
+| Model-based tests | in progress — plan lifecycle state machine cross-checked against an independent reference model over random op sequences with full (state × op) coverage (`Tests/Host/test_plan_model.c`); success path only | commit `8a20209` |
 
 **Ownership ledger — deferred, and why (a reverted misstep worth
 recording).** An ownership ledger was built in commit `2cc4c3e` whose
@@ -1005,6 +1005,41 @@ rollups and their transitions are already covered by `test-plan-prepare` /
 values no operation produces yet (a real gap in the lifecycle, noted — those
 transitions can't be modeled until something creates them). `make test` and
 `./build.sh all` (all 4 lanes) verified clean.
+
+**Fault injection — OOM sweep**, this iteration
+(`Tests/Host/test_fault_injection.c`): every core allocation
+(malloc/calloc/realloc) is routed through a linker `--wrap` interceptor that
+fails exactly the Nth allocation. The sweep runs the full lifecycle (runtime +
+plan + 2 hooks + analyze + prepare + commit) once per N = 1, 2, 3, … until a
+run completes with no failure fired — meaning every allocation site was the
+failure point exactly once (**23 sites** on this build). Beyond "doesn't
+crash / doesn't leak" (built under `-fsanitize=address` for the leak half),
+the load-bearing invariant is: **an `HK_STATUS_OUT_OF_MEMORY` return must
+leave the plan's state unchanged** — which catches the classic bug of
+advancing the state machine and then failing a late allocation. Result: no
+crashes, no leaks, and the invariant held at all 23 sites — the core's
+hand-written OOM paths (partial-cleanup in `add_hook`, the report/ledger
+create failures, the `hk_report_create` OOM that frees a pre-built ledger)
+are all clean. A genuine finding worth recording, not a bug but a boundary:
+`fake_rebind` ignores a failed artifact-ledger append (`(void)`
+`hk_artifact_sink_record`), so an OOM in that one append is *swallowed* and
+commit still succeeds with the artifact silently dropped — consistent with
+the artifact-ledger header's own stated "a real engine must instead degrade
+to `HK_MUTATION_UNKNOWN`" future-work note; the sweep surfaces exactly where
+that unimplemented degradation will need to live. `make test` and
+`./build.sh all` (all 4 lanes) verified clean.
+
+**Milestone 4 status.** The core runtime + plan lifecycle + fake-engine
+contract are real and now well-covered: IDs, runtime/plan lifecycle, router,
+results/reports, artifact ledger (through the commit path), original slots +
+installed handles, model-based lifecycle tests, and this OOM sweep. Not done
+and honestly out of scope for the fake-engine stage: the ownership ledger
+(reverted — it must be chain-coordination with real engines, not a refusal
+gate; see the note under the milestone table), and the grouped engine
+operations (`prepare_group`/`commit_group`/`compensate`/`verify`) that only
+matter once real engines and compensation exist (Milestone 6+). Next frontier
+is Milestone 5 (image catalog and resolvers), which several deferred pieces
+(address-precise ownership keys, private-symbol scans) depend on.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
