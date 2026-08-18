@@ -5,19 +5,16 @@
 
 #include <string.h>
 
+typedef hk_symbol_candidates_t candidates_t;
+
 // At most two candidates: the name as given, then the underscore-prefixed
 // linker form. Ordered -- an exact match wins over the prefixed one.
-#define MAX_CANDIDATES 2
-
-typedef struct {
-    const char *names[MAX_CANDIDATES];
-    unsigned count;
-    char storage[HK_RESOLVE_MAX_NAME + 2];  // room for '_' + name + NUL
-} candidates_t;
-
-static hk_resolve_status_t build_candidates(const char *name,
-                                            hk_symbol_name_convention_t convention,
-                                            candidates_t *out) {
+hk_resolve_status_t hk_symbol_build_candidates(const char *name,
+                                               hk_symbol_name_convention_t convention,
+                                               hk_symbol_candidates_t *out) {
+    if (!name || !out) {
+        return HK_RESOLVE_INVALID_ARGUMENT;
+    }
     size_t length = strlen(name);
     if (length == 0) {
         return HK_RESOLVE_INVALID_ARGUMENT;
@@ -126,7 +123,7 @@ hk_resolve_status_t hk_resolve_symbol(const hk_symbol_sources_t *sources,
         return HK_RESOLVE_INVALID_ARGUMENT;
     }
     candidates_t candidates;
-    hk_resolve_status_t status = build_candidates(name, convention, &candidates);
+    hk_resolve_status_t status = hk_symbol_build_candidates(name, convention, &candidates);
     if (status != HK_RESOLVE_OK) {
         return status;
     }

@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -316,6 +316,14 @@ test-image-catalog:
 .PHONY: test-symbol-table
 test-symbol-table:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_table Tests/Host/test_symbol_table.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_symbol_table$(ECHO_END)
+
+# HookKit 3.0 import slot resolution (Milestone 5). Maps each symbol-pointer
+# slot to the symbol it binds to, via LC_DYSYMTAB's indirect symbol table --
+# the question a rebind engine must answer. Bounded where fishhook's
+# equivalent walk trusts dyld's prior validation.
+.PHONY: test-import-slots
+test-import-slots:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_import_slots Tests/Host/test_import_slots.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_import_slots$(ECHO_END)
 
 # HookKit 3.0 resolver-selection layer (Milestone 5). The single place that
 # decides HOW a symbol is looked up: name normalization in one place, and the

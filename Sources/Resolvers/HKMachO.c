@@ -293,17 +293,31 @@ hk_macho_status_t hk_macho_find_segment(const void *image, size_t size,
     return HK_MACHO_OK;
 }
 
+// Reads one section_64 at `offset`, which the caller has already bounded.
+static void read_section(const uint8_t *base, size_t offset, hk_macho_section_t *out) {
+    memcpy(out->sectname, base + offset, 16);
+    out->sectname[16] = '\0';
+    memcpy(out->segname, base + offset + 16, 16);
+    out->segname[16] = '\0';
+    out->addr      = read_u64(base + offset + 32);
+    out->size      = read_u64(base + offset + 40);
+    out->offset    = read_u32(base + offset + 48);
+    out->flags     = read_u32(base + offset + 64);
+    out->reserved1 = read_u32(base + offset + 68);
+    out->reserved2 = read_u32(base + offset + 72);
+}
+
 typedef struct {
     const uint8_t *base;
-    uint32_t wanted;    // 1-based section index
-    uint32_t running;   // sections counted in preceding segments
-    uint32_t flags;
-    bool found;
+    hk_macho_section_visit_fn visit;
+    void *ctx;
+    uint32_t running;    // sections counted in preceding segments
     bool malformed;
-} section_ctx_t;
+    bool stopped;
+} sections_ctx_t;
 
-static bool section_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
-    section_ctx_t *s = (section_ctx_t *)ctx;
+static bool sections_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
+    sections_ctx_t *s = (sections_ctx_t *)ctx;
     if (cmd != HK_LC_SEGMENT_64) {
         return true;
     }
@@ -312,46 +326,156 @@ static bool section_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsi
         s->malformed = true;
         return false;
     }
-    if (s->wanted <= s->running + seg.nsects) {
-        uint32_t index_in_segment = s->wanted - s->running - 1;  // 0-based
+    for (uint32_t i = 0; i < seg.nsects; i++) {
         size_t section_offset = offset + HK_SEGMENT_COMMAND_64_SIZE +
-                                (size_t)index_in_segment * HK_SECTION_64_SIZE;
-        s->flags = read_u32(s->base + section_offset + 64);  // section_64.flags
-        s->found = true;
-        return false;
+                                (size_t)i * HK_SECTION_64_SIZE;
+        hk_macho_section_t section;
+        read_section(s->base, section_offset, &section);
+
+        uint32_t n_sect = s->running + i + 1;  // 1-based, across all segments
+        if (n_sect > 0xffu) {
+            // n_sect is a uint8_t in an nlist, so sections past 255 cannot be
+            // named by one. Stop rather than report an index that would alias.
+            s->stopped = true;
+            return false;
+        }
+        if (!s->visit(s->ctx, (uint8_t)n_sect, &section)) {
+            s->stopped = true;
+            return false;
+        }
     }
     s->running += seg.nsects;
     return true;
 }
 
-hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
-                                         uint8_t n_sect, uint32_t *out_flags) {
-    if (!image || !out_flags) {
+hk_macho_status_t hk_macho_iterate_sections(const void *image, size_t size,
+                                            hk_macho_section_visit_fn visit, void *ctx) {
+    if (!image || !visit) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    sections_ctx_t s;
+    s.base = (const uint8_t *)image;
+    s.visit = visit;
+    s.ctx = ctx;
+    s.running = 0;
+    s.malformed = false;
+    s.stopped = false;
+
+    hk_macho_status_t status =
+        hk_macho_iterate_load_commands(image, size, sections_visit, &s);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    return s.malformed ? HK_MACHO_MALFORMED : HK_MACHO_OK;
+}
+
+typedef struct {
+    uint8_t wanted;
+    hk_macho_section_t section;
+    bool found;
+} section_lookup_ctx_t;
+
+static bool section_lookup_visit(void *ctx, uint8_t n_sect, const hk_macho_section_t *section) {
+    section_lookup_ctx_t *l = (section_lookup_ctx_t *)ctx;
+    if (n_sect == l->wanted) {
+        l->section = *section;
+        l->found = true;
+        return false;
+    }
+    return true;
+}
+
+hk_macho_status_t hk_macho_section_info(const void *image, size_t size,
+                                        uint8_t n_sect, hk_macho_section_t *out_section) {
+    if (!image || !out_section) {
         return HK_MACHO_NOT_MACHO;
     }
     if (n_sect == 0) {
         return HK_MACHO_NOT_FOUND;  // NO_SECT: the symbol is in no section
     }
-    section_ctx_t s;
-    s.base = (const uint8_t *)image;
-    s.wanted = n_sect;
-    s.running = 0;
-    s.flags = 0;
-    s.found = false;
-    s.malformed = false;
+    section_lookup_ctx_t l;
+    l.wanted = n_sect;
+    l.found = false;
+    memset(&l.section, 0, sizeof(l.section));
 
     hk_macho_status_t status =
-        hk_macho_iterate_load_commands(image, size, section_visit, &s);
+        hk_macho_iterate_sections(image, size, section_lookup_visit, &l);
     if (status != HK_MACHO_OK) {
         return status;
     }
-    if (s.malformed) {
-        return HK_MACHO_MALFORMED;
-    }
-    if (!s.found) {
+    if (!l.found) {
         return HK_MACHO_NOT_FOUND;  // fewer sections than n_sect claims
     }
-    *out_flags = s.flags;
+    *out_section = l.section;
+    return HK_MACHO_OK;
+}
+
+hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
+                                         uint8_t n_sect, uint32_t *out_flags) {
+    if (!out_flags) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    hk_macho_section_t section;
+    hk_macho_status_t status = hk_macho_section_info(image, size, n_sect, &section);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    *out_flags = section.flags;
+    return HK_MACHO_OK;
+}
+
+// ---- indirect symbol table ---------------------------------------------
+
+typedef struct {
+    const uint8_t *base;
+    uint32_t offset;
+    uint32_t count;
+    bool found;
+    bool malformed;
+} dysymtab_ctx_t;
+
+static bool dysymtab_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
+    dysymtab_ctx_t *d = (dysymtab_ctx_t *)ctx;
+    if (cmd != HK_LC_DYSYMTAB) {
+        return true;
+    }
+    if (cmdsize < HK_DYSYMTAB_COMMAND_SIZE) {
+        d->malformed = true;
+        return false;
+    }
+    // dysymtab_command: indirectsymoff at 56, nindirectsyms at 60.
+    d->offset = read_u32(d->base + offset + 56);
+    d->count = read_u32(d->base + offset + 60);
+    d->found = true;
+    return false;
+}
+
+hk_macho_status_t hk_macho_find_indirect_symbols(const void *image, size_t size,
+                                                 uint32_t *out_file_offset,
+                                                 uint32_t *out_count) {
+    if (!image || !out_file_offset || !out_count) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    dysymtab_ctx_t d;
+    d.base = (const uint8_t *)image;
+    d.offset = 0;
+    d.count = 0;
+    d.found = false;
+    d.malformed = false;
+
+    hk_macho_status_t status =
+        hk_macho_iterate_load_commands(image, size, dysymtab_visit, &d);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (d.malformed) {
+        return HK_MACHO_MALFORMED;
+    }
+    if (!d.found || d.count == 0) {
+        return HK_MACHO_NOT_FOUND;  // no indirect symbols is not an error
+    }
+    *out_file_offset = d.offset;
+    *out_count = d.count;
     return HK_MACHO_OK;
 }
 

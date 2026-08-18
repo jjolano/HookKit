@@ -75,6 +75,19 @@ typedef enum {
     HK_RESOLVE_SOURCE_SYMBOL_TABLE,
 } hk_resolve_source_t;
 
+// The linker-form candidate expansion described above, exposed so other
+// resolvers (HKImportSlots.h) apply the SAME rule rather than reimplementing
+// it. Ordered: the name as given, then the underscore-prefixed form.
+typedef struct {
+    const char *names[2];
+    unsigned count;
+    char storage[HK_RESOLVE_MAX_NAME + 2];  // '_' + name + NUL
+} hk_symbol_candidates_t;
+
+hk_resolve_status_t hk_symbol_build_candidates(const char *name,
+                                               hk_symbol_name_convention_t convention,
+                                               hk_symbol_candidates_t *out_candidates);
+
 // Where one image's symbols can be found. Either source may be absent
 // (`export_trie == NULL`, or `symbol_table.nlist == NULL`); a resolve simply
 // skips what is not there.

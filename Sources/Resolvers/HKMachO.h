@@ -67,11 +67,17 @@ extern "C" {
 #define HK_SECTION_64_SIZE          80u
 #define HK_LINKEDIT_DATA_CMD_SIZE   16u
 #define HK_DYLD_INFO_COMMAND_SIZE   48u
+#define HK_DYSYMTAB_COMMAND_SIZE    80u
 
 // Section flag bits that mark a section as containing instructions -- the
 // code-vs-data distinction (arm64e signs code pointers, not data pointers).
 #define HK_S_ATTR_PURE_INSTRUCTIONS 0x80000000u
 #define HK_S_ATTR_SOME_INSTRUCTIONS 0x00000400u
+
+// The low byte of a section's flags is its type.
+#define HK_SECTION_TYPE                  0x000000ffu
+#define HK_S_NON_LAZY_SYMBOL_POINTERS    0x00000006u
+#define HK_S_LAZY_SYMBOL_POINTERS        0x00000007u
 
 typedef enum {
     HK_MACHO_OK = 0,
@@ -161,6 +167,38 @@ hk_macho_status_t hk_macho_find_segment(const void *image, size_t size,
 // only ever runs on a live, dyld-validated image.)
 hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
                                          uint8_t n_sect, uint32_t *out_flags);
+
+// One section_64, as parsed. `n_sect` numbering matches an nlist's field:
+// 1-based, counted across all segments in load-command order.
+typedef struct {
+    char sectname[17];   // NUL-terminated copies; the on-disk fields are fixed
+    char segname[17];    // 16-byte and need not be terminated
+    uint64_t addr;       // unslid VM address
+    uint64_t size;
+    uint32_t offset;     // file offset of the section's contents
+    uint32_t flags;
+    uint32_t reserved1;  // for symbol-pointer sections: index into the indirect symbol table
+    uint32_t reserved2;
+} hk_macho_section_t;
+
+// Visits every section in n_sect order. Returning false stops early.
+typedef bool (*hk_macho_section_visit_fn)(void *ctx, uint8_t n_sect,
+                                          const hk_macho_section_t *section);
+hk_macho_status_t hk_macho_iterate_sections(const void *image, size_t size,
+                                            hk_macho_section_visit_fn visit, void *ctx);
+
+// Full information for one 1-based section index.
+hk_macho_status_t hk_macho_section_info(const void *image, size_t size,
+                                        uint8_t n_sect, hk_macho_section_t *out_section);
+
+// Locates LC_DYSYMTAB's indirect symbol table -- the array mapping each
+// symbol-pointer slot to a symbol table index. Reports the declared FILE
+// offset and entry count without validating them, since what they must be
+// validated against differs between file and loaded layouts (see
+// HKImportSlots.h, which does that validation).
+hk_macho_status_t hk_macho_find_indirect_symbols(const void *image, size_t size,
+                                                 uint32_t *out_file_offset,
+                                                 uint32_t *out_count);
 
 // Whether a section's flags mark it as containing instructions. The check a
 // caller uses to decide whether a resolved symbol is code (and so, on arm64e,

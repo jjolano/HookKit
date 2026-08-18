@@ -1054,7 +1054,7 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 | Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
 | Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | this commit — see below |
 | Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | this commit — see below |
-| Import resolver | not started | |
+| Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | this commit — see below |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
 | ObjC / Swift resolvers | not started | |
@@ -1420,12 +1420,94 @@ now live in shared helpers used by both the symbol-table and export-trie
 loaded-image paths, rather than being repeated per table. Both pre-existing
 suites re-verified green after the change.
 
-**Deferred with a reason, not avoided:** resolving a `hk_symbol_target_t`
-against the *image catalog* (matching images by selector, then resolving in
+**Deferred with a reason, not avoided (still open):** resolving a
+`hk_symbol_target_t` against the *image catalog* (matching images by selector, then resolving in
 each) needs a per-entry "how many bytes are safely readable from this header"
 on `hk_image_entry_t`. That value is naturally produced by the dyld populator
 — a device-only piece — so adding the field is better done together with it
 than invented now.
+
+**Import slot resolution**, this iteration
+(`Sources/Resolvers/HKImportSlots.{h,c}`) — answers "which pointer slot in
+this image binds to symbol X", the question a rebind engine (Milestone 6) must
+answer before it can redirect anything. A symbol-pointer section (`__got`,
+`__auth_got`, `__la_symbol_ptr`) holds one pointer per import; its `reserved1`
+indexes LC_DYSYMTAB's *indirect symbol table*, where entry `reserved1 + i`
+gives the symbol table index slot `i` binds to. Both file and loaded layouts
+are supported, the latter translating the indirect table through `__LINKEDIT`
+exactly as the symbol table already did.
+
+*Reuse survey.* `vendor/fishhook/fishhook.c` performs this very walk in
+`perform_rebinding_with_section` and is the reference for the mechanism, but
+it is not reusable, for two reasons. Its walk is fused with the parts that
+only exist on device — VM protection changes, arm64e pointer re-signing for
+`__auth_got`, its own rebinding list. More importantly, it performs **no
+bounds validation at all**: `indirect_symtab + section->reserved1`,
+`symtab[symtab_index]`, and `strtab + strtab_offset` are each dereferenced
+unchecked. That is perfectly sound in fishhook's context, because dyld has
+already validated the image — but a parser handed arbitrary bytes cannot
+assume it. All three are checked here, and each has its own test.
+
+**The first of those checks was verified to have teeth, on a real
+out-of-bounds read.** With the indirect table in its own exactly-sized
+allocation and a section claiming `reserved1 = 3` for a 2-entry table, a
+guard-less build produces an ASan `heap-buffer-overflow` (`READ of size 4`)
+while the real code returns `HK_IMPORT_MALFORMED`. (The first attempt at this
+proof was inconclusive because the table sat inside a larger image buffer, so
+the overrun stayed in bounds — the guard only demonstrably matters once the
+table is its own object, which is how it will be on device.)
+
+Slots whose indirect entry is `INDIRECT_SYMBOL_LOCAL`/`ABS` name no symbol and
+are skipped: they are not imports. `hk_import_slots_find` uses the **same**
+linker-form candidate expansion as `hk_resolve_symbol`, now exported from
+`HKSymbolResolve.h` as `hk_symbol_build_candidates` rather than reimplemented —
+so the normalization rule established last commit still exists in exactly one
+place, now with two users.
+
+11 host tests (`test-import-slots`, clean under
+`-fsanitize=address,undefined`), including the loaded-image case with a
+**decoy** indirect table placed where raw file-offset logic would read, naming
+a different symbol — so a missing translation returns a visibly wrong answer
+rather than merely failing. Two layout bugs in my own fixture were caught this
+way while writing it (the string table overlapping `LC_DYSYMTAB`, and two
+nlist entries overlapping), which is the point of building fixtures that fail
+loudly.
+
+Also generalized in `HKMachO`: section walking is now a real iterator
+(`hk_macho_iterate_sections`) exposing full `section_64` information, with
+`hk_macho_section_flags` reimplemented on top of it, plus
+`hk_macho_find_indirect_symbols` for LC_DYSYMTAB. Sections past index 255 stop
+the walk rather than being reported under an aliased `n_sect`, since an nlist's
+`n_sect` is a `uint8_t` and could not name them.
+
+### Milestone 5 stock-take — what is host-testable vs device-gated
+
+Taken deliberately, because the loop is approaching a real boundary and it is
+better to name it than to drift into writing unverifiable code.
+
+**Still genuinely host-testable** (pure buffer logic, synthetic fixtures):
+chained fixups (`LC_DYLD_CHAINED_FIXUPS`, the modern iOS import mechanism);
+bind opcodes (`LC_DYLD_INFO`'s bind streams, the older one); ObjC metadata
+sections (`__objc_classlist` and friends parse as plain data, though the
+practical hooking path is the runtime API, not static parsing); and Swift
+metadata — note `native/hk_swift.c` already parses class descriptors and is
+already host-tested by `tests/test_swift_abi.c` against a hand-built metadata
+blob, so that is a reuse candidate rather than new work.
+
+**Genuinely device-gated** — needs SSH to the jailbroken test device, and
+nothing here may be claimed without a real run: the dyld catalog populator
+(`_dyld_image_count`/`_dyld_get_image_header`); the shared-cache resolver (the
+cache's own layout and symbol index); PAC signing of resolved addresses;
+actually *writing* a slot (VM protection, `__auth_got` re-signing); and
+conformance against **real** system images, which is the only thing that can
+confirm these parsers handle what Apple actually ships rather than what my
+fixtures assume.
+
+That last item deserves emphasis: every parser in Milestone 5 is verified
+against synthetic images I constructed. That is genuine verification of the
+logic, and it has caught real bugs — but it is *not* evidence that a real
+`libsystem_kernel.dylib` parses correctly. Nothing in this milestone is
+device-verified.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
 **State: not started.** Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
