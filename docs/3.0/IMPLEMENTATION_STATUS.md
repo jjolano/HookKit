@@ -1048,7 +1048,9 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 |---|---|---|
 | Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | this commit — see below |
 | dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
-| Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | this commit — see below |
+| Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | commit `5c3efe7` |
+| Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete for the file-image case (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view | this commit — see below |
+| Loaded-image (`__LINKEDIT`) offset translation | not started | needs `LC_SEGMENT_64` parsing; the file-image path does not cover a slid, segment-scattered image |
 | Export trie resolver | not started | the proper path for *exported* symbols; separate parser (ULEB128 trie) |
 | Import resolver | not started | |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
@@ -1143,10 +1145,77 @@ same-address names) and `interior_address_permitted` — a caller's alias policy
 is simply not consulted yet, stated in the header rather than approximated.
 
 **Device-only work this does NOT cover** (and cannot, honestly, from this
-host): finding `LC_SYMTAB` in a real mapped image to build the view, the dyld
-catalog populator, the shared-cache resolver, and PAC signing of results.
-Those need SSH to the jailbroken device to build and verify; nothing here is
-device-verified.
+host): the dyld catalog populator, the shared-cache resolver, and PAC signing
+of results. Those need SSH to the jailbroken device to build and verify;
+nothing here is device-verified. *(Corrected in the next entry: locating
+`LC_SYMTAB` was listed here as device-only, but parsing a Mach-O is pure
+buffer arithmetic — only obtaining the bytes is device-bound.)*
+
+`make test` and `./build.sh all` (all 4 lanes) verified clean.
+
+**Mach-O container parsing**, this iteration
+(`Sources/Resolvers/HKMachO.{h,c}`) — closes the path from raw bytes to a
+resolved symbol: image → `LC_SYMTAB` → symbol table view → symbol search.
+
+*A correction to the previous entry, worth recording as a scoping error:* it
+listed "finding `LC_SYMTAB` in a real mapped image" as device-only. Parsing a
+Mach-O is pure arithmetic over bytes; only *obtaining* the bytes (mmap, dyld)
+is device-bound. So more of Milestone 5 is honestly host-testable than that
+entry projected, and this commit is the proof.
+
+*Reuse survey first, again.* 2.x walks load commands **twice**: once bounded
+against a mmap'd file size (`bind_ondisk_symbols`) and once *unbounded* over a
+live dyld-validated header (`collect_section_flags`, which only guards a
+degenerate `cmdsize` because dyld has already validated the list). Both sit
+inside `#if defined(__arm64__)`, both use Apple's headers, neither can run
+here. This is the single bounded walk, host-testable, with the structure
+layouts and magic/command constants declared locally so it builds off-Apple.
+The 2.x code is untouched.
+
+Two robustness properties, both **verified to have teeth** rather than
+asserted:
+1. **Bounded reads and no infinite loop.** Every read is bounded by the
+   caller-declared size, using subtraction (`end - offset`) so no addition can
+   overflow. `cmdsize < 8` is rejected, so the cursor always advances — a
+   `cmdsize` of 0 cannot park the walk forever (the test asserts the rejection,
+   and its own termination is the rest of the proof). 64-bit Mach-O also
+   requires 8-byte-aligned `cmdsize`, which is checked.
+2. **Alignment safety.** Every multi-byte read goes through `memcpy`, so a
+   buffer at *any* alignment parses correctly. Swapping those for a
+   struct-pointer cast makes UBSan report `load of misaligned address ...
+   which requires 4 byte alignment` on the deliberately odd-addressed test
+   image, while the real implementation passes — so that test genuinely
+   catches the bug it claims to.
+
+One real correctness point found while writing it: `hk_macho_find_symtab_view`
+hands back a **typed** `nlist` pointer that callers dereference, so unlike the
+parser's own memcpy reads it genuinely requires 8-byte alignment
+(`hk_macho_nlist64_t` contains a `uint64_t`). Any linker-produced image
+satisfies that; a corrupt or hostile one might not, and a misaligned load is
+undefined behaviour. So the alignment is validated and the view refused rather
+than returned as an unsound pointer — tested from both directions (a
+misaligned image, and an aligned image with a 4-aligned `symoff`).
+
+15 host tests (`test-macho`, clean under `-fsanitize=address,undefined`).
+The payoff is `end-to-end-symtab-to-symbol-search`: build an image, locate
+`LC_SYMTAB`, feed the resulting view straight into the previous commit's
+symbol search and resolve a real symbol — neither half mocked. Also covered:
+magic dispatch (fat, 32-bit, byte-swapped, and garbage each get their own
+distinct status rather than a generic failure), truncated buffers at several
+sizes, `sizeofcmds` overrunning the buffer, in-order iteration, visitor early
+stop, all three degenerate-`cmdsize` forms, a command overrunning the region,
+`ncmds` claiming more than `sizeofcmds` holds, `LC_SYMTAB` range validation
+(including an `nsyms` large enough to overflow a 32-bit span multiply — the
+span is computed in 64 bits for exactly that reason), a truncated
+`LC_SYMTAB`, and NULL tolerance.
+
+**Stated limitation, not an oversight:** this is the **file-image layout**
+only. `LC_SYMTAB`'s `symoff`/`stroff` are file offsets, correct for an image
+laid out as on disk (what 2.x's `bind_ondisk_symbols` mmaps). A *loaded* image
+is scattered at segment VM addresses, where those offsets must be translated
+through the `__LINKEDIT` segment — that needs `LC_SEGMENT_64` parsing and is
+deliberately absent rather than guessed at. Byte-swapped and 32-bit images are
+likewise rejected with distinct statuses rather than half-supported.
 
 `make test` and `./build.sh all` (all 4 lanes) verified clean.
 

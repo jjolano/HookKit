@@ -123,7 +123,7 @@ check-compat:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
@@ -316,6 +316,14 @@ test-image-catalog:
 .PHONY: test-symbol-table
 test-symbol-table:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_table Tests/Host/test_symbol_table.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_symbol_table$(ECHO_END)
+
+# HookKit 3.0 Mach-O container parsing (Milestone 5). Pure buffer logic:
+# header validation, bounded load-command iteration, and building the
+# LC_SYMTAB view that the symbol search consumes -- including an end-to-end
+# test composing both resolvers. Only obtaining a real image is device-only.
+.PHONY: test-macho
+test-macho:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_macho Tests/Host/test_macho.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_macho$(ECHO_END)
 
 # Device smoke binary. NOT part of `make test`: it links the built framework
 # and has to run on a jailbroken device, where the trampoline-page check is
