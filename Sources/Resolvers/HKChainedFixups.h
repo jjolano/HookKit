@@ -3,12 +3,13 @@
 // cover: on a current image that path finds nothing, so without this,
 // import resolution silently misses.
 //
-// This file is the METADATA half: the LC_DYLD_CHAINED_FIXUPS header, the
-// imports table, and the symbol string pool -- i.e. "what does this image
-// import, by name". Walking the fixup chains to find *which slot* holds each
-// bind is the traversal half, deliberately a separate piece: it needs
-// per-pointer-format decoding and cycle guards of its own, and splitting
-// keeps each testable. Nothing here is device-specific.
+// Two halves, built in two commits and both here now:
+//   METADATA   the payload header, imports table and symbol pool -- "what
+//              does this image import, by name and ordinal".
+//   TRAVERSAL  walking starts_in_image -> starts_in_segment -> page_start[]
+//              -> the fixup chains, to find WHICH SLOT holds each bind.
+// Joined, they answer the same question HKImportSlots.h answers for the older
+// LC_DYSYMTAB mechanism. Nothing here is device-specific.
 //
 // Reuse survey: vendor/litehook/fixup-chains.h vendors Apple's own
 // definitions and includes only <stdint.h>, so it builds on this host. It is
@@ -48,6 +49,23 @@ extern "C" {
 
 // symbols_format: 0 uncompressed, 1 zlib. Only uncompressed is supported.
 #define HK_CHAINED_SYMBOLS_UNCOMPRESSED 0u
+
+// pointer_format values. Only the arm64 userland formats are decoded; every
+// other value gets HK_CHAINED_UNSUPPORTED_FORMAT rather than being misread
+// with the wrong bit layout.
+#define HK_CHAINED_PTR_ARM64E             1u
+#define HK_CHAINED_PTR_64                 2u
+#define HK_CHAINED_PTR_64_OFFSET          6u
+#define HK_CHAINED_PTR_ARM64E_USERLAND    9u
+#define HK_CHAINED_PTR_ARM64E_USERLAND24 12u
+
+// page_start[] sentinels.
+#define HK_CHAINED_PTR_START_NONE  0xFFFFu  // page has no fixups
+#define HK_CHAINED_PTR_START_MULTI 0x8000u  // page_start is an index into the overflow list
+#define HK_CHAINED_PTR_START_LAST  0x8000u  // marks the last entry of an overflow list
+
+// On-disk sizes, asserted against Apple's structs in the test.
+#define HK_CHAINED_STARTS_IN_SEGMENT_HEADER 22u  // through page_count, before page_start[]
 
 typedef enum {
     HK_CHAINED_OK = 0,
@@ -99,6 +117,42 @@ hk_chained_status_t hk_chained_fixups_parse(const void *blob, size_t size,
 hk_chained_status_t hk_chained_import_at(const hk_chained_fixups_t *fixups,
                                          uint32_t index,
                                          hk_chained_import_t *out_import);
+
+// One bind site found by walking the chains.
+typedef struct {
+    // Offset of the pointer slot FROM THE IMAGE BASE. Deliberately not called
+    // a vmaddr: hk_import_slot_t.slot_vmaddr is an unslid VM address from a
+    // section header, which is a different coordinate system. Conflating the
+    // two would be a real bug, so they are named apart.
+    uint64_t slot_image_offset;
+    uint32_t import_ordinal;   // index into the imports table
+    uint32_t segment_index;
+    uint16_t pointer_format;
+    bool is_auth;              // arm64e authenticated bind
+} hk_chained_bind_t;
+
+typedef bool (*hk_chained_bind_visit_fn)(void *ctx, const hk_chained_bind_t *bind);
+
+// Walks starts_in_image -> starts_in_segment -> page_start[] -> the chains,
+// visiting every BIND site (rebases are skipped: they carry no symbol).
+//
+// `image_base`/`image_size` are where the chain data lives: a segment's
+// declared `segment_offset` is an offset from the image base, so this is the
+// LOADED layout. A file-on-disk image would need its VM offsets translated to
+// file offsets first; that is not done here rather than guessed at.
+//
+// Termination is structural, not merely guarded: `next` counts stride units
+// and `next == 0` ends the chain, so any nonzero `next` advances by at least
+// one stride. The offset therefore strictly increases and is bounded, so the
+// walk cannot cycle the way an export trie can. The explicit progress check in
+// the implementation is defense in depth against a zero stride -- which is the
+// one way this could loop, and is why unknown formats are rejected before any
+// walking begins.
+hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *fixups,
+                                                    const void *image_base,
+                                                    size_t image_size,
+                                                    hk_chained_bind_visit_fn visit,
+                                                    void *ctx);
 
 // Finds the first import whose name matches, using the SAME linker-form
 // candidate expansion as hk_resolve_symbol and hk_import_slots_find

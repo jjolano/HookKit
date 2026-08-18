@@ -1054,6 +1054,7 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 | Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
 | Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | this commit — see below |
 | Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | this commit — see below |
+| Chained fixups (`Sources/Resolvers/HKChainedFixups.{h,c}`) | complete (host-verified) — metadata *and* traversal: header, imports table, symbol pool, and chain walking to bind sites | commits `25347f0` + this commit |
 | Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | this commit — see below |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
@@ -1535,7 +1536,61 @@ still exactly one implementation.
 Note the cycle-safety proof this milestone's guidance calls for belongs to the
 **traversal** half, not here: nothing in the metadata parser loops over
 attacker-controlled links. That guard and its timeout-based proof come with the
-chain walking.
+chain walking — delivered in the next entry.
+
+**Chained fixups — traversal half**, this iteration, completing what the
+metadata commit split out and promised. Walks `starts_in_image` →
+`starts_in_segment` → `page_start[]` → the fixup chains, reporting every
+**bind** site as (slot offset, import ordinal) and skipping rebases, which
+carry no symbol. Joined to the imports table, this answers for the modern
+mechanism exactly what `HKImportSlots` answers for `LC_DYSYMTAB`.
+
+Five arm64 formats are decoded (`ARM64E`, `ARM64E_USERLAND`,
+`ARM64E_USERLAND24`, `PTR_64`, `PTR_64_OFFSET`); every other `pointer_format`
+gets `HK_CHAINED_UNSUPPORTED_FORMAT` **before any walking**, since decoding
+with the wrong bit layout would silently produce nonsense rather than fail.
+The two families genuinely differ — arm64e puts `bind` at bit 62 with an 11-bit
+`next` and stride 8, `PTR_64` puts `bind` at bit 63 with a 12-bit `next` and
+stride 4 — and a test encodes through Apple's own bitfield structs for both, so
+the parser decodes bits it did not lay out.
+
+**A real bug in this implementation was caught by its own test.** The
+`START_MULTI` overflow list is indexed into `page_start[]` itself, and those
+entries live *beyond* `page_count` — which is precisely why
+`dyld_chained_starts_in_segment` carries its own `size` field separate from
+what `page_count` implies. My first version bounded the overflow list by
+`page_count * 2`, which rejects every multi-start page. Fixed to bound by the
+declared `size` (clamped to the blob, since `size` is not to be trusted past
+it) while still using `page_count` for the page loop.
+
+**Termination is structural here, not merely guarded — stated because it
+differs from the export trie.** `next` counts stride units and `next == 0` ends
+the chain, so any nonzero `next` advances by at least one stride; the offset
+strictly increases and is bounded, so this cannot cycle the way a trie with a
+zero-length edge can. The one way it *could* spin is a zero stride, which is
+why unknown formats are rejected up front and why an explicit progress check
+remains as defense in depth.
+
+**Both guards verified to have teeth**, by the two different methods each
+failure mode requires:
+- *Bounds*: removing the segment/image checks turns a `next` of 0x7FF into an
+  ASan `heap-buffer-overflow` (`READ of size 8`) on an exactly-sized image,
+  while the real code returns `HK_CHAINED_MALFORMED`.
+- *Progress*: injecting a stride-0 bug and removing the progress check makes
+  the walk **hang** (killed at a 5-second timeout); with the check it returns
+  `MALFORMED`. As with the export trie cap, **no sanitizer detects this** —
+  ASan and UBSan run happily forever — so a timeout is the only proof
+  available, and "passes under sanitizers" would have been false assurance.
+
+19 host tests in `test-chained-fixups` (9 new), clean under
+`-fsanitize=address,undefined`, plus compile-time cross-checks of the
+`starts_in_segment` field offsets and every pointer-format and sentinel
+constant against Apple's vendored definitions.
+
+**Stated limitation:** traversal uses the **loaded** layout — a segment's
+`segment_offset` is an offset from the image base. A file-on-disk image would
+need its VM offsets translated to file offsets first; that is not done rather
+than guessed at.
 
 ### Milestone 5 stock-take — what is host-testable vs device-gated
 

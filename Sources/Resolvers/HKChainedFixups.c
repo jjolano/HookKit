@@ -178,3 +178,275 @@ hk_chained_status_t hk_chained_imports_find(const hk_chained_fixups_t *fixups,
     }
     return HK_CHAINED_NOT_FOUND;
 }
+
+// ---- traversal ----------------------------------------------------------
+
+static uint16_t read_u16(const uint8_t *p) {
+    uint16_t v;
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+// Stride in bytes between consecutive chain entries, per pointer format.
+// Returns 0 for a format this parser does not decode -- callers must reject
+// that BEFORE walking, since a zero stride is the one way the walk could fail
+// to advance.
+static uint32_t format_stride(uint16_t pointer_format) {
+    switch (pointer_format) {
+    case HK_CHAINED_PTR_ARM64E:
+    case HK_CHAINED_PTR_ARM64E_USERLAND:
+    case HK_CHAINED_PTR_ARM64E_USERLAND24:
+        return 8;
+    case HK_CHAINED_PTR_64:
+    case HK_CHAINED_PTR_64_OFFSET:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+static bool format_is_arm64e(uint16_t pointer_format) {
+    return pointer_format == HK_CHAINED_PTR_ARM64E ||
+           pointer_format == HK_CHAINED_PTR_ARM64E_USERLAND ||
+           pointer_format == HK_CHAINED_PTR_ARM64E_USERLAND24;
+}
+
+// Decodes the fields shared by bind and rebase entries. `next` sits at the
+// same bit position for both within a family, so it is read without first
+// knowing which kind this is.
+typedef struct {
+    bool is_bind;
+    bool is_auth;
+    uint32_t ordinal;
+    uint32_t next;
+} chained_ptr_t;
+
+static void decode_pointer(uint64_t raw, uint16_t pointer_format, chained_ptr_t *out) {
+    if (format_is_arm64e(pointer_format)) {
+        // ordinal:16|24, ... , next:11 (bits 51-61), bind:62, auth:63
+        out->is_auth = ((raw >> 63) & 1u) != 0;
+        out->is_bind = ((raw >> 62) & 1u) != 0;
+        out->next = (uint32_t)((raw >> 51) & 0x7FFu);
+        out->ordinal = (pointer_format == HK_CHAINED_PTR_ARM64E_USERLAND24)
+                           ? (uint32_t)(raw & 0xFFFFFFu)   // 24-bit bind
+                           : (uint32_t)(raw & 0xFFFFu);
+    } else {
+        // DYLD_CHAINED_PTR_64 / _64_OFFSET:
+        // ordinal:24 (bits 0-23), ..., next:12 (bits 51-62), bind:63
+        out->is_auth = false;
+        out->is_bind = ((raw >> 63) & 1u) != 0;
+        out->next = (uint32_t)((raw >> 51) & 0xFFFu);
+        out->ordinal = (uint32_t)(raw & 0xFFFFFFu);
+    }
+}
+
+typedef struct {
+    const uint8_t *image;
+    size_t image_size;
+    uint16_t pointer_format;
+    uint32_t stride;
+    uint64_t segment_start;   // segment_offset
+    uint64_t segment_end;     // segment_offset + page_count * page_size
+    uint32_t segment_index;
+    hk_chained_bind_visit_fn visit;
+    void *ctx;
+    bool stopped;
+} chain_ctx_t;
+
+// Walks one chain from `offset` (an image offset). Returns a status; stops
+// early without error if the visitor asks to.
+static hk_chained_status_t walk_chain(chain_ctx_t *c, uint64_t offset) {
+    for (;;) {
+        // Every read is bounded by BOTH the readable image and the segment's
+        // own declared span, so a corrupt `next` cannot wander out of either.
+        if (offset < c->segment_start || offset + 8 > c->segment_end) {
+            return HK_CHAINED_MALFORMED;
+        }
+        if (offset + 8 > (uint64_t)c->image_size) {
+            return HK_CHAINED_MALFORMED;
+        }
+
+        uint64_t raw = read_u64(c->image + (size_t)offset);
+        chained_ptr_t ptr;
+        decode_pointer(raw, c->pointer_format, &ptr);
+
+        if (ptr.is_bind) {
+            hk_chained_bind_t bind;
+            memset(&bind, 0, sizeof(bind));
+            bind.slot_image_offset = offset;
+            bind.import_ordinal = ptr.ordinal;
+            bind.segment_index = c->segment_index;
+            bind.pointer_format = c->pointer_format;
+            bind.is_auth = ptr.is_auth;
+            if (!c->visit(c->ctx, &bind)) {
+                c->stopped = true;
+                return HK_CHAINED_OK;
+            }
+        }
+
+        if (ptr.next == 0) {
+            return HK_CHAINED_OK;  // end of chain
+        }
+        uint64_t advanced = offset + (uint64_t)ptr.next * (uint64_t)c->stride;
+        // Defense in depth: with a nonzero stride this cannot fail, which is
+        // exactly why unknown formats are rejected before walking. If a stride
+        // of 0 ever reached here, this is what stops the walk spinning.
+        if (advanced <= offset) {
+            return HK_CHAINED_MALFORMED;
+        }
+        offset = advanced;
+    }
+}
+
+static hk_chained_status_t walk_segment(const hk_chained_fixups_t *fixups,
+                                        const uint8_t *image, size_t image_size,
+                                        size_t seg_info_offset, uint32_t segment_index,
+                                        hk_chained_bind_visit_fn visit, void *ctx,
+                                        bool *stopped) {
+    const uint8_t *blob = fixups->blob;
+    size_t blob_size = fixups->size;
+
+    if (seg_info_offset > blob_size ||
+        blob_size - seg_info_offset < HK_CHAINED_STARTS_IN_SEGMENT_HEADER) {
+        return HK_CHAINED_MALFORMED;
+    }
+    const uint8_t *seg = blob + seg_info_offset;
+
+    uint32_t declared_size = read_u32(seg + 0);
+    uint16_t page_size     = read_u16(seg + 4);
+    uint16_t ptr_format    = read_u16(seg + 6);
+    uint64_t segment_off   = read_u64(seg + 8);
+    uint16_t page_count    = read_u16(seg + 20);
+
+    if (page_size == 0) {
+        return HK_CHAINED_MALFORMED;  // would make every page start identical
+    }
+    uint32_t stride = format_stride(ptr_format);
+    if (stride == 0) {
+        // Rejected BEFORE any walking: decoding with the wrong bit layout
+        // would silently produce nonsense, and a zero stride is the only way
+        // the chain walk could fail to advance.
+        return HK_CHAINED_UNSUPPORTED_FORMAT;
+    }
+
+    // Two extents, and the difference matters. page_start[] proper holds one
+    // entry per page. The START_MULTI overflow list is indexed into the SAME
+    // array but lives BEYOND page_count -- which is exactly why the struct
+    // carries its own `size` separate from what page_count implies. Bounding
+    // the overflow list by page_count would wrongly reject every multi-start
+    // page. (dyld indexes page_start[] directly for the overflow list too.)
+    uint64_t available = (uint64_t)(blob_size - seg_info_offset -
+                                    HK_CHAINED_STARTS_IN_SEGMENT_HEADER);
+    if ((uint64_t)declared_size < (uint64_t)HK_CHAINED_STARTS_IN_SEGMENT_HEADER) {
+        return HK_CHAINED_MALFORMED;
+    }
+    uint64_t starts_extent = (uint64_t)declared_size - HK_CHAINED_STARTS_IN_SEGMENT_HEADER;
+    if (starts_extent > available) {
+        starts_extent = available;  // never trust `size` past the blob
+    }
+    uint64_t page_start_bytes = (uint64_t)page_count * sizeof(uint16_t);
+    if (page_start_bytes > starts_extent) {
+        return HK_CHAINED_MALFORMED;
+    }
+
+    chain_ctx_t c;
+    c.image = image;
+    c.image_size = image_size;
+    c.pointer_format = ptr_format;
+    c.stride = stride;
+    c.segment_start = segment_off;
+    c.segment_end = segment_off + (uint64_t)page_count * (uint64_t)page_size;
+    c.segment_index = segment_index;
+    c.visit = visit;
+    c.ctx = ctx;
+    c.stopped = false;
+
+    const uint8_t *page_start = seg + HK_CHAINED_STARTS_IN_SEGMENT_HEADER;
+
+    for (uint16_t page = 0; page < page_count; page++) {
+        uint16_t start = read_u16(page_start + (size_t)page * sizeof(uint16_t));
+        if (start == HK_CHAINED_PTR_START_NONE) {
+            continue;  // no fixups on this page
+        }
+        uint64_t page_base = segment_off + (uint64_t)page * (uint64_t)page_size;
+
+        if ((start & HK_CHAINED_PTR_START_MULTI) != 0) {
+            // Overflow list: the low bits index a run of chain_starts[] that
+            // follows page_start[], the last entry flagged with START_LAST.
+            uint32_t index = start & ~HK_CHAINED_PTR_START_MULTI;
+            for (;;) {
+                uint64_t entry_off = (uint64_t)index * sizeof(uint16_t);
+                if (entry_off + sizeof(uint16_t) > starts_extent) {
+                    return HK_CHAINED_MALFORMED;  // list runs past the starts array
+                }
+                uint16_t entry = read_u16(page_start + (size_t)entry_off);
+                uint16_t offset_in_page = entry & ~HK_CHAINED_PTR_START_LAST;
+
+                hk_chained_status_t status = walk_chain(&c, page_base + offset_in_page);
+                if (status != HK_CHAINED_OK) {
+                    return status;
+                }
+                if (c.stopped) {
+                    *stopped = true;
+                    return HK_CHAINED_OK;
+                }
+                if ((entry & HK_CHAINED_PTR_START_LAST) != 0) {
+                    break;
+                }
+                index++;
+            }
+            continue;
+        }
+
+        hk_chained_status_t status = walk_chain(&c, page_base + start);
+        if (status != HK_CHAINED_OK) {
+            return status;
+        }
+        if (c.stopped) {
+            *stopped = true;
+            return HK_CHAINED_OK;
+        }
+    }
+    return HK_CHAINED_OK;
+}
+
+hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *fixups,
+                                                    const void *image_base,
+                                                    size_t image_size,
+                                                    hk_chained_bind_visit_fn visit,
+                                                    void *ctx) {
+    if (!fixups || !fixups->blob || !image_base || !visit) {
+        return HK_CHAINED_INVALID_ARGUMENT;
+    }
+    const uint8_t *blob = fixups->blob;
+    size_t blob_size = fixups->size;
+    size_t starts = fixups->starts_offset;
+
+    if (starts > blob_size || blob_size - starts < sizeof(uint32_t)) {
+        return HK_CHAINED_MALFORMED;
+    }
+    uint32_t seg_count = read_u32(blob + starts);
+    uint64_t table_bytes = (uint64_t)seg_count * sizeof(uint32_t);
+    if (table_bytes > (uint64_t)(blob_size - starts - sizeof(uint32_t))) {
+        return HK_CHAINED_MALFORMED;
+    }
+
+    const uint8_t *image = (const uint8_t *)image_base;
+    bool stopped = false;
+
+    for (uint32_t i = 0; i < seg_count && !stopped; i++) {
+        uint32_t seg_info_offset =
+            read_u32(blob + starts + sizeof(uint32_t) + (size_t)i * sizeof(uint32_t));
+        if (seg_info_offset == 0) {
+            continue;  // this segment has no fixups
+        }
+        // seg_info_offset is relative to the starts_in_image struct.
+        hk_chained_status_t status = walk_segment(fixups, image, image_size,
+                                                  starts + seg_info_offset, i,
+                                                  visit, ctx, &stopped);
+        if (status != HK_CHAINED_OK) {
+            return status;
+        }
+    }
+    return HK_CHAINED_OK;
+}

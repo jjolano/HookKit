@@ -35,6 +35,22 @@ _Static_assert(DYLD_CHAINED_IMPORT_ADDEND == HK_CHAINED_IMPORT_ADDEND, "");
 _Static_assert(DYLD_CHAINED_IMPORT_ADDEND64 == HK_CHAINED_IMPORT_ADDEND64, "");
 
 _Static_assert(sizeof(struct dyld_chained_import) == HK_CHAINED_IMPORT_SIZE, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, size) == 0, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, page_size) == 4, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, pointer_format) == 6, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, segment_offset) == 8, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, max_valid_pointer) == 16, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, page_count) == 20, "");
+_Static_assert(offsetof(struct dyld_chained_starts_in_segment, page_start) ==
+               HK_CHAINED_STARTS_IN_SEGMENT_HEADER, "page_start[] follows the 22-byte header");
+_Static_assert(DYLD_CHAINED_PTR_ARM64E == HK_CHAINED_PTR_ARM64E, "");
+_Static_assert(DYLD_CHAINED_PTR_64 == HK_CHAINED_PTR_64, "");
+_Static_assert(DYLD_CHAINED_PTR_64_OFFSET == HK_CHAINED_PTR_64_OFFSET, "");
+_Static_assert(DYLD_CHAINED_PTR_ARM64E_USERLAND == HK_CHAINED_PTR_ARM64E_USERLAND, "");
+_Static_assert(DYLD_CHAINED_PTR_ARM64E_USERLAND24 == HK_CHAINED_PTR_ARM64E_USERLAND24, "");
+_Static_assert(DYLD_CHAINED_PTR_START_NONE == HK_CHAINED_PTR_START_NONE, "");
+_Static_assert(DYLD_CHAINED_PTR_START_MULTI == HK_CHAINED_PTR_START_MULTI, "");
+_Static_assert(DYLD_CHAINED_PTR_START_LAST == HK_CHAINED_PTR_START_LAST, "");
 _Static_assert(sizeof(struct dyld_chained_import_addend) == HK_CHAINED_IMPORT_ADDEND_SIZE, "");
 _Static_assert(sizeof(struct dyld_chained_import_addend64) == HK_CHAINED_IMPORT_ADDEND64_SIZE, "");
 
@@ -352,6 +368,357 @@ static void test_locates_payload_in_an_image(void) {
     printf("  locates-payload-in-an-image: PASS\n");
 }
 
+
+// ---- traversal fixtures -------------------------------------------------
+
+static void put_u16(uint8_t *b, size_t off, uint16_t v) { memcpy(b + off, &v, sizeof(v)); }
+static void put_u64f(uint8_t *b, size_t off, uint64_t v) { memcpy(b + off, &v, sizeof(v)); }
+
+// Encoded through Apple's own bitfield struct, so the parser decodes bits it
+// did not lay out -- the same cross-check the imports table gets.
+static uint64_t arm64e_bind24(uint32_t ordinal, uint32_t next, bool auth) {
+    if (auth) {
+        struct dyld_chained_ptr_arm64e_auth_bind24 e;
+        memset(&e, 0, sizeof(e));
+        e.ordinal = ordinal; e.next = next; e.bind = 1; e.auth = 1;
+        uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
+    }
+    struct dyld_chained_ptr_arm64e_bind24 e;
+    memset(&e, 0, sizeof(e));
+    e.ordinal = ordinal; e.next = next; e.bind = 1; e.auth = 0;
+    uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
+}
+
+static uint64_t arm64e_rebase24(uint32_t next) {
+    struct dyld_chained_ptr_arm64e_rebase e;
+    memset(&e, 0, sizeof(e));
+    e.target = 0x1234; e.next = next; e.bind = 0; e.auth = 0;
+    uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
+}
+
+static uint64_t ptr64_bind(uint32_t ordinal, uint32_t next) {
+    struct dyld_chained_ptr_64_bind e;
+    memset(&e, 0, sizeof(e));
+    e.ordinal = ordinal; e.next = next; e.bind = 1;
+    uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
+}
+
+// Blob layout for traversal tests:
+//   [0,28)   header (starts_offset 28)
+//   [28,40)  starts_in_image: seg_count 2, seg_info_offset[0]=0, [1]=12
+//   [40,70)  starts_in_segment (22-byte header + up to 4 uint16 starts)
+//   [72,80)  2 imports
+//   [80,94)  symbols "\0_alpha\0_beta"
+#define T_STARTS_OFF    28u
+#define T_SEG_OFF       40u
+#define T_PAGESTART_OFF (T_SEG_OFF + HK_CHAINED_STARTS_IN_SEGMENT_HEADER)
+// page_start[] gets room for 4 uint16 (one real page plus overflow entries),
+// so the imports and symbols start after it rather than on top of it.
+#define T_IMPORTS_OFF   72u
+#define T_SYMBOLS_OFF   80u
+#define T_BLOB_SIZE     94u
+
+// The image the chains live in: one "segment" at 0x100, one 0x100-byte page.
+#define T_IMG_SIZE   0x400u
+#define T_SEGMENT    0x100u
+#define T_PAGE_SIZE  0x100u
+
+static void build_traversal_blob(uint8_t *b, uint16_t pointer_format,
+                                 uint16_t page_start_value, uint16_t page_count) {
+    memset(b, 0, T_BLOB_SIZE);
+    put_u32(b, 0, 0);                 // fixups_version
+    put_u32(b, 4, T_STARTS_OFF);
+    put_u32(b, 8, T_IMPORTS_OFF);
+    put_u32(b, 12, T_SYMBOLS_OFF);
+    put_u32(b, 16, 2);                // imports_count
+    put_u32(b, 20, HK_CHAINED_IMPORT);
+    put_u32(b, 24, 0);                // symbols_format
+
+    put_u32(b, T_STARTS_OFF + 0, 2);  // seg_count
+    put_u32(b, T_STARTS_OFF + 4, 0);  // segment 0: no fixups
+    put_u32(b, T_STARTS_OFF + 8, T_SEG_OFF - T_STARTS_OFF);  // segment 1
+
+    put_u32(b, T_SEG_OFF + 0, HK_CHAINED_STARTS_IN_SEGMENT_HEADER + 2u * page_count);
+    put_u16(b, T_SEG_OFF + 4, T_PAGE_SIZE);
+    put_u16(b, T_SEG_OFF + 6, pointer_format);
+    put_u64f(b, T_SEG_OFF + 8, T_SEGMENT);
+    put_u16(b, T_SEG_OFF + 20, page_count);
+    put_u16(b, T_PAGESTART_OFF, page_start_value);
+
+    put_u32(b, T_IMPORTS_OFF + 0, encode_import(1, false, 1));  // "_alpha"
+    put_u32(b, T_IMPORTS_OFF + 4, encode_import(1, false, 8));  // "_beta"
+    memcpy(b + T_SYMBOLS_OFF, "\0_alpha\0_beta", 14);
+}
+
+// Chain: bind(ordinal 0) -> rebase -> bind(ordinal 1, auth). Offsets 0x110,
+// 0x118, 0x120 with stride 8, so `next` is 1 between each.
+static void build_traversal_image(uint8_t *img) {
+    memset(img, 0, T_IMG_SIZE);
+    put_u64f(img, 0x110, arm64e_bind24(0, 1, false));
+    put_u64f(img, 0x118, arm64e_rebase24(1));
+    put_u64f(img, 0x120, arm64e_bind24(1, 0, true));
+}
+
+typedef struct {
+    hk_chained_bind_t binds[8];
+    size_t n;
+    size_t stop_after;
+} bind_collect_t;
+
+static bool collect_bind(void *ctx, const hk_chained_bind_t *bind) {
+    bind_collect_t *c = (bind_collect_t *)ctx;
+    if (c->n < 8) { c->binds[c->n] = *bind; }
+    c->n++;
+    return !(c->stop_after && c->n >= c->stop_after);
+}
+
+// ---- traversal tests ----------------------------------------------------
+
+static void test_walks_chain_and_skips_rebases(void) {
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    build_traversal_image(img);
+
+    hk_chained_fixups_t fixups;
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+
+    bind_collect_t c = {{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_OK);
+
+    // Three chain entries, but the middle one is a rebase and carries no symbol.
+    assert(c.n == 2);
+    assert(c.binds[0].slot_image_offset == 0x110);
+    assert(c.binds[0].import_ordinal == 0);
+    assert(!c.binds[0].is_auth);
+    assert(c.binds[0].segment_index == 1);  // segment 0 had no fixups
+    assert(c.binds[1].slot_image_offset == 0x120);
+    assert(c.binds[1].import_ordinal == 1);
+    assert(c.binds[1].is_auth);
+    printf("  walks-chain-and-skips-rebases: PASS\n");
+}
+
+static void test_binds_join_to_the_imports_table(void) {
+    // The point of the whole feature: a bind's ordinal names an import, which
+    // names a symbol. This is the join the older LC_DYSYMTAB path does via the
+    // indirect symbol table.
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    build_traversal_image(img);
+
+    hk_chained_fixups_t fixups;
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t c = {{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_OK);
+    assert(c.n == 2);
+
+    hk_chained_import_t imp;
+    assert(hk_chained_import_at(&fixups, c.binds[0].import_ordinal, &imp) == HK_CHAINED_OK);
+    assert(strcmp(imp.symbol_name, "_alpha") == 0);
+    assert(hk_chained_import_at(&fixups, c.binds[1].import_ordinal, &imp) == HK_CHAINED_OK);
+    assert(strcmp(imp.symbol_name, "_beta") == 0);
+    printf("  binds-join-to-the-imports-table: PASS\n");
+}
+
+static void test_ptr64_format_has_its_own_bit_layout(void) {
+    // DYLD_CHAINED_PTR_64 puts bind at bit 63 and next at 51-62 (12 bits),
+    // with stride 4 -- decoding it with the arm64e layout would misread both.
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_64, 0x10, 1);
+    memset(img, 0, sizeof(img));
+    put_u64f(img, 0x110, ptr64_bind(1, 4));   // stride 4 -> next 4 == +16 bytes
+    put_u64f(img, 0x120, ptr64_bind(0, 0));
+
+    hk_chained_fixups_t fixups;
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t c = {{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_OK);
+    assert(c.n == 2);
+    assert(c.binds[0].slot_image_offset == 0x110 && c.binds[0].import_ordinal == 1);
+    assert(c.binds[1].slot_image_offset == 0x120 && c.binds[1].import_ordinal == 0);
+    assert(!c.binds[0].is_auth);  // PTR_64 has no auth bit
+    printf("  ptr64-format-has-its-own-bit-layout: PASS\n");
+}
+
+static void test_page_start_none_and_early_stop(void) {
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_image(img);
+    hk_chained_fixups_t fixups;
+
+    // A page marked NONE has no fixups and must be skipped entirely.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24,
+                         HK_CHAINED_PTR_START_NONE, 1);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t c = {{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_OK);
+    assert(c.n == 0);
+
+    // The visitor can stop the walk early.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t s = {{{0}}, 0, 1};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &s)
+           == HK_CHAINED_OK);
+    assert(s.n == 1);
+    printf("  page-start-none-and-early-stop: PASS\n");
+}
+
+static void test_start_multi_overflow_list(void) {
+    // A page with several chain starts: page_start holds MULTI|index, and the
+    // entries from there on are chain starts, the last flagged with LAST.
+    // page_count 3 gives three uint16 slots: [0] the MULTI marker, [1] and [2]
+    // the overflow list itself.
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24,
+                         (uint16_t)(HK_CHAINED_PTR_START_MULTI | 1u), 1);
+    // ONE real page, with the overflow entries at indices 1 and 2 -- past
+    // page_count, inside the segment struct's declared size. Bounding the
+    // list by page_count instead of `size` would reject this, which is the
+    // bug this test caught.
+    put_u32(blob, T_SEG_OFF, HK_CHAINED_STARTS_IN_SEGMENT_HEADER + 3u * 2u);
+    put_u16(blob, T_PAGESTART_OFF + 2, 0x10);                                 // chain at 0x110
+    put_u16(blob, T_PAGESTART_OFF + 4, (uint16_t)(0x20 | HK_CHAINED_PTR_START_LAST));
+    memset(img, 0, sizeof(img));
+    put_u64f(img, 0x110, arm64e_bind24(0, 0, false));  // first start
+    put_u64f(img, 0x120, arm64e_bind24(1, 0, false));  // second start
+
+    hk_chained_fixups_t fixups;
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t c = {{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_OK);
+    assert(c.n == 2);
+    assert(c.binds[0].slot_image_offset == 0x110 && c.binds[0].import_ordinal == 0);
+    assert(c.binds[1].slot_image_offset == 0x120 && c.binds[1].import_ordinal == 1);
+    printf("  start-multi-overflow-list: PASS\n");
+}
+
+static void test_unsupported_pointer_format_is_rejected(void) {
+    // Rejected BEFORE walking: decoding with the wrong bit layout would
+    // silently produce nonsense rather than fail.
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_image(img);
+    hk_chained_fixups_t fixups;
+    bind_collect_t c = {{{0}}, 0, 0};
+
+    build_traversal_blob(blob, 3 /* DYLD_CHAINED_PTR_32 */, 0x10, 1);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_UNSUPPORTED_FORMAT);
+
+    build_traversal_blob(blob, 13 /* ARM64E_SHARED_CACHE */, 0x10, 1);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_UNSUPPORTED_FORMAT);
+    printf("  unsupported-pointer-format-is-rejected: PASS\n");
+}
+
+static void test_chain_bounds_are_enforced(void) {
+    hk_chained_fixups_t fixups;
+    bind_collect_t c;
+
+    // A `next` that walks the chain past the segment's declared span.
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    memset(img, 0, sizeof(img));
+    // Segment is [0x100,0x200); next=0x7FF*8 lands far beyond it.
+    put_u64f(img, 0x110, arm64e_bind24(0, 0x7FF, false));
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    c = (bind_collect_t){{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+    assert(c.n == 1);  // the first bind was reported before the overrun showed
+
+    // A start offset already outside the segment.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0xF0, 1);
+    put_u16(blob, T_SEG_OFF + 4, 0x40);  // page_size 0x40 -> segment [0x100,0x140)
+    put_u64f(img, 0x1F0, arm64e_bind24(0, 0, false));
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    c = (bind_collect_t){{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+
+    // An image too small to hold the chain, even though the segment allows it.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    c = (bind_collect_t){{{0}}, 0, 0};
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, 0x118, collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+    printf("  chain-bounds-are-enforced: PASS\n");
+}
+
+static void test_malformed_starts_structures(void) {
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_image(img);
+    hk_chained_fixups_t fixups;
+    bind_collect_t c = {{{0}}, 0, 0};
+
+    // page_size 0 would make every page start resolve to the same address.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    put_u16(blob, T_SEG_OFF + 4, 0);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+
+    // A page_start[] array larger than the blob can hold.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    put_u16(blob, T_SEG_OFF + 20, 0xFFFF);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+
+    // A seg_count claiming more entries than the blob holds.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    put_u32(blob, T_STARTS_OFF, 0xFFFFFFFFu);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+
+    // starts_offset past the blob.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    put_u32(blob, 4, T_BLOB_SIZE);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+
+    // A seg_info_offset pointing past the blob.
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    put_u32(blob, T_STARTS_OFF + 8, T_BLOB_SIZE);
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_MALFORMED);
+    printf("  malformed-starts-structures: PASS\n");
+}
+
+static void test_traversal_null_arguments(void) {
+    _Alignas(8) uint8_t blob[T_BLOB_SIZE];
+    _Alignas(8) uint8_t img[T_IMG_SIZE];
+    build_traversal_blob(blob, HK_CHAINED_PTR_ARM64E_USERLAND24, 0x10, 1);
+    build_traversal_image(img);
+    hk_chained_fixups_t fixups;
+    assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
+    bind_collect_t c = {{{0}}, 0, 0};
+
+    assert(hk_chained_fixups_iterate_binds(NULL, img, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_INVALID_ARGUMENT);
+    assert(hk_chained_fixups_iterate_binds(&fixups, NULL, sizeof(img), collect_bind, &c)
+           == HK_CHAINED_INVALID_ARGUMENT);
+    assert(hk_chained_fixups_iterate_binds(&fixups, img, sizeof(img), NULL, &c)
+           == HK_CHAINED_INVALID_ARGUMENT);
+    printf("  traversal-null-arguments: PASS\n");
+}
+
 int main(void) {
     verify_pool_offsets();
     test_bitfield_layout_agrees_with_apple();
@@ -364,6 +731,15 @@ int main(void) {
     test_name_offsets_are_bounded_and_terminated();
     test_null_arguments();
     test_locates_payload_in_an_image();
+    test_walks_chain_and_skips_rebases();
+    test_binds_join_to_the_imports_table();
+    test_ptr64_format_has_its_own_bit_layout();
+    test_page_start_none_and_early_stop();
+    test_start_multi_overflow_list();
+    test_unsupported_pointer_format_is_rejected();
+    test_chain_bounds_are_enforced();
+    test_malformed_starts_structures();
+    test_traversal_null_arguments();
     printf("all chained fixups tests passed\n");
     return 0;
 }
