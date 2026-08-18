@@ -429,7 +429,7 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | this commit — see below |
 | Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
 | Fault injection | not started | |
-| Model-based tests | not started | |
+| Model-based tests | in progress — plan lifecycle state machine cross-checked against an independent reference model over random op sequences with full (state × op) coverage (`Tests/Host/test_plan_model.c`); success path only | this commit — see below |
 
 **Ownership ledger — deferred, and why (a reverted misstep worth
 recording).** An ownership ledger was built in commit `2cc4c3e` whose
@@ -980,6 +980,31 @@ and NULL tolerance across all four accessors plus a direct record with a NULL
 out-param. Every HKPlan.c-linking Makefile target gained `HKInstalled.c`
 (the commit path calls into it); `make test` and `./build.sh all` (all 4
 lanes) verified clean.
+
+**Model-based tests — plan lifecycle state machine**, this iteration
+(`Tests/Host/test_plan_model.c`): an independent reference model
+(`model_apply`, written from the documented lifecycle — "only DRAFT accepts
+new domains/hooks", DRAFT→ANALYZED→PREPARED→COMMITTED — deliberately NOT
+copied from `HKPlan.c`) predicts, for every (state, operation), whether the
+op is accepted and the resulting state. Random operation sequences (a
+reproducible LCG, eight fixed seeds × 40 steps) are applied to both the model
+and a real plan, asserting at every step that accept/reject agrees, that a
+rejection is specifically `HK_STATUS_INVALID_STATE` (unique ids + valid specs
+mean state is the *only* possible rejection reason, so an `INVALID_ARGUMENT`
+sneaking in would be caught), and that the plan's state equals the model's. A
+coverage assertion then proves all 24 (4 states × 6 ops) cells were actually
+exercised — a model-based test that only visited a corner would otherwise
+pass vacuously. Found no divergence: the state machine matches the reference
+for the success path.
+
+Scope stated honestly: all hooks succeed (fake_rebind, no failures — and
+ownership conflicts don't exist, that gate having been reverted), so the four
+reachable states are DRAFT/ANALYZED/PREPARED/COMMITTED. The FAILED/PARTIAL
+rollups and their transitions are already covered by `test-plan-prepare` /
+`test-plan-commit` and not re-modeled here; `INVALIDATED`/`DISCARDED` are enum
+values no operation produces yet (a real gap in the lifecycle, noted — those
+transitions can't be modeled until something creates them). `make test` and
+`./build.sh all` (all 4 lanes) verified clean.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**
