@@ -1717,7 +1717,71 @@ logic, and it has caught real bugs — but it is *not* evidence that a real
 device-verified.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
-**State: not started.** Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | this commit — see below |
+| ObjC engine | not started | |
+| Memory engine | not started | |
+| Swift engine | not started | native/hk_swift.c exists (2.x), a reuse candidate |
+
+**Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
+the first engine, and the point where every Milestone 5 resolver becomes an
+actual hook. It rewrites an image's import slots so calls to an imported symbol
+land on a replacement. Reach is `HK_REACH_EXISTING_IMPORTS`: it redirects
+cross-image calls, which all go through a slot, and nothing else.
+
+**Two phases, and the split is required by the invariants, not chosen for
+style.** `prepare` enumerates the slots and reads their current values while
+mutating nothing (invariant #2), which is also what makes the original known
+before any replacement is reachable (invariant #5) — capturing originals
+during the write loop would publish a replacement before its predecessor was
+known. `commit` revalidates each slot against what prepare saw (invariant #3),
+then writes. It consults **both** import mechanisms — LC_DYSYMTAB indirect
+symbols and chained fixups — so a caller never has to know which era the image
+comes from; a subtlety the code names explicitly is that the two report slot
+addresses in *different coordinate systems* (unslid vmaddr + slide vs. offset
+from the image base), and conflating them would put every write at the wrong
+address.
+
+**Mutation state reported honestly, which is the whole reason this is an
+engine and not a loop.** A write that fails before any slot is touched is
+`NONE` — a clean refusal the router may retry elsewhere. A write that fails
+*after* a slot is already rewritten is `PARTIAL`, never a clean failure:
+invariant #4 forbids a fallback over a half-modified image, and reporting
+`NONE` there would invite exactly that. Revalidation enforces the same
+distinction — a slot changed since prepare (plausibly by another hooking
+consumer, since co-targeting is designed-for) is refused rather than silently
+overwritten, as `NONE` if nothing was touched yet or `PARTIAL` if the image is
+already mixed.
+
+**Reuse survey:** 2.x rebinds imports via `vendor/fishhook`
+(`Backends/HKFishhookBackend.m`). Reference for the mechanism, not reusable:
+fused with the device-only parts, carries its own rebinding registry instead
+of reporting artifacts, and predates the mutation-state and
+original-publication contracts this engine exists to satisfy.
+
+**The write is the only device-only part, and it is behind a seam**
+(`hk_rebind_write_fn`). On device it must change VM protection, store, restore,
+and on arm64e re-sign the pointer for an `__auth_got` slot — none of which can
+run or be verified here. The host test supplies a seam that writes into a
+buffer, exercising every decision the engine makes except the store itself.
+**Not device-verified**, and the arm64e re-signing in particular has no host
+analogue.
+
+6 host tests (`test-rebind-engine`, clean under
+`-fsanitize=address,undefined`): prepare finds both sites for a symbol bound by
+two slots and leaves the image byte-for-byte unchanged; commit writes every
+site and records one artifact each (with both pointers and reversibility);
+failure before any write is `NONE`; failure after a write is `PARTIAL`;
+revalidation refuses a slot changed since prepare (as `NONE` or `PARTIAL`
+depending on how far the write got); and absent-symbol / argument handling.
+**Verified to have teeth:** dropping the `+slide` in the slot-address
+computation makes the test fault on a bad address rather than pass — the
+address assertions are load-bearing.
+
+Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
 ## Milestone 7 — Native terminal inline
 **State: not started.** Note: the atomicity work committed at `3e6bbdb`
