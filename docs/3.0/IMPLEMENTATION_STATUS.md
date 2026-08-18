@@ -1049,8 +1049,9 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 | Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | this commit — see below |
 | dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
 | Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | commit `5c3efe7` |
-| Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete for the file-image case (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view | this commit — see below |
-| Loaded-image (`__LINKEDIT`) offset translation | not started | needs `LC_SEGMENT_64` parsing; the file-image path does not cover a slid, segment-scattered image |
+| Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + this commit |
+| Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | this commit — see below |
+| Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
 | Export trie resolver | not started | the proper path for *exported* symbols; separate parser (ULEB128 trie) |
 | Import resolver | not started | |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
@@ -1214,8 +1215,71 @@ only. `LC_SYMTAB`'s `symoff`/`stroff` are file offsets, correct for an image
 laid out as on disk (what 2.x's `bind_ondisk_symbols` mmaps). A *loaded* image
 is scattered at segment VM addresses, where those offsets must be translated
 through the `__LINKEDIT` segment — that needs `LC_SEGMENT_64` parsing and is
-deliberately absent rather than guessed at. Byte-swapped and 32-bit images are
-likewise rejected with distinct statuses rather than half-supported.
+deliberately absent rather than guessed at. *(Lifted in the next entry.)*
+Byte-swapped and 32-bit images are likewise rejected with distinct statuses
+rather than half-supported.
+
+`make test` and `./build.sh all` (all 4 lanes) verified clean.
+
+**`LC_SEGMENT_64`: segments, sections, and loaded-image translation**, this
+iteration — lifts the file-image-only limitation stated directly above, and
+adds the code-vs-data check callers need.
+
+*Reuse survey first.* 2.x's `collect_section_flags` is the section-flags
+precedent: two passes over the load commands (count sections, then collect
+flags into a flat array indexed by `n_sect - 1`), reading each segment's
+section array **without bounds checking** — sound only because it runs on a
+live, dyld-validated image, as its own comment says. It is also inside
+`#if defined(__arm64__)` and uses Apple's headers. The HK3.0 version keeps the
+same `n_sect` numbering (1-based, across segments in load-command order) but
+is fully bounded and needs no allocation: `hk_macho_section_flags` walks to
+the requested index directly.
+
+**The bounds check 2.x omits is load-bearing, and that was proven, not
+asserted.** A segment's section array lives inside the segment command, so it
+must fit within that command's own `cmdsize`. With a segment claiming
+`nsects = 99` inside a 232-byte command, asking for section 50 reads roughly
+4 KB into a 1 KB image. On identical input a guard-less build produces an ASan
+`heap-buffer-overflow` (`READ of size 4`), while the real implementation
+returns `HK_MACHO_MALFORMED` — so the guard prevents a genuine out-of-bounds
+read, not a hypothetical one.
+
+`segname` is a fixed 16-byte field that need not be NUL-terminated, so it is
+copied out and terminated rather than ever read as a C string in place —
+tested with an exactly-16-character name (which must match) and a
+17-character query (which must not).
+
+**Loaded-image translation** (`hk_macho_symtab_view_for_loaded_image`): a
+loaded image is scattered at segment VM addresses, so `LC_SYMTAB`'s file
+offsets are relative to `__LINKEDIT`, whose mapped base is
+`slide + linkedit.vmaddr - linkedit.fileoff`. Both referenced ranges are
+validated to lie inside `__LINKEDIT`'s declared file range, so a corrupt
+`LC_SYMTAB` cannot yield a pointer into unrelated memory, and the
+`vmaddr - fileoff` subtraction is guarded against underflow rather than
+allowed to wrap.
+
+The test for it uses a **negative control** rather than just asserting
+success: a decoy symbol table is placed exactly where file-offset logic would
+read, holding `n_value 0xDEAD`, while the real table sits where translation
+lands, holding `0x4000`. The test asserts the translated path resolves to
+`0x4000` *and* that the file-image path on the very same bytes resolves to
+`0xDEAD` — so the two paths are demonstrably different rather than
+incidentally equal, and a missing or wrong translation would return a visibly
+wrong answer instead of quietly passing. The synthetic image is deliberately
+non-degenerate (vmaddr delta `0x140` ≠ file offset `0x40`), since a
+contiguous layout would make translation a no-op and the test vacuous.
+
+22 host tests total in `test-macho` (8 new), clean under
+`-fsanitize=address,undefined`. New coverage: segment lookup by name, the
+16-byte `segname` handling, section flags with the code/data distinction,
+`NO_SECT` and past-the-end indices, the section-array bounds guard, a
+truncated segment command, the loaded-image translation with its negative
+control, and `__LINKEDIT` range validation (symoff before the range, nlist
+span past the end, string table past the end, and no `__LINKEDIT` at all
+reported as missing rather than malformed).
+
+**Still device-only, unchanged**: the dyld catalog populator, the shared-cache
+resolver, and PAC signing. Nothing here is device-verified.
 
 `make test` and `./build.sh all` (all 4 lanes) verified clean.
 

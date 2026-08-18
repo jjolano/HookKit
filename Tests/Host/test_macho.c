@@ -339,6 +339,262 @@ static void test_misaligned_symoff_rejected(void) {
     printf("  misaligned-symoff-rejected: PASS\n");
 }
 
+
+// ---- segments and sections ----------------------------------------------
+
+// An image with two segments and two sections:
+//   [0,32)     header (ncmds=3, sizeofcmds=328)
+//   [32,264)   LC_SEGMENT_64 __TEXT, cmdsize 232, nsects 2
+//                [104,184)  section __text   (instructions)
+//                [184,264)  section __const  (data)
+//   [264,336)  LC_SEGMENT_64 __LINKEDIT, cmdsize 72, nsects 0
+//   [336,360)  LC_SYMTAB
+#define SEG_TEXT_OFF      32u
+#define SEG_TEXT_CMDSIZE  (HK_SEGMENT_COMMAND_64_SIZE + 2u * HK_SECTION_64_SIZE)
+#define SEG_LE_OFF        (SEG_TEXT_OFF + SEG_TEXT_CMDSIZE)
+#define SEG_SYMTAB_OFF    (SEG_LE_OFF + HK_SEGMENT_COMMAND_64_SIZE)
+#define SEG_SIZEOFCMDS    (SEG_TEXT_CMDSIZE + HK_SEGMENT_COMMAND_64_SIZE + HK_SYMTAB_COMMAND_SIZE)
+#define SEG_IMG_SIZE      0x400u
+
+// Where the loaded-image test places the two symbol tables. The decoy sits
+// where FILE-offset logic would look; the real one where __LINKEDIT
+// translation lands. See test_loaded_image_symtab_translation.
+#define DECOY_NLIST_OFF   0x80u
+#define DECOY_STR_OFF     0x90u
+#define REAL_NLIST_OFF    0x180u
+#define REAL_STR_OFF      0x190u
+
+static void put_u64(uint8_t *b, size_t off, uint64_t v) {
+    memcpy(b + off, &v, sizeof(v));
+}
+
+static void write_segment(uint8_t *b, size_t off, const char *name, uint32_t cmdsize,
+                          uint64_t vmaddr, uint64_t vmsize,
+                          uint64_t fileoff, uint64_t filesize, uint32_t nsects) {
+    memset(b + off, 0, cmdsize);
+    put_u32(b, off + 0, HK_LC_SEGMENT_64);
+    put_u32(b, off + 4, cmdsize);
+    memcpy(b + off + 8, name, strlen(name));  // fixed 16-byte field, zero-padded
+    put_u64(b, off + 24, vmaddr);
+    put_u64(b, off + 32, vmsize);
+    put_u64(b, off + 40, fileoff);
+    put_u64(b, off + 48, filesize);
+    put_u32(b, off + 64, nsects);
+}
+
+static void write_section(uint8_t *b, size_t off, const char *sectname, uint32_t flags) {
+    memset(b + off, 0, HK_SECTION_64_SIZE);
+    memcpy(b + off, sectname, strlen(sectname));
+    put_u32(b, off + 64, flags);
+}
+
+static void write_nlist(uint8_t *b, size_t off, uint32_t strx, uint8_t type,
+                        uint8_t sect, uint64_t value) {
+    put_u32(b, off + 0, strx);
+    b[off + 4] = type;
+    b[off + 5] = sect;
+    put_u64(b, off + 8, value);
+}
+
+// `text_vmaddr` is the image's preferred load address; the loaded-image test
+// derives a slide from it. File-image tests can pass anything.
+static void build_segment_image(uint8_t *b, uint64_t text_vmaddr) {
+    memset(b, 0, SEG_IMG_SIZE);
+    write_header(b, HK_MH_MAGIC_64, 3, SEG_SIZEOFCMDS);
+
+    write_segment(b, SEG_TEXT_OFF, "__TEXT", SEG_TEXT_CMDSIZE,
+                  text_vmaddr, 0x1000, 0, 0x1000, 2);
+    write_section(b, SEG_TEXT_OFF + HK_SEGMENT_COMMAND_64_SIZE,
+                  "__text", HK_S_ATTR_PURE_INSTRUCTIONS);
+    write_section(b, SEG_TEXT_OFF + HK_SEGMENT_COMMAND_64_SIZE + HK_SECTION_64_SIZE,
+                  "__const", 0);
+
+    // Deliberately non-degenerate: the vmaddr delta (0x140) differs from the
+    // file offset (0x40), so translation genuinely has to do arithmetic.
+    write_segment(b, SEG_LE_OFF, "__LINKEDIT", HK_SEGMENT_COMMAND_64_SIZE,
+                  text_vmaddr + 0x140, 0x200, 0x40, 0x200, 0);
+
+    put_u32(b, SEG_SYMTAB_OFF + 0, HK_LC_SYMTAB);
+    put_u32(b, SEG_SYMTAB_OFF + 4, HK_SYMTAB_COMMAND_SIZE);
+    put_u32(b, SEG_SYMTAB_OFF + 8, 0x80);   // symoff
+    put_u32(b, SEG_SYMTAB_OFF + 12, 1);     // nsyms
+    put_u32(b, SEG_SYMTAB_OFF + 16, 0x90);  // stroff
+    put_u32(b, SEG_SYMTAB_OFF + 20, 8);     // strsize
+
+    // Negative control: a decoy table exactly where file-offset logic would
+    // read (symoff/stroff used as image offsets), holding a different value.
+    write_nlist(b, DECOY_NLIST_OFF, 1, (uint8_t)(HK_N_SECT | HK_N_EXT), 1, 0xDEAD);
+    memcpy(b + DECOY_STR_OFF, "\0_alpha", 8);
+
+    // The real table, where __LINKEDIT translation lands.
+    write_nlist(b, REAL_NLIST_OFF, 1, (uint8_t)(HK_N_SECT | HK_N_EXT), 1, 0x4000);
+    memcpy(b + REAL_STR_OFF, "\0_alpha", 8);
+}
+
+static void test_find_segment(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+
+    hk_macho_segment_t seg;
+    assert(hk_macho_find_segment(img, sizeof(img), "__TEXT", &seg) == HK_MACHO_OK);
+    assert(strcmp(seg.segname, "__TEXT") == 0);
+    assert(seg.nsects == 2);
+    assert(seg.vmaddr == 0x100000000ull);
+    assert(seg.command_offset == SEG_TEXT_OFF);
+
+    assert(hk_macho_find_segment(img, sizeof(img), "__LINKEDIT", &seg) == HK_MACHO_OK);
+    assert(seg.fileoff == 0x40 && seg.filesize == 0x200 && seg.nsects == 0);
+
+    assert(hk_macho_find_segment(img, sizeof(img), "__DATA", &seg) == HK_MACHO_NOT_FOUND);
+    printf("  find-segment: PASS\n");
+}
+
+static void test_segname_is_not_read_as_a_c_string(void) {
+    // segname is a fixed 16-byte field with no required terminator. A full
+    // 16-character name must compare correctly and must not over-read into
+    // the following vmaddr field.
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+    memcpy(img + SEG_TEXT_OFF + 8, "ABCDEFGHIJKLMNOP", 16);  // exactly 16, unterminated
+
+    hk_macho_segment_t seg;
+    assert(hk_macho_find_segment(img, sizeof(img), "ABCDEFGHIJKLMNOP", &seg) == HK_MACHO_OK);
+    assert(strlen(seg.segname) == 16);
+    // A 17-character query cannot match a 16-byte field.
+    assert(hk_macho_find_segment(img, sizeof(img), "ABCDEFGHIJKLMNOPQ", &seg) == HK_MACHO_NOT_FOUND);
+    printf("  segname-is-not-read-as-a-c-string: PASS\n");
+}
+
+static void test_section_flags_and_code_check(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+    uint32_t flags = 0;
+
+    // n_sect is 1-based and counts across segments in load-command order.
+    assert(hk_macho_section_flags(img, sizeof(img), 1, &flags) == HK_MACHO_OK);
+    assert(flags == HK_S_ATTR_PURE_INSTRUCTIONS);
+    assert(hk_macho_section_is_code(flags));
+
+    assert(hk_macho_section_flags(img, sizeof(img), 2, &flags) == HK_MACHO_OK);
+    assert(flags == 0);
+    assert(!hk_macho_section_is_code(flags));
+
+    // Past the last section, and NO_SECT.
+    assert(hk_macho_section_flags(img, sizeof(img), 3, &flags) == HK_MACHO_NOT_FOUND);
+    assert(hk_macho_section_flags(img, sizeof(img), 0, &flags) == HK_MACHO_NOT_FOUND);
+    printf("  section-flags-and-code-check: PASS\n");
+}
+
+static void test_section_array_must_fit_in_cmdsize(void) {
+    // The check HookKit 2.x omits (it only runs on dyld-validated images): a
+    // segment claiming more sections than its own cmdsize can hold would walk
+    // off the end of the command.
+    uint8_t *img = (uint8_t *)aligned_alloc(8, SEG_IMG_SIZE);  // heap: over-reads are ASan-visible
+    assert(img != NULL);
+    build_segment_image(img, 0x100000000ull);
+    put_u32(img, SEG_TEXT_OFF + 64, 99);  // nsects=99 in a 232-byte command
+
+    uint32_t flags = 0;
+    assert(hk_macho_section_flags(img, sizeof(uint8_t) * SEG_IMG_SIZE, 1, &flags) == HK_MACHO_MALFORMED);
+
+    // The case that makes this guard load-bearing rather than cosmetic:
+    // section 50 of the claimed 99 would be read at ~4KB into a 1KB image.
+    // Without the check that is a real out-of-bounds read, which is what the
+    // teeth-check against a guard-less build confirms ASan reports.
+    assert(hk_macho_section_flags(img, SEG_IMG_SIZE, 50, &flags) == HK_MACHO_MALFORMED);
+
+    free(img);
+    printf("  section-array-must-fit-in-cmdsize: PASS\n");
+}
+
+static void test_truncated_segment_command_rejected(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+    // Shrink __LINKEDIT below the 72-byte segment structure, keeping the
+    // command list self-consistent so the failure is about the segment.
+    put_u32(img, SEG_LE_OFF + 4, 8);
+    put_u32(img, 20, SEG_TEXT_CMDSIZE + 8);
+    put_u32(img, 16, 2);
+
+    hk_macho_segment_t seg;
+    assert(hk_macho_find_segment(img, sizeof(img), "__LINKEDIT", &seg) == HK_MACHO_MALFORMED);
+    printf("  truncated-segment-command-rejected: PASS\n");
+}
+
+// ---- loaded-image translation -------------------------------------------
+
+static void test_loaded_image_symtab_translation(void) {
+    // The test that proves translation actually happens. A decoy symbol table
+    // sits where FILE-offset logic would read (image + symoff) holding
+    // n_value 0xDEAD; the real one sits where __LINKEDIT translation lands,
+    // holding 0x4000. A missing or wrong translation returns 0xDEAD.
+    _Alignas(8) uint8_t *img = (uint8_t *)aligned_alloc(8, SEG_IMG_SIZE);
+    assert(img != NULL);
+
+    // Model a real load: the image prefers text_vmaddr and is mapped at `img`,
+    // so its slide is the difference. (Unsigned wraparound here is exact and
+    // cancels in the translation, whichever way the addresses compare.)
+    const uint64_t text_vmaddr = 0x100000000ull;
+    build_segment_image(img, text_vmaddr);
+    uintptr_t slide = (uintptr_t)img - (uintptr_t)text_vmaddr;
+
+    hk_symbol_table_view_t view;
+    assert(hk_macho_symtab_view_for_loaded_image(img, SEG_IMG_SIZE, slide, &view) == HK_MACHO_OK);
+
+    // linkedit_base = slide + vmaddr(0x140) - fileoff(0x40) = img + 0x100,
+    // so symoff 0x80 lands at img + 0x180 -- the real table, not the decoy.
+    assert((const uint8_t *)view.nlist == img + REAL_NLIST_OFF);
+    assert((const uint8_t *)view.strings == img + REAL_STR_OFF);
+    assert(view.nlist_count == 1 && view.strings_size == 8);
+
+    hk_symbol_query_t q;
+    q.name = "alpha";
+    q.convention = HK_SYMBOL_NAME_C;
+    q.visibility = HK_SYMBOL_VISIBILITY_ANY;
+    hk_symbol_match_t m;
+    assert(hk_symbol_table_find(&view, &q, &m));
+    assert(m.n_value == 0x4000);   // translated
+    assert(m.n_value != 0xDEAD);   // and demonstrably not the file-offset decoy
+
+    // The file-image path on the same bytes reaches the decoy, which is what
+    // makes the two paths genuinely different rather than incidentally equal.
+    hk_symbol_table_view_t file_view;
+    assert(hk_macho_find_symtab_view(img, SEG_IMG_SIZE, &file_view) == HK_MACHO_OK);
+    assert(hk_symbol_table_find(&file_view, &q, &m));
+    assert(m.n_value == 0xDEAD);
+
+    free(img);
+    printf("  loaded-image-symtab-translation: PASS\n");
+}
+
+static void test_loaded_image_validates_against_linkedit(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    hk_symbol_table_view_t view;
+    const uint64_t V = 0x100000000ull;
+    uintptr_t slide = (uintptr_t)img - (uintptr_t)V;
+
+    // symoff before __LINKEDIT's file range.
+    build_segment_image(img, V);
+    put_u32(img, SEG_SYMTAB_OFF + 8, 0x10);  // < fileoff 0x40
+    assert(hk_macho_symtab_view_for_loaded_image(img, SEG_IMG_SIZE, slide, &view) == HK_MACHO_MALFORMED);
+
+    // nlist span running past __LINKEDIT's end.
+    build_segment_image(img, V);
+    put_u32(img, SEG_SYMTAB_OFF + 12, 0xFFFFFF);
+    assert(hk_macho_symtab_view_for_loaded_image(img, SEG_IMG_SIZE, slide, &view) == HK_MACHO_MALFORMED);
+
+    // string table running past __LINKEDIT's end.
+    build_segment_image(img, V);
+    put_u32(img, SEG_SYMTAB_OFF + 20, 0xFFFFFF);
+    assert(hk_macho_symtab_view_for_loaded_image(img, SEG_IMG_SIZE, slide, &view) == HK_MACHO_MALFORMED);
+
+    // No __LINKEDIT at all: report it as missing, not as a bad range.
+    _Alignas(8) uint8_t bare[IMG_SIZE];
+    build_symtab_image(bare);
+    assert(hk_macho_symtab_view_for_loaded_image(bare, IMG_SIZE, 0, &view) == HK_MACHO_NOT_FOUND);
+    printf("  loaded-image-validates-against-linkedit: PASS\n");
+}
+
 static void test_null_tolerance(void) {
     _Alignas(8) uint8_t img[IMG_SIZE];
     build_symtab_image(img);
@@ -373,6 +629,13 @@ int main(void) {
     test_end_to_end_symtab_to_symbol_search();
     test_misaligned_image_parses_safely();
     test_misaligned_symoff_rejected();
+    test_find_segment();
+    test_segname_is_not_read_as_a_c_string();
+    test_section_flags_and_code_check();
+    test_section_array_must_fit_in_cmdsize();
+    test_truncated_segment_command_rejected();
+    test_loaded_image_symtab_translation();
+    test_loaded_image_validates_against_linkedit();
     test_null_tolerance();
     printf("all mach-o tests passed\n");
     return 0;

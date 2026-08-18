@@ -63,6 +63,13 @@ extern "C" {
 #define HK_MACHO_HEADER_64_SIZE     32u
 #define HK_LOAD_COMMAND_SIZE         8u
 #define HK_SYMTAB_COMMAND_SIZE      24u
+#define HK_SEGMENT_COMMAND_64_SIZE  72u
+#define HK_SECTION_64_SIZE          80u
+
+// Section flag bits that mark a section as containing instructions -- the
+// code-vs-data distinction (arm64e signs code pointers, not data pointers).
+#define HK_S_ATTR_PURE_INSTRUCTIONS 0x80000000u
+#define HK_S_ATTR_SOME_INSTRUCTIONS 0x00000400u
 
 typedef enum {
     HK_MACHO_OK = 0,
@@ -115,6 +122,74 @@ hk_macho_status_t hk_macho_find_load_command(const void *image, size_t size,
 // parsing and is deliberately not done here rather than guessed at.
 hk_macho_status_t hk_macho_find_symtab_view(const void *image, size_t size,
                                             hk_symbol_table_view_t *out_view);
+
+// ---- segments and sections ---------------------------------------------
+
+typedef struct {
+    char segname[17];   // NUL-terminated copy; the on-disk field is 16 bytes
+                        // and need not be terminated, so it is never read as
+                        // a C string in place.
+    uint64_t vmaddr;
+    uint64_t vmsize;
+    uint64_t fileoff;
+    uint64_t filesize;
+    uint32_t maxprot;
+    uint32_t initprot;
+    uint32_t nsects;
+    uint32_t flags;
+    size_t command_offset;  // offset of the LC_SEGMENT_64 command in the image
+    uint32_t cmdsize;
+} hk_macho_segment_t;
+
+// Finds the first LC_SEGMENT_64 whose name equals `segname` (compared over at
+// most 16 bytes, since the on-disk field is fixed-width and may be
+// unterminated). HK_MACHO_NOT_FOUND if absent.
+hk_macho_status_t hk_macho_find_segment(const void *image, size_t size,
+                                        const char *segname,
+                                        hk_macho_segment_t *out_segment);
+
+// Section flags for a 1-based section index, numbered across all segments in
+// load-command order -- exactly the numbering an nlist's `n_sect` uses, and
+// the same ordering HookKit 2.x's collect_section_flags builds. n_sect 0 is
+// NO_SECT and is rejected.
+//
+// Unlike the 2.x version this is fully bounded: a segment's section array
+// must fit inside the segment command's own cmdsize, so a corrupt `nsects`
+// cannot walk off the end. (2.x reads sections without that check because it
+// only ever runs on a live, dyld-validated image.)
+hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
+                                         uint8_t n_sect, uint32_t *out_flags);
+
+// Whether a section's flags mark it as containing instructions. The check a
+// caller uses to decide whether a resolved symbol is code (and so, on arm64e,
+// whether its address should be signed rather than left a plain pointer).
+static inline bool hk_macho_section_is_code(uint32_t section_flags) {
+    return (section_flags & (HK_S_ATTR_PURE_INSTRUCTIONS | HK_S_ATTR_SOME_INSTRUCTIONS)) != 0;
+}
+
+// ---- loaded-image symbol table -----------------------------------------
+
+// The loaded-image counterpart to hk_macho_find_symtab_view, lifting that
+// function's file-image-only limitation.
+//
+// A loaded image is scattered at segment VM addresses, so LC_SYMTAB's file
+// offsets do not index the mapped header. They are instead relative to the
+// __LINKEDIT segment, whose mapped base is
+//     linkedit_base = slide + linkedit.vmaddr - linkedit.fileoff
+// and the symbol table lives at linkedit_base + symoff / + stroff. `header`
+// is the image's mach header as mapped, `slide` its ASLR slide (on device,
+// _dyld_get_image_header / _dyld_get_image_vmaddr_slide).
+//
+// `header_region_size` bounds only the LOAD-COMMAND parsing -- it is how many
+// bytes are safely readable from `header`. The returned view deliberately
+// points OUTSIDE that region, into __LINKEDIT, which is the correct result
+// for a real loaded image; both referenced ranges are validated to lie within
+// __LINKEDIT's declared file range, so a corrupt LC_SYMTAB cannot produce a
+// pointer into unrelated memory.
+hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
+                                                        size_t header_region_size,
+                                                        uintptr_t slide,
+                                                        hk_symbol_table_view_t *out_view);
 
 #ifdef __cplusplus
 }
