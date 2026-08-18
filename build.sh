@@ -164,6 +164,9 @@ build_rootful_legacy() {
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
     legacy_make check-exports
     cp -p "$artifact" build/hookkit-rootful-legacy.deb
+    # Canonical name too: the release step must upload the theos-produced
+    # <package>_<version>_<arch>.deb name, not the short lane alias above.
+    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 build_rootful_modern() {
@@ -177,6 +180,9 @@ build_rootful_modern() {
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
     run_make check-exports
     cp -p "$artifact" build/hookkit-rootful-modern.deb
+    # Canonical name too: the release step must upload the theos-produced
+    # <package>_<version>_<arch>.deb name, not the short lane alias above.
+    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 build_rootless() {
@@ -190,6 +196,9 @@ build_rootless() {
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
     run_make check-exports
     cp -p "$artifact" build/hookkit-rootless.deb
+    # Canonical name too: the release step must upload the theos-produced
+    # <package>_<version>_<arch>.deb name, not the short lane alias above.
+    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 # Existing roothide profile; it shares the modern/rootless compatibility floor.
@@ -205,6 +214,9 @@ build_roothide() {
     run_make check-compat COMPAT_PROFILE=roothide COMPAT_ARTIFACT="$artifact"
     run_make check-exports
     cp -p "$artifact" build/hookkit-roothide.deb
+    # Canonical name too: the release step must upload the theos-produced
+    # <package>_<version>_<arch>.deb name, not the short lane alias above.
+    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 case ${1:-all} in
