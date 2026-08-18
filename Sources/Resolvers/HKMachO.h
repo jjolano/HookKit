@@ -65,6 +65,8 @@ extern "C" {
 #define HK_SYMTAB_COMMAND_SIZE      24u
 #define HK_SEGMENT_COMMAND_64_SIZE  72u
 #define HK_SECTION_64_SIZE          80u
+#define HK_LINKEDIT_DATA_CMD_SIZE   16u
+#define HK_DYLD_INFO_COMMAND_SIZE   48u
 
 // Section flag bits that mark a section as containing instructions -- the
 // code-vs-data distinction (arm64e signs code pointers, not data pointers).
@@ -190,6 +192,19 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
                                                         size_t header_region_size,
                                                         uintptr_t slide,
                                                         hk_symbol_table_view_t *out_view);
+
+// Locates the export trie's byte range. Modern images carry
+// LC_DYLD_EXPORTS_TRIE; older ones put export_off/export_size inside
+// LC_DYLD_INFO(_ONLY). Both are checked, in that order, so a caller never has
+// to know which form an image uses. HK_MACHO_NOT_FOUND if the image has
+// neither (or declares an empty trie).
+//
+// FILE-IMAGE LAYOUT, same as hk_macho_find_symtab_view: the returned offset
+// is into `image`. For a loaded image the value is a __LINKEDIT-relative file
+// offset and needs the same translation
+// hk_macho_symtab_view_for_loaded_image performs.
+hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
+                                            size_t *out_offset, size_t *out_size);
 
 #ifdef __cplusplus
 }

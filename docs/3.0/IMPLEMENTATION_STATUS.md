@@ -1052,7 +1052,7 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 | Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + this commit |
 | Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | this commit — see below |
 | Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
-| Export trie resolver | not started | the proper path for *exported* symbols; separate parser (ULEB128 trie) |
+| Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | this commit — see below |
 | Import resolver | not started | |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
@@ -1280,6 +1280,73 @@ reported as missing rather than malformed).
 
 **Still device-only, unchanged**: the dyld catalog populator, the shared-cache
 resolver, and PAC signing. Nothing here is device-verified.
+
+`make test` and `./build.sh all` (all 4 lanes) verified clean.
+
+**Export trie resolver**, this iteration
+(`Sources/Resolvers/HKExportTrie.{h,c}`) — the proper path for *exported*
+symbols. dyld stores exports in a ULEB128-encoded prefix tree, not in the
+symbol table; `HKSymbolTable` remains the private-symbol path. Added
+`hk_macho_find_export_trie` alongside it, which handles both load-command
+forms (modern `LC_DYLD_EXPORTS_TRIE`, and older images' `export_off`/
+`export_size` inside `LC_DYLD_INFO(_ONLY)`) so callers never have to know
+which an image uses.
+
+*Reuse survey:* nothing in this repo decodes ULEB128 or walks an export trie.
+fishhook rebinds GOT slots, litehook does its own scanning, and
+`native/hk_symbols.c` reads only the symbol table and the shared cache's own
+index — it matched a "trie" grep solely on the word "en**trie**s". So this is
+genuinely new code rather than a second copy.
+
+Three safety properties, **two of them proven to have teeth**:
+1. **ULEB128 correctness.** Bounds-checked, and rejects both overlong
+   encodings (>10 bytes) and values overflowing 64 bits — at shift 63 only one
+   bit still fits, so a wider final chunk is refused. Tested against the
+   canonical LEB128 example and `UINT64_MAX`'s exact 10-byte encoding.
+2. **Bounded edge strings.** An edge string with no terminator before the end
+   of the trie is refused. Removing that bound makes ASan report a
+   `heap-buffer-overflow` on an exact-length heap buffer, while the real code
+   returns `MALFORMED`.
+3. **Cycle cap** — the one worth dwelling on. A trie edge with a *zero-length*
+   string consumes no name characters, so if it points back at an ancestor the
+   walk never terminates. Name length does not bound the walk; only the depth
+   cap does. Verified by removing it: the walk **hangs indefinitely** (killed
+   at a 5-second timeout) rather than crashing. This is a failure mode **no
+   sanitizer detects** — ASan and UBSan both run happily forever — so the cap
+   plus its test is the only defense, and "the tests pass under sanitizers"
+   would have been a false assurance here.
+
+A re-export is reported as `HK_EXPORT_UNSUPPORTED_KIND` rather than given an
+invented address: it names another dylib instead of carrying one, so resolving
+it means following into a different image through the image catalog. The
+out-parameter is still filled (flags, library ordinal) so a caller can see
+what was found, with `address` left zero.
+
+15 host tests (`test-export-trie`, clean under `-fsanitize=address,undefined`).
+The main trie is laid out and traced **by hand**, byte by byte, rather than
+produced by a builder, so the bytes under test are auditable. The truncation
+test exercises every prefix length and asserts the strong invariant — a
+truncated trie either fails cleanly or returns the *right* answer, never a
+wrong one — and pins the exact count of lengths that legitimately still
+resolve (24..29, since resolving `_alpha` reads to offset 23 and never touches
+`_beta`'s subtree), so it cannot silently degrade into "everything failed",
+which would pass vacuously.
+
+**Stated gap:** the walker is exact-name-only. The trie stores linker-form
+names, so `malloc` must be queried as `_malloc`. The leading-underscore
+normalization `HKSymbolTable` does internally is deliberately not duplicated
+here — it belongs in the resolver-selection layer above both, which is not yet
+written. The asymmetry is recorded rather than papered over.
+
+**Visibility semantics revisited**, now that an export resolver exists:
+`HKSymbolTable.h` previously noted that `HK_SYMBOL_VISIBILITY_ANY` and
+`PRIVATE_ALLOWED` behave identically "until an export-trie resolver exists".
+That resolver now exists, and the conclusion is unchanged but for a better
+reason, so the comment was updated rather than left stale: the difference
+between those visibilities is about *which source to consult and in what
+order*, which is a resolver-selection decision belonging to the layer above
+both. Within a symbol-table search on its own there is genuinely nothing for
+them to differ about — the symbol table is a private-symbol source by nature.
 
 `make test` and `./build.sh all` (all 4 lanes) verified clean.
 

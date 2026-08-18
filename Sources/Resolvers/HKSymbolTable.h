@@ -94,11 +94,18 @@ typedef struct {
 //   - Only HK_N_SECT entries with a non-zero n_value are candidates: a symbol
 //     that is undefined, absolute, or has no address cannot be a hook target.
 //   - HK_SYMBOL_VISIBILITY_EXPORTED_ONLY requires the HK_N_EXT bit; ANY and
-//     PRIVATE_ALLOWED accept both external and local symbols. (ANY and
-//     PRIVATE_ALLOWED behave identically here -- the symbol table is a
-//     private-symbol source by nature; the distinction only becomes
-//     observable once an export-trie resolver exists to be preferred
-//     instead, so it is deliberately NOT faked as a difference now.)
+//     PRIVATE_ALLOWED accept both external and local symbols.
+//
+//     ANY and PRIVATE_ALLOWED still behave identically *here*, and that is
+//     correct rather than a gap. An export-trie resolver now exists
+//     (HKExportTrie.h), but the difference between those two visibilities is
+//     about WHICH SOURCE to consult and in what order -- prefer the export
+//     trie, fall back to the symbol table, or go straight to the symbol table
+//     because private symbols are explicitly acceptable. That is a
+//     resolver-selection decision belonging to the layer above both
+//     resolvers, which is not written yet. Within a symbol-table search on
+//     its own there is genuinely nothing for the two to differ about: the
+//     symbol table is a private-symbol source by nature.
 //   - Name matching: HK_SYMBOL_NAME_MACHO_EXACT compares the table string
 //     byte-for-byte. Every other convention (C, C++ mangled, Swift mangled)
 //     also accepts the table's leading-underscore form, honoring the ABI's

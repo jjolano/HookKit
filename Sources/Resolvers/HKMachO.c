@@ -424,3 +424,73 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
     out_view->strings_size = (size_t)strsize;
     return HK_MACHO_OK;
 }
+
+// ---- export trie location ----------------------------------------------
+
+typedef struct {
+    const uint8_t *base;
+    uint32_t data_off;
+    uint32_t data_size;
+    bool found;
+    bool malformed;
+} export_trie_ctx_t;
+
+static bool export_trie_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
+    export_trie_ctx_t *e = (export_trie_ctx_t *)ctx;
+
+    if (cmd == HK_LC_DYLD_EXPORTS_TRIE) {
+        // linkedit_data_command: dataoff at 8, datasize at 12.
+        if (cmdsize < HK_LINKEDIT_DATA_CMD_SIZE) {
+            e->malformed = true;
+            return false;
+        }
+        e->data_off = read_u32(e->base + offset + 8);
+        e->data_size = read_u32(e->base + offset + 12);
+        e->found = true;
+        return false;  // the modern form wins outright
+    }
+
+    if ((cmd == HK_LC_DYLD_INFO || cmd == HK_LC_DYLD_INFO_ONLY) && !e->found) {
+        // dyld_info_command: export_off at 40, export_size at 44.
+        if (cmdsize < HK_DYLD_INFO_COMMAND_SIZE) {
+            e->malformed = true;
+            return false;
+        }
+        e->data_off = read_u32(e->base + offset + 40);
+        e->data_size = read_u32(e->base + offset + 44);
+        e->found = true;
+        // Keep scanning: a later LC_DYLD_EXPORTS_TRIE takes precedence.
+    }
+    return true;
+}
+
+hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
+                                            size_t *out_offset, size_t *out_size) {
+    if (!image || !out_offset || !out_size) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    export_trie_ctx_t e;
+    e.base = (const uint8_t *)image;
+    e.data_off = 0;
+    e.data_size = 0;
+    e.found = false;
+    e.malformed = false;
+
+    hk_macho_status_t status =
+        hk_macho_iterate_load_commands(image, size, export_trie_visit, &e);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (e.malformed) {
+        return HK_MACHO_MALFORMED;
+    }
+    if (!e.found || e.data_size == 0) {
+        return HK_MACHO_NOT_FOUND;  // an empty trie is "no exports", not an error
+    }
+    if (e.data_off > size || e.data_size > size - e.data_off) {
+        return HK_MACHO_MALFORMED;
+    }
+    *out_offset = e.data_off;
+    *out_size = e.data_size;
+    return HK_MACHO_OK;
+}
