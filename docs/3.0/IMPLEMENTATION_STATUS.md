@@ -1724,6 +1724,8 @@ device-verified.
 | Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
 | Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts | this commit — see below |
 | Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
+| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end | this commit — see below |
+| Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey this commit |
 | ObjC engine | not started | |
 | Memory engine | not started | |
 | Swift engine | not started | native/hk_swift.c exists (2.x), a reuse candidate |
@@ -1864,6 +1866,46 @@ selecting which bytes (and bits) matter; revalidation refusing a changed
 region; store refusal and size-mismatch both giving `NONE` with the region
 untouched; and argument validation. `make test` and `./build.sh all` (all 4
 lanes) clean.
+
+**Memory engine wired into the runtime**, this iteration
+(`Sources/Engines/HKMemoryVtable.{h,c}`) — the second engine wired in, and the
+point is generality: the same vtable-adapter pattern that carried the rebind
+engine also carries the memory engine and a *different* target kind
+(`HK_TARGET_MEMORY_PATCH`), driving the plan's memory-target path (the
+deep-copied `expected_bytes`/`replacement_bytes`/`mask`) end to end for the
+first time. Same file-scoped environment and stated ceiling as the rebind
+adapter; preserves the two-phase invariant. The environment supplies what the
+spec cannot: the writer, and for an image-relative target the image base (a
+stand-in for the unbuilt catalog's selector-to-base lookup; absolute targets
+need neither). 3 host tests (`test-memory-wired`, ASan+UBSan clean): an
+absolute-address patch through the full lifecycle with the report carrying a
+real `HK_ARTIFACT_MEMORY_PATCH` (original bytes, request_id stamped to the
+hook); an image-relative patch resolving base+offset to the right region; and
+a precondition failure surfacing honestly at prepare (`FAILED_SAFE`, plan
+`FAILED`, region untouched).
+
+**Swift engine — survey finding (why it is not the clean win the others
+were).** The mission prioritized the Swift vtable engine; surveying first, as
+required, changed the plan. The Swift *mechanism already exists* in
+`native/hk_swift.c` — it parses class metadata, resolves a vtable slot by name
+(`hk_swift_find_slot` via `hk_swift_resolve`), and patches it with PAC handling
+— and it is already host-tested by `tests/test_swift_abi.c` against a
+hand-built metadata blob. But unlike the rebind/memory engines (pure
+arch-neutral C), `hk_swift.c` is `#if arm64` **device code**, host-runnable
+only through `test_swift_abi.c`'s bespoke harness (it `#include`s the `.c` and
+injects PAC-shim macros and a fake `hk_native_patch_memory`). It also fuses
+resolve+patch in one call (`hk_swift_hook_slot` captures the original as it
+patches), so a true two-phase adapter (prepare captures, commit writes, per
+invariants #3/#5) would need `hk_swift.c` to expose a slot-address/read
+primitive it does not, or a duplication of its slot logic. Forcing an adapter
+now would mean duplicating tricky device code, or editing arch-gated
+`hk_swift.c` while another agent is actively committing to `native/` — exactly
+what the survey-for-reuse and avoid-conflict rules steer away from. Recorded as
+deferred with a concrete unblock (a small `hk_swift_slot_address(cls, index)`
+primitive, best added in coordination) rather than faked or forced; the memory
+wiring above was taken as the clean adjacent Milestone 6 win instead.
+
+`make test` and `./build.sh all` (all 4 lanes) verified clean.
 
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
