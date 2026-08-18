@@ -78,6 +78,27 @@ bool hk_arm64_is_terminator(uint32_t insn) {
     return false;
 }
 
+bool hk_arm64_insn_is_trap(uint32_t insn) {
+    // BRK #imm16:  1101 0100 001 imm16 00000  -> 0xD4200000 | (imm16 << 5)
+    // HLT #imm16:  1101 0100 010 imm16 00000  -> 0xD4400000 | (imm16 << 5)
+    // UDF #imm16:  0000 0000 0000 0000 imm16  -> 0x00000000 | imm16
+    // (dyld's shared-cache trap stubs use BRK #1 = 0xD4200020; __builtin_trap
+    // on arm64 compiles to BRK #1 as well.)
+    if((insn & 0xFFE0001Fu) == 0xD4200000u) {
+        return true;    // BRK
+    }
+
+    if((insn & 0xFFE0001Fu) == 0xD4400000u) {
+        return true;    // HLT
+    }
+
+    if((insn & 0xFFFF0000u) == 0u) {
+        return true;    // UDF
+    }
+
+    return false;
+}
+
 // RETAA / RETAB authenticate then return; BRAA/BRAB and their Z forms are
 // authenticated indirect branches. These are exactly the shapes arm64e
 // micro-thunks use.
