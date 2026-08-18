@@ -426,7 +426,7 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
 | Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | this commit — see below |
 | Ownership ledger | not started | |
-| Original slots | not started | |
+| Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | this commit — see below |
 | Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
@@ -906,6 +906,60 @@ remain undefined — there is still no runtime- or process-level
 accumulation, only per-report. Aggregating a runtime's committed plans'
 artifacts is its own task, gated on the runtime tracking committed plans at
 all (it doesn't yet).
+
+**Original slots + installed handles**, this iteration
+(`Sources/Core/HKInstalled.{h,c}`): the four public accessors that were
+declared-but-undefined since Milestone 3 (`hk_hook_original_slot`,
+`hk_original_slot_load`, `hk_hook_installed_handle`,
+`hk_installed_hook_copy_result`) are now real. The requirement that shaped
+the whole design is the survival rule from `PUBLIC_C_ABI.md`: "Active
+installation data and original slots that live replacements still use must
+survive runtime wrapper release." A replacement keeps calling through its
+original slot long after the `hk_plan_t`/`hk_runtime_t`/`hk_hook_t` wrappers
+are gone, so the installed record **cannot** be owned by any of them. It is
+allocated with process lifetime and retained in a process-global registry,
+intentionally never freed in production. `hk_installed_reset_for_testing`
+frees the registry so host tests stay leak-clean under ASan; production has
+no such call. This is the honest way to model an intentional
+process-lifetime retention without leaving ASan unable to distinguish it
+from a real leak — the leak is real, it is just deliberate, and the test-only
+reset draws that line explicitly.
+
+Wiring: `hk_plan_commit`, when a hook goes ACTIVE and its engine published
+an original (a new `published_original` output field on the sink, reset per
+hook so hook N never inherits hook N-1's — the same per-hook-reset
+discipline the artifact `request_id` already follows), generates an
+`installed_id`, stamps it plus `original_available` onto the hook's result
+*before* snapshotting that result into the record, and links the record onto
+the hook. OOM retaining the record is handled honestly: the mutation still
+happened, but the optimistically-set `installed_id`/`original_available` are
+rolled back because we cannot advertise a slot we failed to allocate.
+
+Deliberate narrow scope, stated: an installed record is created **only** for
+an active hook whose engine published an original — an active hook with no
+original does not yet get an installed handle. This kept the blast radius to
+zero for the existing `test-plan-commit` (its `fake_rebind` publishes no
+original, so it creates no records and leaks nothing, needing no edits). A
+new `fake_rebind_original` engine (separate, so it does not perturb other
+tests) publishes a fixed nonzero sentinel original and also records it on its
+artifact's `original_pointer` for inspectability. The original slot is
+atomic (`_Atomic(void *)`) from the start because a future re-hook can
+republish under a concurrent reader on the replacement's hot path, even
+though no update path exists yet. Linking an artifact to its installed
+record (the artifact's `installed_id` is still zero — artifacts are recorded
+inside `commit_one`, before the record exists) is left as a stated follow-up.
+
+5 host tests (`test-installed-original`, all clean under
+`-fsanitize=address,undefined`): an active hook gets a handle + slot loading
+the published pointer, with `installed_id`/`original_available` wired onto
+the result and the handle's stored snapshot matching; the **survival** test
+— capture the slot, release plan then runtime, and the slot still loads the
+right pointer; an engine that publishes no original gives no slot/handle and
+`original_available` stays false; a non-active (NO_ROUTE) hook gets neither;
+and NULL tolerance across all four accessors plus a direct record with a NULL
+out-param. Every HKPlan.c-linking Makefile target gained `HKInstalled.c`
+(the commit path calls into it); `make test` and `./build.sh all` (all 4
+lanes) verified clean.
 
 ## Milestone 5 — Image catalog and resolvers
 **State: not started.**

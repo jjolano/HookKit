@@ -9,6 +9,7 @@
 #include "../../Headers/HookKit/HookKitPlan.h"
 #include "../../Headers/HookKit/HookKitRuntime.h"
 #include "HKEngineInternal.h"
+#include "HKInstalled.h"
 
 // Individually heap-allocated, never stored inline in a growable array.
 // hk_plan_t hands out `const hk_domain_t *`/`hk_domain_t *` pointers to
@@ -71,6 +72,13 @@ struct hk_hook {
     // found eligible, rather than re-searching (and potentially finding a
     // different one if the registry changed between analyze and prepare).
     const hk_engine_vtable_t *matched_engine;
+
+    // Set by hk_plan_commit when this hook goes ACTIVE and its engine
+    // published an original. NOT owned: points into the process-global
+    // installed registry (HKInstalled.h), which outlives this hook -- that
+    // survival is the whole point (a live replacement loads through the
+    // slot long after the plan/hook are released).
+    hk_installed_hook_t *installed;
 
     hk_hook_result_t result;
 };

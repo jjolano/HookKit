@@ -53,6 +53,38 @@ static const hk_engine_vtable_t fake_rebind_engine = {
     .commit_one = fake_rebind_commit_one,
 };
 
+// Like fake_rebind, but also publishes an original pointer -- a real rebind
+// always preserves the prior import value the replacement can call through.
+// Separate from fake_rebind so tests that don't care about installed records
+// don't accumulate them. The published pointer is a fixed nonzero sentinel
+// (a stand-in for a real code address, same spirit as the fake slot address
+// above); FAKE_ORIGINAL below is what a test asserts came back out of the slot.
+#define FAKE_ORIGINAL_PTR ((void *)0xC0DE4444)
+static inline hk_mutation_state_t fake_rebind_original_commit_one(const hk_hook_spec_t *spec,
+                                                                  hk_artifact_sink_t *sink) {
+    (void)spec;
+    hk_artifact_t a;
+    memset(&a, 0, sizeof(a));
+    a.struct_size = sizeof(a);
+    a.struct_version = HK_ABI_VERSION_3_0;
+    a.kind = HK_ARTIFACT_IMPORT_SLOT;
+    a.state = HK_ARTIFACT_COMMITTED;
+    a.effects = HK_EFFECT_IMPORT_MUTATION;
+    a.engine_id.data = "fake-rebind-original";
+    a.engine_id.length = strlen("fake-rebind-original");
+    a.import_slot_address = 0xF00D2000;
+    a.original_pointer = FAKE_ORIGINAL_PTR;  // inspectable record of the preserved original
+    a.mechanically_reversible = true;
+    (void)hk_artifact_sink_record(sink, &a);
+    sink->published_original = FAKE_ORIGINAL_PTR;  // the live pointer the slot will hold
+    return HK_MUTATION_COMPLETE;
+}
+static const hk_engine_vtable_t fake_rebind_original_engine = {
+    .describe = fake_rebind_describe,  // same eligibility as fake_rebind
+    .prepare_one = fake_rebind_prepare_one,
+    .commit_one = fake_rebind_original_commit_one,
+};
+
 // Same eligibility shape as fake_rebind_engine, but always fails to
 // prepare -- for testing hk_plan_prepare's failure path without needing
 // mutable global test state (a second always-failing engine is simpler

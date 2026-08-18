@@ -27,6 +27,7 @@
 
 #include "HKIDs.h"
 #include "HKArtifactLedger.h"
+#include "HKInstalled.h"
 #include "HKPlanInternal.h"
 #include "HKReportInternal.h"
 #include "HKRuntimeInternal.h"
@@ -836,7 +837,8 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
     sink.ledger = ledger;
     sink.plan_id = plan->plan_id;
     sink.runtime_owner_id = hk_runtime_owner_id(plan->runtime);
-    sink.request_id = (hk_id_t){0};  // set per hook below
+    sink.request_id = (hk_id_t){0};    // set per hook below
+    sink.published_original = NULL;    // reset per hook below
 
     size_t attempted = 0, active = 0, failed = 0;
 
@@ -851,6 +853,7 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         attempted++;
 
         sink.request_id = hook->hook_id;  // this hook is the artifact's originating request
+        sink.published_original = NULL;   // each hook's engine publishes its own, or none
         hk_mutation_state_t mutation = (hook->matched_engine && hook->matched_engine->commit_one)
             ? hook->matched_engine->commit_one(&hook->spec, &sink)
             : HK_MUTATION_UNKNOWN;  // matched_engine gone, or never implemented commit_one -- an
@@ -862,6 +865,26 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         case HK_MUTATION_COMPLETE:
             out->outcome = HK_OUTCOME_ACTIVE;
             active++;
+            // If the engine preserved an original, retain it in a
+            // process-lifetime installed record so a live replacement can
+            // load through it after this plan/hook is released. Set the
+            // result's installed_id/original_available BEFORE snapshotting
+            // it into the record, so the stored snapshot carries them too.
+            if (sink.published_original) {
+                hk_id_t installed_id = hk_id_generate();
+                out->installed_id = installed_id;
+                out->original_available = true;
+                hk_installed_hook_t *rec =
+                    hk_installed_record_create(installed_id, sink.published_original, out);
+                if (rec) {
+                    hook->installed = rec;
+                } else {
+                    // OOM retaining the handle: the mutation still happened,
+                    // but we cannot advertise a slot we failed to allocate.
+                    out->installed_id = (hk_id_t){0};
+                    out->original_available = false;
+                }
+            }
             break;
         case HK_MUTATION_NONE:
             out->outcome = HK_OUTCOME_FAILED_SAFE;
@@ -904,10 +927,26 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
     return HK_STATUS_OK;
 }
 
-// hk_hook_original_slot / hk_original_slot_load / hk_hook_installed_handle
-// / hk_installed_hook_copy_result are declared in HookKitPlan.h but not
-// implemented here yet -- they describe state that doesn't exist before a
-// real commit happens (Milestone 4's "Original slots" work, and the
-// engines that would actually install something), so there is nothing
-// honest to return today. Left undefined rather than given a placeholder
-// body that would compile but lie.
+// Original-slot / installed-handle accessors. hk_original_slot_load and
+// hk_installed_hook_copy_result live in HKInstalled.c (they need only the
+// installed-record internals); the two below need struct hk_hook, so they
+// live here. All four were previously undefined -- the state they describe
+// (a process-lifetime installed record) did not exist until hk_plan_commit
+// began creating one for an active hook whose engine published an original.
+
+// The hook's original slot, or NULL if it has no retained original (never
+// went ACTIVE, or its engine published none). The returned slot points into
+// the process-global installed registry and stays valid after this hook /
+// plan / runtime is released -- the whole reason that registry exists.
+const hk_original_slot_t *hk_hook_original_slot(const hk_hook_t *hook) {
+    if (!hook || !hook->installed || !hook->installed->has_original) {
+        return NULL;
+    }
+    return &hook->installed->slot;
+}
+
+// The hook's installed handle, or NULL if it has no retained installation.
+// Same process-lifetime survival as the slot above.
+const hk_installed_hook_t *hk_hook_installed_handle(const hk_hook_t *hook) {
+    return hook ? hook->installed : NULL;
+}

@@ -57,6 +57,14 @@ typedef struct {
     hk_id_t plan_id;
     hk_id_t runtime_owner_id;
     hk_id_t request_id;
+
+    // Engine OUTPUT for the current hook: the original/continuation pointer
+    // it preserved, or NULL if it produced none. The commit loop resets
+    // this to NULL before each hook and reads it after commit_one to build
+    // the hook's original slot (HKInstalled.h). Distinct from the artifact
+    // channel: the artifact is the inspectable record, this is the live
+    // pointer a replacement will actually load through.
+    void *published_original;
 } hk_artifact_sink_t;
 
 // Stamps the contextual IDs onto a copy of *artifact (overwriting any the
