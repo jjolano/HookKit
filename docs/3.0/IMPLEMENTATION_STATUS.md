@@ -1592,6 +1592,65 @@ constant against Apple's vendored definitions.
 need its VM offsets translated to file offsets first; that is not done rather
 than guessed at.
 
+### Milestone 5 device conformance — FIRST DEVICE-VERIFIED RESULT
+
+Everything above this line was verified against synthetic fixtures only. This
+section is the first work in the HK3.0 rewrite verified against binaries
+nobody here constructed, and against an independent tool.
+
+**Device**: iPhone 7 (`iPhone9,3`, T8010), iOS 15.8.3 build 19H386, Darwin
+21.6.0, reached over SSH. **arm64, not arm64e** — which bounds what this run
+can claim (see the gaps below). The device was touched **read-only**: four
+binaries were copied off it, nothing was installed, modified, or removed.
+
+**Harness**: `Tools/conformance/macho_conformance.c` runs every Milestone 5
+resolver over a real image and prints what it found. It is a tool, not a test —
+the specimens are third-party binaries and are deliberately not committed.
+
+**Specimens** (real, from the device): `liblz4.1.dylib` and `libz-ng.2.dylib`
+(Procursus dylibs), `uicache` (a PIE executable), and HookKit's own installed
+framework (fat: arm64 + arm64e).
+
+**Result: every parser handled every specimen.** Concretely, for
+`liblz4.1.dylib`: header, `__TEXT`/`__LINKEDIT`, 7 sections, `LC_SYMTAB`
+(104 syms), a 1744-byte export trie, 15 indirect symbols yielding 8 import
+slots, and a 176-byte chained-fixups payload with 8 imports and 8 bind sites.
+For `uicache`: 29 load commands, 15 sections, 62 chained imports, 117 binds.
+
+**Independent ground truth** (theos' Mach-O `nm`/`otool`, not my code):
+
+| Claim | Mine | `nm`/`otool` |
+|---|---|---|
+| `_LZ4_compress_default` address | `0xaa28` (via export trie) | `0000000000aa28 T` |
+| `liblz4` nsyms | 104 | 104 |
+| `uicache` nsyms | 64 | 64 |
+| `liblz4` sections | 7 | 7 |
+
+**Cross-parser corroboration**, which is arguably stronger than either check
+alone: the LC_DYSYMTAB path and the chained-fixups path are entirely separate
+parsers reading entirely different structures, and they agree — on `liblz4`
+both report 8 imports with `___chkstk_darwin` first; on HookKit's own arm64
+slice both report `___objc_personality_v0` first. Neither was written with the
+other's output in mind.
+
+**Confirmed by real data, not assumed:** shipped binaries are **fat**, and the
+library correctly refuses them with `HK_MACHO_FAT_UNSUPPORTED` while the tool
+selects a slice. That division was a design choice made against fixtures; a
+real framework confirms it is the right one.
+
+**Gaps this run does NOT close, stated because the device bounds them:**
+- **arm64e is unverified.** An iPhone 7 is arm64. The `ARM64E`,
+  `ARM64E_USERLAND` and `ARM64E_USERLAND24` chained-pointer formats were
+  therefore never exercised by real data, nor was PAC signing. Those need an
+  A12-or-later device.
+- **Loaded-layout traversal is unverified.** Chain traversal ran over
+  file-layout images and succeeded, but only because these binaries' VM and
+  file offsets coincide for the fixup-bearing segments. That is common, not
+  guaranteed, and it is not the same as running against a live mapped image.
+- The dyld populator and shared-cache resolver remain unbuilt and untested;
+  shared-cache dylibs are not files on disk, so they cannot be pulled this way
+  at all.
+
 ### Milestone 5 stock-take — what is host-testable vs device-gated
 
 Taken deliberately, because the loop is approaching a real boundary and it is
