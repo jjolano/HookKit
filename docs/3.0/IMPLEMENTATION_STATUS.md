@@ -366,10 +366,21 @@ this required, so re-ran `make test` and `./build.sh all` afterward to
 restore and reconfirm the full green baseline (64/64 PASS, 4 `.deb`s) —
 not assumed still valid after the worktree detour.
 
-Remaining 5 of the spec's 6 named baselines (`v1.0.1`, `v2.1.1`, `v2.2.5`,
-`v2.3.0`, `v2.4.0`) not yet extracted — same worktree-build-extract
-recipe, straightforward but time-costly (a full framework build per tag);
-left for a future iteration rather than rushed through this one.
+Remaining named baselines extracted one per iteration by the same
+worktree-build-extract recipe. **`v2.4.0` done** (`Tests/LegacyABI/Baselines/v2.4.0.json`,
+schema-valid): current/compat `2.4.0`, the linker-enforced `HKSubstitutor`
+export allowlist (identical to v2.5.0 — that boundary is stable across the
+release), a distinct `Headers/HookKit.h` checksum. One concrete recipe note
+for the remaining tags, learned here: pre-v2.5.0 tags predate the Makefile's
+lane-based ARCHS override, so a plain `make HOOKKIT_LANE=rootful-modern` still
+builds the armv7/armv7s slices and fails at link — build them with an explicit
+`ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0` and the modern
+`SDKBINPATH` instead. Worktree removed cleanly afterward; the extract ran from
+the main tree against the worktree binary via `--repo-root`, so it did not
+depend on `Tools/abi/extract_abi.py` existing in the old tag. Still to do:
+`v1.0.1`, `v2.1.1`, `v2.2.5`, `v2.3.0` (3 remain after this — v2.4.0 was the
+4th of 5). The older v1/v2.1/v2.2 tags may need more build coaxing (they
+predate more of the toolchain setup); assessed per tag.
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same
