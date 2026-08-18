@@ -377,10 +377,13 @@ builds the armv7/armv7s slices and fails at link — build them with an explicit
 `ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:14.0` and the modern
 `SDKBINPATH` instead. Worktree removed cleanly afterward; the extract ran from
 the main tree against the worktree binary via `--repo-root`, so it did not
-depend on `Tools/abi/extract_abi.py` existing in the old tag. Still to do:
-`v1.0.1`, `v2.1.1`, `v2.2.5`, `v2.3.0` (3 remain after this — v2.4.0 was the
-4th of 5). The older v1/v2.1/v2.2 tags may need more build coaxing (they
-predate more of the toolchain setup); assessed per tag.
+depend on `Tools/abi/extract_abi.py` existing in the old tag. **`v2.3.0` also done** (`Tests/LegacyABI/Baselines/v2.3.0.json`, schema-valid,
+same build recipe, versions `2.3.0`, same export allowlist). Half the named
+set is now extracted (v2.5.0, v2.4.0, v2.3.0); **3 remain**: `v2.2.5`,
+`v2.1.1`, `v1.0.1`. The older v1/v2.1/v2.2 tags may need more build coaxing
+(they predate more of the toolchain setup); assessed per tag, and a tag that
+genuinely will not build with the current toolchain is recorded as such rather
+than chased through many failed builds.
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same
