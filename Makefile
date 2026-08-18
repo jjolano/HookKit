@@ -119,6 +119,18 @@ check-exports:
 check-compat:
 	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT)$(ECHO_END)
 
+# Milestone 5 conformance run against a REAL Mach-O image. Deliberately NOT
+# part of `make test`: it needs a specimen pulled off a device, and specimens
+# are third-party binaries that are not committed. See the header of
+# Tools/conformance/macho_conformance.c for how to obtain one.
+#
+#   make conformance IMAGE=/path/to/libfoo.dylib
+#   make conformance IMAGE=/path/to/libfoo.dylib SYMBOLS="malloc free"
+.PHONY: conformance
+conformance:
+	$(ECHO_NOTHING)test -n "$(IMAGE)" || { echo "usage: make conformance IMAGE=<mach-o> [SYMBOLS=\"a b\"]"; exit 2; }; \
+	mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O1 -o $(THEOS_OBJ_DIR)/macho_conformance Tools/conformance/macho_conformance.c Sources/Resolvers/*.c && $(THEOS_OBJ_DIR)/macho_conformance "$(IMAGE)" $(SYMBOLS)$(ECHO_END)
+
 # Host-side test aggregate: builds and runs each suite in sequence, stopping
 # at the first failure (no -k).
 .PHONY: test
