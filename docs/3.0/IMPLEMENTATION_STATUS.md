@@ -1723,6 +1723,7 @@ device-verified.
 |---|---|---|
 | Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
 | Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts | this commit — see below |
+| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
 | ObjC engine | not started | |
 | Memory engine | not started | |
 | Swift engine | not started | native/hk_swift.c exists (2.x), a reuse candidate |
@@ -1820,6 +1821,49 @@ pointers and a `request_id` stamped to the hook; an absent symbol is routed by
 the capability-only router but refused at prepare (`FAILED_SAFE`, plan
 `FAILED`), with the image left untouched; and no environment set fails cleanly
 rather than crashing. `make test` and `./build.sh all` (all 4 lanes) clean.
+
+**Memory-patch engine**, this iteration
+(`Sources/Engines/HKMemoryEngine.{h,c}`) — the second Milestone 6 engine,
+built to the same shape as the rebind engine: two phases, the write behind a
+device seam, so every decision is host-testable and only the store is
+device-only. It writes a controlled byte sequence over a target region
+(`HK_TARGET_MEMORY_PATCH`).
+
+The value is the two checks that bracket the write, both of which exist so a
+patch cannot silently corrupt the wrong thing. First, the caller-supplied
+**precondition** (`expected_bytes` under `expected_mask`, spec 6.19): prepare
+refuses if the region does not already hold what the caller asserts — a patch
+aimed at a wrong address, or at a region already modified, fails loudly rather
+than clobbering it. The mask is comparison-only and works at bit granularity
+(the tests exercise a whole ignored byte and a compared-nibble); replacement
+bytes are always written in full. Second, **revalidation** before the write
+(invariant #3): commit re-reads the region and refuses if it changed since
+prepare — e.g. another consumer touched it — leaving their value intact.
+
+**Both checks verified to have teeth:** removing the precondition makes the
+wrong-region test abort; removing the revalidation makes the changed-region
+test abort. The engine records an `HK_ARTIFACT_MEMORY_PATCH` carrying the
+original bytes inline (for reversal) and marked mechanically reversible — a
+byte patch is a plain store to undo, unlike a relocating inline hook, which is
+why that flag lives per artifact rather than per engine.
+
+Reuse survey: 2.x's `hk_native_patch_memory` (`native/hk_native.c`) is the
+device store (VM-protection change + write, arm64e handling) — the reference
+for the seam, not reusable, since it is the store itself and carries none of
+the precondition/revalidation/artifact contract. On device it is exactly what
+backs the seam. Mutation state is `NONE`/`COMPLETE` for a single region; a
+device store that can write a region partially must report `PARTIAL`, noted at
+the seam. **Not device-verified.** Not yet wired into the runtime (the rebind
+adapter is the pattern; a memory adapter needs image-relative address
+resolution, which leans on the still-unbuilt image catalog).
+
+6 host tests (`test-memory-engine`, clean under
+`-fsanitize=address,undefined`): prepare/commit round-trip with the artifact
+carrying the original bytes; precondition refusing a wrong region; the mask
+selecting which bytes (and bits) matter; revalidation refusing a changed
+region; store refusal and size-mismatch both giving `NONE` with the region
+untouched; and argument validation. `make test` and `./build.sh all` (all 4
+lanes) clean.
 
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
