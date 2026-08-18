@@ -1048,8 +1048,10 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 |---|---|---|
 | Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | this commit — see below |
 | dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
-| Export/import resolvers | not started | needs Mach-O symbol-table / export-trie parsing |
-| Private-symbol resolver | not started | |
+| Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | this commit — see below |
+| Export trie resolver | not started | the proper path for *exported* symbols; separate parser (ULEB128 trie) |
+| Import resolver | not started | |
+| Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
 | ObjC / Swift resolvers | not started | |
 
@@ -1083,6 +1085,70 @@ disjoint sub-selectors *and* dedup of overlapping ones, early-stop via the
 visitor, generation bumping, path deep-copy stability (mutate the source
 buffer after add, catalog copy intact), and NULL tolerance across every
 entry point. `make test` and `./build.sh all` (all 4 lanes) verified clean.
+
+**Symbol table (nlist) search**, this iteration
+(`Sources/Resolvers/HKSymbolTable.{h,c}`) — the search mechanism behind the
+private-symbol resolver.
+
+*Reuse survey first, as the mission required.* `native/hk_symbols.c` already
+walks a Mach-O symbol table in `hk_native_find_symbol`, but the entire file is
+`#if defined(__arm64__)` and its walk is fused with `mmap`/`dlsym`/PAC signing/
+slide application, with a single hardcoded name rule (`strcmp`, or skip one
+leading underscore). None of it can compile or run on this host, and none of
+it implements HK3.0's convention/visibility model. So the new file is not a
+duplicate but the *pure core* the 2.x version never separated out: a function
+over a **caller-supplied table view** (nlist array + string table), returning
+the symbol's **unslid** `n_value` plus its `n_sect`. Slide application and
+PAC signing stay with the caller — `n_sect` is returned precisely so the
+device side can look up section flags to decide code-vs-data, exactly as 2.x
+already does. That separation is the only reason any of this is host-testable.
+The 2.x path is untouched and still serves the 2.x runtime during migration.
+
+Real correctness content, not a transcription: **STAB rejection** — any entry
+with an `N_STAB` bit is debug information whose fields do not carry symbol
+meaning, and two STAB types (`N_BNSYM` 0x2e, `N_ENSYM` 0x4e) satisfy
+`(n_type & N_TYPE) == N_SECT` *by coincidence*, so the STAB check must come
+first and stand on its own (the test asserts that coincidence explicitly).
+**Visibility** — `EXPORTED_ONLY` requires the `N_EXT` bit; `ANY` and
+`PRIVATE_ALLOWED` deliberately behave identically for now and the header says
+so rather than faking a difference that only becomes observable once an
+export-trie resolver exists to be preferred instead. **Conventions** —
+`MACHO_EXACT` compares byte-for-byte, while C / C++-mangled / Swift-mangled
+also accept the table's leading-underscore form (all three acquire Mach-O's
+underscore), honoring the ABI's "pass either form". **Bounds safety** — every
+string read is bounded by the caller-declared `strings_size`, so a truncated
+or unterminated string table cannot cause a read past the buffer.
+
+`hk_macho_nlist64_t` is declared locally rather than included from
+`<mach-o/nlist.h>` so this builds on a non-Apple host; the test
+`_Static_assert`s its size (16) and every field offset, so divergence from
+Apple's `struct nlist_64` cannot pass silently.
+
+12 host tests (`test-symbol-table`, clean under
+`-fsanitize=address,undefined`). The bounds-safety test was **verified to have
+teeth**, not assumed: swapping the bounded comparison for a naive `strcmp`
+makes ASan report a `heap-buffer-overflow` (READ of size 6) on the exactly
+sized, deliberately unterminated table, while the real implementation passes —
+so that test genuinely catches the bug it claims to. Also covered: both
+boundary cases (unterminated vs. NUL-as-final-byte), bare/underscored lookup,
+`MACHO_EXACT` refusing to normalize, mangled conventions normalizing,
+`EXPORTED_ONLY` rejecting a local symbol, undefined/absolute/indirect/
+zero-address entries rejected, deterministic first-match-in-table-order
+(including when an earlier entry is skipped as invalid), out-of-range and zero
+`n_strx`, and NULL/empty tolerance.
+
+**Not implemented, deliberately not guessed at**: `hk_symbol_alias_policy_t`
+(`ALIAS_FOLLOW` needs a second pass and a defined preference order among
+same-address names) and `interior_address_permitted` — a caller's alias policy
+is simply not consulted yet, stated in the header rather than approximated.
+
+**Device-only work this does NOT cover** (and cannot, honestly, from this
+host): finding `LC_SYMTAB` in a real mapped image to build the view, the dyld
+catalog populator, the shared-cache resolver, and PAC signing of results.
+Those need SSH to the jailbroken device to build and verify; nothing here is
+device-verified.
+
+`make test` and `./build.sh all` (all 4 lanes) verified clean.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
 **State: not started.** Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
