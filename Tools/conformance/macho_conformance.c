@@ -111,6 +111,141 @@ static bool bind_cb(void *ctx, const hk_chained_bind_t *b) {
     return true;
 }
 
+
+// ---- loaded-layout mode -------------------------------------------------
+//
+// The file-layout run leaves one thing unproven: chain traversal and the
+// __LINKEDIT translations were only ever exercised on file offsets, and they
+// happened to work because most binaries' VM and file offsets coincide for
+// the segments that matter. That is common, not guaranteed. This mode places
+// each segment at its vmaddr the way dyld would, then runs the LOADED code
+// paths -- so the two layouts are genuinely different and must still agree.
+
+typedef struct { uint64_t base_vmaddr; uint64_t max_end; bool found_text; } span_ctx_t;
+
+static bool span_cb(void *ctx, uint32_t i, const hk_macho_segment_t *s) {
+    (void)i;
+    span_ctx_t *sp = (span_ctx_t *)ctx;
+    if (s->filesize == 0) {
+        return true;  // __PAGEZERO and friends contribute no content
+    }
+    if (s->fileoff == 0 && !sp->found_text) {
+        sp->base_vmaddr = s->vmaddr;  // the segment holding the mach header
+        sp->found_text = true;
+    }
+    uint64_t end = s->vmaddr + s->vmsize;
+    if (end > sp->max_end) { sp->max_end = end; }
+    return true;
+}
+
+typedef struct {
+    const uint8_t *file; size_t file_size;
+    uint8_t *mapped; uint64_t span; uint64_t base;
+    int placed;
+} map_ctx_t;
+
+static bool map_cb(void *ctx, uint32_t i, const hk_macho_segment_t *s) {
+    (void)i;
+    map_ctx_t *m = (map_ctx_t *)ctx;
+    if (s->filesize == 0 || s->vmaddr < m->base) { return true; }
+    uint64_t off = s->vmaddr - m->base;
+    if (off + s->filesize > m->span) { return true; }
+    if (s->fileoff + s->filesize > (uint64_t)m->file_size) { return true; }
+    memcpy(m->mapped + off, m->file + s->fileoff, (size_t)s->filesize);
+    m->placed++;
+    return true;
+}
+
+typedef struct { uint64_t base; int diverging; int total; } divergence_ctx_t;
+static bool divergence_cb(void *ctx, uint32_t i, const hk_macho_segment_t *s) {
+    (void)i;
+    divergence_ctx_t *d = (divergence_ctx_t *)ctx;
+    if (s->filesize == 0 || s->vmaddr < d->base) { return true; }
+    d->total++;
+    if ((s->vmaddr - d->base) != s->fileoff) {
+        d->diverging++;
+        printf("     seg %-12s vm_off=0x%-8llx fileoff=0x%-8llx  DIFFER\n",
+               s->segname, (unsigned long long)(s->vmaddr - d->base),
+               (unsigned long long)s->fileoff);
+    }
+    return true;
+}
+
+static void run_loaded(const uint8_t *img, size_t size, int argc, char **argv) {
+    span_ctx_t sp = {0, 0, false};
+    if (hk_macho_iterate_segments(img, size, span_cb, &sp) != HK_MACHO_OK || !sp.found_text) {
+        printf("   [loaded] could not determine VM span\n");
+        return;
+    }
+    uint64_t span = sp.max_end - sp.base_vmaddr;
+    if (span == 0 || span > (64u << 20)) {
+        printf("   [loaded] implausible span 0x%llx\n", (unsigned long long)span);
+        return;
+    }
+    size_t alloc = (size_t)((span + 0x3fff) & ~(uint64_t)0x3fff);
+    uint8_t *mapped = (uint8_t *)aligned_alloc(0x4000, alloc);
+    if (!mapped) { printf("   [loaded] out of memory\n"); return; }
+    memset(mapped, 0, alloc);
+
+    map_ctx_t m = { img, size, mapped, span, sp.base_vmaddr, 0 };
+    hk_macho_iterate_segments(img, size, map_cb, &m);
+    // Does the mapped layout actually DIFFER from the file layout? If every
+    // segment lands at the same offset either way, this mode re-tests the file
+    // path under another name and proves nothing. Report it rather than assume.
+    { divergence_ctx_t d = {sp.base_vmaddr, 0, 0};
+      hk_macho_iterate_segments(img, size, divergence_cb, &d);
+      printf("   [loaded] layout diverges from file in %d of %d segments\n",
+             d.diverging, d.total); }
+    uintptr_t slide = (uintptr_t)mapped - (uintptr_t)sp.base_vmaddr;
+    printf("   [loaded] base_vmaddr=0x%llx span=0x%llx segments placed=%d\n",
+           (unsigned long long)sp.base_vmaddr, (unsigned long long)span, m.placed);
+
+    hk_symbol_table_view_t lv;
+    hk_macho_status_t ls = hk_macho_symtab_view_for_loaded_image(mapped, alloc, slide, &lv);
+    printf("   [loaded] symtab:   status=%d nsyms=%u strsize=%zu\n",
+           ls, lv.nlist_count, lv.strings_size);
+
+    const void *ltrie = NULL; size_t ltrie_size = 0;
+    printf("   [loaded] trie:     status=%d size=%zu\n",
+           hk_macho_export_trie_for_loaded_image(mapped, alloc, slide, &ltrie, &ltrie_size),
+           ltrie_size);
+
+    hk_import_tables_t lt;
+    hk_import_status_t lis = hk_import_tables_from_loaded_image(mapped, alloc, slide, &lt);
+    slot_tally_t lslots = {0, ""};
+    if (lis == HK_IMPORT_OK && lt.indirect_symbols) {
+        hk_import_slots_iterate(mapped, alloc, &lt, slot_cb, &lslots);
+    }
+    printf("   [loaded] slots:    status=%d n=%d  %s\n", lis, lslots.count, lslots.first);
+
+    const void *cblob = NULL; size_t cblob_size = 0;
+    if (hk_macho_chained_fixups_for_loaded_image(mapped, alloc, slide, &cblob, &cblob_size)
+        == HK_MACHO_OK) {
+        hk_chained_fixups_t cf;
+        if (hk_chained_fixups_parse(cblob, cblob_size, &cf) == HK_CHAINED_OK) {
+            bind_tally_t b = {0, 0, 0};
+            hk_chained_status_t bs =
+                hk_chained_fixups_iterate_binds(&cf, mapped, alloc, bind_cb, &b);
+            printf("   [loaded] binds:    status=%d n=%d (first ord=%u @0x%llx)\n",
+                   bs, b.count, b.first_ordinal, (unsigned long long)b.first_off);
+        }
+    }
+
+    hk_symbol_sources_t lsrc;
+    if (hk_symbol_sources_from_loaded_image(mapped, alloc, slide, &lsrc) == HK_RESOLVE_OK) {
+        for (int i = 2; i < argc; i++) {
+            hk_symbol_resolution_t r;
+            hk_resolve_status_t st = hk_resolve_symbol(&lsrc, argv[i], HK_SYMBOL_NAME_C,
+                                                       HK_SYMBOL_VISIBILITY_ANY, &r);
+            // raw_value is the UNSLID value, so it must equal the file-layout
+            // answer exactly even though the two layouts differ.
+            printf("   [loaded] resolve %-20s status=%d src=%d raw=0x%llx\n",
+                   argv[i], st, r.source, (unsigned long long)r.raw_value);
+        }
+    }
+    free(mapped);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <mach-o image> [symbol...]\n", argv[0]);
@@ -210,6 +345,8 @@ int main(int argc, char **argv) {
         printf("     resolve %-24s status=%d src=%d raw=0x%llx\n",
                argv[i], st, r.source, (unsigned long long)r.raw_value);
     }
+
+    run_loaded(img, size, argc, argv);
 
     free(file_buf);
     return 0;

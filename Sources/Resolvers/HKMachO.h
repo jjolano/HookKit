@@ -150,6 +150,14 @@ typedef struct {
     uint32_t cmdsize;
 } hk_macho_segment_t;
 
+// Visits every LC_SEGMENT_64 in load-command order. Returning false stops
+// early. Needed to work out an image's VM layout -- computing its mapped span,
+// or placing each segment at its vmaddr -- which name-by-name lookup cannot do.
+typedef bool (*hk_macho_segment_visit_fn)(void *ctx, uint32_t index,
+                                          const hk_macho_segment_t *segment);
+hk_macho_status_t hk_macho_iterate_segments(const void *image, size_t size,
+                                            hk_macho_segment_visit_fn visit, void *ctx);
+
 // Finds the first LC_SEGMENT_64 whose name equals `segname` (compared over at
 // most 16 bytes, since the on-disk field is fixed-width and may be
 // unterminated). HK_MACHO_NOT_FOUND if absent.

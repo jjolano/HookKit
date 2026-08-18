@@ -241,6 +241,47 @@ static bool sections_fit(const hk_macho_segment_t *seg) {
 
 typedef struct {
     const uint8_t *base;
+    hk_macho_segment_visit_fn visit;
+    void *ctx;
+    uint32_t index;
+    bool malformed;
+} segments_ctx_t;
+
+static bool segments_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t cmdsize) {
+    segments_ctx_t *s = (segments_ctx_t *)ctx;
+    if (cmd != HK_LC_SEGMENT_64) {
+        return true;
+    }
+    hk_macho_segment_t seg;
+    if (!read_segment(s->base, offset, cmdsize, &seg)) {
+        s->malformed = true;
+        return false;
+    }
+    return s->visit(s->ctx, s->index++, &seg);
+}
+
+hk_macho_status_t hk_macho_iterate_segments(const void *image, size_t size,
+                                            hk_macho_segment_visit_fn visit, void *ctx) {
+    if (!image || !visit) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    segments_ctx_t s;
+    s.base = (const uint8_t *)image;
+    s.visit = visit;
+    s.ctx = ctx;
+    s.index = 0;
+    s.malformed = false;
+
+    hk_macho_status_t status =
+        hk_macho_iterate_load_commands(image, size, segments_visit, &s);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    return s.malformed ? HK_MACHO_MALFORMED : HK_MACHO_OK;
+}
+
+typedef struct {
+    const uint8_t *base;
     const char *wanted;
     hk_macho_segment_t segment;
     bool found;

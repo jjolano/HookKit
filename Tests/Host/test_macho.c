@@ -595,6 +595,50 @@ static void test_loaded_image_validates_against_linkedit(void) {
     printf("  loaded-image-validates-against-linkedit: PASS\n");
 }
 
+
+typedef struct { char names[4][17]; uint32_t n; } segs_t;
+static bool seg_cb(void *ctx, uint32_t index, const hk_macho_segment_t *seg) {
+    segs_t *g = (segs_t *)ctx;
+    if (g->n < 4) { memcpy(g->names[g->n], seg->segname, 17); }
+    assert(index == g->n);   // indices are dense and in load-command order
+    g->n++;
+    return true;
+}
+static bool seg_stop_cb(void *ctx, uint32_t index, const hk_macho_segment_t *seg) {
+    (void)index; (void)seg;
+    (*(uint32_t *)ctx)++;
+    return false;  // stop after the first
+}
+
+static void test_iterate_segments(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+
+    segs_t g;
+    memset(&g, 0, sizeof(g));
+    assert(hk_macho_iterate_segments(img, sizeof(img), seg_cb, &g) == HK_MACHO_OK);
+    assert(g.n == 2);
+    assert(strcmp(g.names[0], "__TEXT") == 0);
+    assert(strcmp(g.names[1], "__LINKEDIT") == 0);
+
+    uint32_t seen = 0;
+    assert(hk_macho_iterate_segments(img, sizeof(img), seg_stop_cb, &seen) == HK_MACHO_OK);
+    assert(seen == 1);  // early stop honored
+
+    // A truncated segment command is reported, not silently skipped.
+    _Alignas(8) uint8_t bad[SEG_IMG_SIZE];
+    build_segment_image(bad, 0x100000000ull);
+    put_u32(bad, SEG_LE_OFF + 4, 8);
+    put_u32(bad, 20, SEG_TEXT_CMDSIZE + 8);
+    put_u32(bad, 16, 2);
+    memset(&g, 0, sizeof(g));
+    assert(hk_macho_iterate_segments(bad, sizeof(bad), seg_cb, &g) == HK_MACHO_MALFORMED);
+
+    assert(hk_macho_iterate_segments(NULL, 16, seg_cb, &g) == HK_MACHO_NOT_MACHO);
+    assert(hk_macho_iterate_segments(img, sizeof(img), NULL, &g) == HK_MACHO_NOT_MACHO);
+    printf("  iterate-segments: PASS\n");
+}
+
 static void test_null_tolerance(void) {
     _Alignas(8) uint8_t img[IMG_SIZE];
     build_symtab_image(img);
@@ -636,6 +680,7 @@ int main(void) {
     test_truncated_segment_command_rejected();
     test_loaded_image_symtab_translation();
     test_loaded_image_validates_against_linkedit();
+    test_iterate_segments();
     test_null_tolerance();
     printf("all mach-o tests passed\n");
     return 0;

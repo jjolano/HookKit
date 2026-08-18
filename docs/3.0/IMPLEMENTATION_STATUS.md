@@ -1643,13 +1643,49 @@ real framework confirms it is the right one.
   `ARM64E_USERLAND` and `ARM64E_USERLAND24` chained-pointer formats were
   therefore never exercised by real data, nor was PAC signing. Those need an
   A12-or-later device.
-- **Loaded-layout traversal is unverified.** Chain traversal ran over
-  file-layout images and succeeded, but only because these binaries' VM and
-  file offsets coincide for the fixup-bearing segments. That is common, not
-  guaranteed, and it is not the same as running against a live mapped image.
+- ~~**Loaded-layout traversal is unverified.**~~ **Closed** — see the
+  follow-up below.
 - The dyld populator and shared-cache resolver remain unbuilt and untested;
   shared-cache dylibs are not files on disk, so they cannot be pulled this way
   at all.
+
+**Loaded-layout conformance follow-up.** The gap above is now closed, and the
+way it was closed is worth recording because the obvious version of this test
+would have proved nothing.
+
+`Tools/conformance/macho_conformance.c` gained a `[loaded]` mode that places
+each segment at its `vmaddr` the way dyld would, then runs the *loaded* code
+paths (`symtab_view_for_loaded_image`, `export_trie_for_loaded_image`,
+`import_tables_from_loaded_image`, chained-bind traversal) over the result.
+This needed a new `hk_macho_iterate_segments` in the library — name-by-name
+lookup cannot compute an image's VM span — added with its own host test.
+
+**The measurement that mattered:** before trusting the comparison, the tool now
+reports how many segments actually land at a *different* offset in the mapped
+layout than in the file. The answer for two of three specimens is **zero**:
+
+| specimen | segments diverging |
+|---|---|
+| `liblz4.1.dylib` | 0 of 3 |
+| `uicache` | 0 of 4 |
+| HookKit's own framework | **1 of 4** (`__LINKEDIT`: vm `0x24000` vs file `0x20000`) |
+
+So for `liblz4` and `uicache` the loaded run is the file run under another
+name and demonstrates nothing — had the tool not measured this, the conformance
+claim would have been hollow while looking thorough. Only HookKit's own
+framework genuinely exercises the translation, and it is the ideal specimen for
+it: the divergence is in `__LINKEDIT`, which is exactly where the symbol table,
+export trie, indirect symbols and chained fixups all live, so a single 0x4000
+shift exercises **every** `__LINKEDIT` translation at once.
+
+On that specimen the two layouts agree exactly — 125 nsyms, 2144 strsize, an
+80-byte export trie, 106 import slots (`___objc_personality_v0` first), and 213
+chained binds — reached by completely different arithmetic. That is the
+loaded-image translation verified against real data.
+
+Still not the same as a live process: this is a faithful reconstruction of
+dyld's mapping, not dyld's. It does not exercise page permissions, the shared
+cache, or a real slide.
 
 ### Milestone 5 stock-take — what is host-testable vs device-gated
 
