@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <HookKit/HookKit.h>
 
+#include <mach/mach_time.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -10,6 +11,13 @@ static int (*nativeOriginal)(int);
 static NSInteger (*messageOriginal)(id, SEL);
 static int dobbyHits;
 static int nativeHits;
+
+// Replacement for the dyld trap-stub fail-soft check. It is never actually
+// installed (the target is refused before dispatch), so its body is
+// irrelevant; it only needs to be a valid non-NULL replacement pointer.
+__attribute__((noinline)) static int dyldStubReplacement(void) {
+    return 0;
+}
 
 // Trampoline page isolation — the regression test for the crash this release
 // fixes. The old allocator bump-allocated trampolines out of a shared page
@@ -227,6 +235,55 @@ int main(void) {
             pagesOK ? "PASS" : "FAIL", installed,
             pagesOK ? "all on distinct pages" : "SHARING pages — the old arena is back");
         failures += !pagesOK;
+
+        // Fail-soft on dyld-cache trap stubs + fast NULL-image lookup. The
+        // dyld shared cache stubs dyld's private APIs (dyld_image_get_installname
+        // and friends) with an entry instruction that raises SIGTRAP, so
+        // hooking one must return HK_ERR instead of crashing, and resolving
+        // it must not walk every loaded image (the old per-image scan took
+        // seconds per symbol). Both are version-dependent: on an iOS without
+        // the stub the symbol may not resolve at all, in which case the
+        // checks are skipped, not failed.
+        HKSubstitutor *dyld = [HKSubstitutor defaultSubstitutor];
+        uint64_t lookupStart = mach_absolute_time();
+        void *dyldSym = [dyld findSymbolInImage:NULL symbolName:@"dyld_image_get_installname"];
+        uint64_t lookupNanos = mach_absolute_time() - lookupStart;
+        printf("Dyld lookup: %s addr=%p took %.1fms\n",
+            dyldSym ? "resolved" : "unresolved (skipping)", dyldSym, lookupNanos / 1000000.0);
+
+        if(dyldSym) {
+            // The fast path must be fast: dlsym (exported) or the cache table
+            // scan (private) is milliseconds, not the old seconds-per-symbol
+            // per-image walk. 1s is a generous ceiling that still catches the
+            // walk regressing.
+            BOOL lookupOK = lookupNanos < 1000000000ull;
+            printf("Dyld lookup speed: %s\n", lookupOK ? "PASS" : "FAIL");
+            failures += !lookupOK;
+
+            // hookFunction: on a trap stub must fail-soft (HK_ERR), never
+            // SIGTRAP. The guard reads the entry instruction before any
+            // backend is dispatched, so this call must simply return.
+            // Version-agnostic: on an iOS where the symbol is REAL code (not
+            // a stub), HK_OK is the correct outcome — only a trap entry is
+            // required to fail. Decode the entry ourselves so the assertion
+            // matches the actual target shape on this iOS.
+            void *stubOriginal = NULL;
+            status = [dyld hookFunction:dyldSym
+                withReplacement:(void *)dyldStubReplacement
+                outOldPtr:(void **)&stubOriginal];
+            uint32_t entry = 0;
+            memcpy(&entry, dyldSym, sizeof(entry));
+            BOOL entryIsTrap = ((entry & 0xFFE0001Fu) == 0xD4200000u)    // BRK
+                || ((entry & 0xFFE0001Fu) == 0xD4400000u)                // HLT
+                || ((entry & 0xFFFF0000u) == 0u);                        // UDF
+            BOOL failSoftOK = entryIsTrap
+                ? (status == HK_ERR || status == HK_ERR_NOT_SUPPORTED) && stubOriginal == NULL
+                : (status == HK_OK || status == HK_ERR || status == HK_ERR_NOT_SUPPORTED);
+            printf("Dyld trap stub: %s status=%d original=%p entry=0x%08x (%s)\n",
+                failSoftOK ? "PASS" : "FAIL", status, stubOriginal, entry,
+                entryIsTrap ? "trap" : "real code");
+            failures += !failSoftOK;
+        }
 
         printf("HOOKKIT DEVICE SMOKE: %s failures=%d\n", failures ? "FAIL" : "PASS", failures);
         return failures ? 1 : 0;

@@ -1805,7 +1805,27 @@ Substrate, Substitute, Dobby, Frida/gum, litehook, fishhook (`vendor/`,
 contract, not new integration work.
 
 ## Milestone 11 — Legacy facade
-**State: not started.**
+**State: not started.** Two 2.x facade robustness fixes landed here ahead of
+the milestone (device-reported from Shadow integration):
+
+1. **Fail-soft on dyld-cache trap stubs.** The dyld shared cache stubs dyld's
+   private APIs (`dyld_image_get_installname` and friends) with an entry
+   instruction that raises SIGTRAP when executed — they exist for
+   symbolication, not for calling. Auto-cover routing (inline-first → rebind)
+   used to dispatch such a target to a backend, which crashed the process
+   (SIGTRAP) instead of returning an error. `hookFunction:` now detects the
+   trap entry instruction (`hk_inline_target_is_trap_stub` →
+   `hk_arm64_insn_is_trap`, BRK/HLT/UDF) before any backend runs and returns
+   `HK_ERR`: the target is permanently unhookable — there is no real
+   "original" to chain to — so retrying is pointless. Both the auto-cover and
+   the direct path are guarded.
+2. **Fast NULL-image symbol lookup.** `findSymbolInImage:NULL` used to walk
+   every loaded image's symbol table (hundreds of images per lookup, seconds
+   per symbol for dyld's private symbols). The facade now resolves exported
+   symbols via `dlsym(RTLD_DEFAULT)` (microseconds) and private symbols via
+   `hk_native_find_cache_symbol` — one scan over the already-mapped dyld
+   shared-cache local-symbols table, bound once per loaded cache dylib — and
+   only falls through to the backend walk for symbols no loaded image carries.
 
 ## Milestone 12 — Deferred lifecycle
 **State: not started.**
