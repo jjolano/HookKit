@@ -1042,7 +1042,47 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 (address-precise ownership keys, private-symbol scans) depend on.
 
 ## Milestone 5 — Image catalog and resolvers
-**State: not started.**
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | this commit — see below |
+| dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
+| Export/import resolvers | not started | needs Mach-O symbol-table / export-trie parsing |
+| Private-symbol resolver | not started | |
+| Shared-cache resolver | not started | device-only (shared cache layout) |
+| ObjC / Swift resolvers | not started | |
+
+**Image catalog — structure + selector matching**, this iteration
+(`Sources/Core/HKImageCatalog.{h,c}`). The deliberate host/device split is
+the whole shape of the file: the **selector-matching logic is
+platform-agnostic and host-tested**; the **only device-only part is
+populating the catalog from the live process** (dyld image list, a real
+Mach-O runtime), which is declared as the `hk_image_catalog_populate_from_dyld`
+seam but **not defined** — writing a dyld body that can't be compiled or run
+on this Linux host (it isn't in any built target yet, and `#if __APPLE__`
+would exclude it here) would be shipping unverifiable code, which this
+project doesn't do. Tests populate synthetically via `hk_image_catalog_add_entry`.
+
+Matching handles all six `hk_image_selector_kind_t` cases. It's written as
+"does this entry satisfy the selector?" applied to each entry in order,
+rather than "find the entries for this kind" — which gives natural dedup
+(each entry considered once) and makes `EXPLICIT_SET` fall out as "matches
+any sub-selector," recursively. Two correctness points worth stating: an
+`EXACT_UUID` selector only matches an entry whose `uuid_present` is true (an
+absent uuid is *not* an all-zero uuid — a zero-uuid selector must not match
+an image that simply has no uuid), and an `EXACT_HEADER` selector with a
+NULL header matches nothing (never a wildcard). The catalog also carries a
+monotonic `generation` counter (bumped on every add) — the concept
+`ARCHITECTURE.md` invariant #3 revalidates against; nothing revalidates yet
+(that's Milestone 12's late-image work), but resolvers can start stamping it.
+
+10 host tests (`test-image-catalog`, clean under
+`-fsanitize=address,undefined`): each selector kind, `EXPLICIT_SET` union of
+disjoint sub-selectors *and* dedup of overlapping ones, early-stop via the
+visitor, generation bumping, path deep-copy stability (mutate the source
+buffer after add, catalog copy intact), and NULL tolerance across every
+entry point. `make test` and `./build.sh all` (all 4 lanes) verified clean.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
 **State: not started.** Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
