@@ -3,9 +3,11 @@
 #import "Internal/HKInlineGuard.h"
 #import "Internal/HKInlinePreflight.h"
 
+#import <dlfcn.h>
 #import <objc/runtime.h>
 #include <stdlib.h>
 
+#import "native/hk_native.h"
 #import "native/hk_swift.h"
 
 // Owned here (resolved by swift_available() via dlsym); consumed by the
@@ -873,6 +875,20 @@ static BOOL hk_descriptor_kind_supported(id<HKSubstitutorBackend> backend, HKHoo
         return HK_ERR_INVALID_ARGUMENT;
     }
 
+    // Fail-soft on unhookable targets (H9): a dyld shared-cache trap stub
+    // (dyld's private APIs such as dyld_image_get_installname resolve to
+    // stubs whose entry instruction raises SIGTRAP) can never be hooked —
+    // the "original" is the trap itself, and dispatching it to a vendor
+    // SIGTRAPs the process instead of returning an error. Refuse before any
+    // backend sees it, in both the auto-cover and the direct path. The check
+    // is side-effect-free (one read, after the same readable probe the
+    // preflight uses). HK_ERR is terminal: the target is permanently
+    // unhookable, so nothing is gained by trying the next picker.
+    if(hk_inline_target_is_trap_stub(function)) {
+        [self noteHookResult:HK_ERR fromBackend:nil];
+        return HK_ERR;
+    }
+
     if(autoCoverCategories) {
         HKHookOperation *hook = [HKHookOperation new];
         hook->kind = HKHookKindFunction;
@@ -1243,6 +1259,32 @@ static const uint32_t HKImageWrapperMagic = 0x484B494D;   // 'HKIM'
     }
 
     if(!image) {
+        // Fast path first (H9): dlsym answers any EXPORTED symbol in
+        // microseconds — the same lookup dyld's own export machinery serves —
+        // and hk_native_find_cache_symbol resolves PRIVATE symbols from the
+        // dyld shared cache's local-symbols table (one scan over the loaded
+        // cache dylibs' already-mapped nlist ranges, no per-image
+        // open/scan/close). The backend walk below remains the fallback for
+        // symbols only non-cache images carry (jailbreak dylibs, RTLD_LOCAL
+        // handles). The underscore convention matches HKDlfcnBackend: dlsym
+        // takes the C name, so one leading underscore is stripped; the cache
+        // scan's own matcher handles both forms.
+        const char *symbol = [symbolName UTF8String];
+
+        if(symbol && symbol[0] == '_') {
+            symbol++;
+        }
+
+        void *found = dlsym(RTLD_DEFAULT, symbol);
+
+        if(!found) {
+            found = hk_native_find_cache_symbol([symbolName UTF8String]);
+        }
+
+        if(found) {
+            return found;
+        }
+
         return [backend findSymbolInImage:NULL symbolName:symbolName];
     }
 

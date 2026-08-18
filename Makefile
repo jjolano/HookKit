@@ -60,7 +60,7 @@ HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks 
 # Mach-O dylib versions: must match HookKit.tbd (current/compatibility 2.5.0)
 # so consumers linking via the tbd record a satisfiable requirement. Theos
 # sets no versions itself, so they come from here.
-HookKit_LDFLAGS += -current_version 2.5.0 -compatibility_version 2.5.0
+HookKit_LDFLAGS += -current_version 2.5.1 -compatibility_version 2.5.1
 # Export boundary: only the public HKSubstitutor ObjC class symbols survive
 # the link (see scripts/export-HookKit.list); every backend/litehook/dobby/
 # fishhook/native symbol becomes local.

@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <string.h>
 
 #if __has_include(<ptrauth.h>)
 #import <ptrauth.h>
@@ -90,6 +91,33 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
     (void)function;
     (void)replacement;
     return HK_OK;
+#endif
+}
+
+bool hk_inline_target_is_trap_stub(void *function) {
+#if defined(__arm64__) || defined(__aarch64__)
+#if __has_feature(ptrauth_calls)
+    // Same canonicalization as the preflight: strip PAC so the raw address
+    // is what the decode sees (arm64e).
+    function = ptrauth_strip(function, ptrauth_key_asia);
+#endif
+
+    // The decode dereferences the entry; a bogus non-NULL address must fail
+    // cleanly instead of faulting (same probe the preflight uses, and the
+    // same convention: an unreadable target is the preflight's EFAULT to
+    // report, not a trap stub).
+    if(!hk_native_range_readable(function, 4)) {
+        return false;
+    }
+
+    uint32_t insn = 0;
+    memcpy(&insn, function, sizeof(insn));
+    return hk_arm64_insn_is_trap(insn);
+#else
+    // Not arm64/arm64e: no AArch64 decoder is compiled in here. Nothing to
+    // detect — the MS providers validate their own Thumb prologues.
+    (void)function;
+    return false;
 #endif
 }
 
