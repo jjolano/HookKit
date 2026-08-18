@@ -425,11 +425,31 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
 | Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | this commit — see below |
-| Ownership ledger | not started | |
+| Ownership ledger | not started — deferred deliberately (see note below); an exclusivity/refusal gate was tried and reverted | commit `2cc4c3e`, reverted |
 | Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | this commit — see below |
 | Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
 | Fault injection | not started | |
 | Model-based tests | not started | |
+
+**Ownership ledger — deferred, and why (a reverted misstep worth
+recording).** An ownership ledger was built in commit `2cc4c3e` whose
+commit-time gate refused a *second* hook on the same target with
+`HK_OUTCOME_CONFLICT`. That is wrong: multiple consumers hooking the same
+function/method is a first-class, designed-for scenario, not a conflict.
+`HK_ORIGINAL_DIRECT_PREDECESSOR` (`PUBLIC_C_ABI.md`) is defined as "an
+existing predecessor is acceptable (untouched function body after rebinding,
+previous IMP, previous Swift slot)" — you hook something already hooked and
+your original *is* the prior consumer's replacement. That is chaining, how
+the tweak ecosystem and Shadow-coexisting-with-other-tweaks work; the
+original-slot machinery (commit `ae8aaf5`) is its primitive.
+`ARCHITECTURE.md` disclaiming "a generic arbitrary C-hook chaining framework"
+is a product-scope disclaimer, not a refusal to let two hooks share a target.
+The commit was reverted in full (back to `ae8aaf5`) at the user's direction.
+When ownership is eventually built it is **chain coordination** (the next
+hook's original = the previous replacement), which needs real engines that
+can install-on-top — Milestone 6+, not the fake-engine stage.
+`HK_OUTCOME_CONFLICT` is reserved for genuine mechanism incompatibility, not
+mere same-target hooking.
 
 First real (not header-only) implementation code this rewrite has shipped.
 `hk_id_generate()`: one process-instance nonce (time+pid+ASLR entropy,
