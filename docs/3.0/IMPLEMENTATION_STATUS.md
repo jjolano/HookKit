@@ -1053,6 +1053,7 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 | Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | this commit — see below |
 | Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
 | Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | this commit — see below |
+| Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | this commit — see below |
 | Import resolver | not started | |
 | Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
@@ -1332,11 +1333,11 @@ resolve (24..29, since resolving `_alpha` reads to offset 23 and never touches
 `_beta`'s subtree), so it cannot silently degrade into "everything failed",
 which would pass vacuously.
 
-**Stated gap:** the walker is exact-name-only. The trie stores linker-form
-names, so `malloc` must be queried as `_malloc`. The leading-underscore
-normalization `HKSymbolTable` does internally is deliberately not duplicated
-here — it belongs in the resolver-selection layer above both, which is not yet
-written. The asymmetry is recorded rather than papered over.
+**Stated gap** (closed by the next entry): the walker is exact-name-only. The
+trie stores linker-form names, so `malloc` must be queried as `_malloc`. The
+leading-underscore normalization `HKSymbolTable` does internally is
+deliberately not duplicated here — it belongs in the resolver-selection layer
+above both. The asymmetry is recorded rather than papered over.
 
 **Visibility semantics revisited**, now that an export resolver exists:
 `HKSymbolTable.h` previously noted that `HK_SYMBOL_VISIBILITY_ANY` and
@@ -1349,6 +1350,82 @@ both. Within a symbol-table search on its own there is genuinely nothing for
 them to differ about — the symbol table is a private-symbol source by nature.
 
 `make test` and `./build.sh all` (all 4 lanes) verified clean.
+
+**Resolver selection**, this iteration
+(`Sources/Resolvers/HKSymbolResolve.{h,c}`) — the layer two previous commits
+deferred to *by name*. Built rather than deferred again. It owns exactly the
+two decisions neither mechanism can make alone.
+
+**1. Name normalization, now in one place.** Mach-O stores linker-form names,
+so C `malloc` appears as `_malloc`. The trie walker is exact-name-only by
+design; `HKSymbolTable` had an equivalent rule built in. Rather than keep two
+implementations of one rule, this layer expands a query into an ordered
+candidate list — the name as given, then the underscore-prefixed form — and
+queries **both** sources with `HK_SYMBOL_NAME_MACHO_EXACT`, which switches off
+`HKSymbolTable`'s internal normalization. The result is provably identical to
+what `HKSymbolTable` did alone (an entry matches if it equals the query, or
+equals `"_" + query`), but the rule now exists once. `HKSymbolTable` keeps its
+internal handling so it remains correct standalone.
+
+A subtlety worth stating: the prefixed candidate is tried **even when the
+query already starts with an underscore**, because a C symbol literally named
+`_hidden` appears as `__hidden` and only the prefixed form finds it. Tested.
+Candidate order is exact-first, also tested against a table holding both
+`malloc` and `_malloc` so the ordering is observable rather than assumed.
+
+**2. Source preference — what finally makes `hk_symbol_visibility_t` mean
+something.** Two commits ago the ledger recorded that `ANY` and
+`PRIVATE_ALLOWED` behaved identically because a symbol-table search alone has
+nothing to differ about. With two sources they genuinely differ:
+
+- `EXPORTED_ONLY` — the export trie is dyld's authority on what is exported,
+  so when a trie exists it is the **only** source consulted: absence from it
+  means not exported, and falling back to the symbol table would contradict
+  that. Images with no trie fall back to the symbol table filtered to `N_EXT`,
+  the best answer available.
+- `ANY` — trie first (authoritative, and exports are the common case), then
+  the symbol table, which also covers private symbols.
+- `PRIVATE_ALLOWED` — symbol table first, since that is the only place private
+  symbols exist; then the trie, so an exported symbol stripped from the symbol
+  table is still found. "Private allowed" permits private symbols, it does not
+  require them.
+
+The two mechanisms report addresses against **different bases** — a trie gives
+an offset from the mach header, an nlist gives an unslid VM address — so the
+sources struct carries both anchors and the resolver returns a single
+comparable runtime address. For a file image, setting the slide to
+`buffer - __TEXT.vmaddr` makes both agree; the constructor does that.
+
+14 host tests (`test-symbol-resolve`, clean under
+`-fsanitize=address,undefined`). The centerpiece places the **same name in
+both sources with different addresses**, so the resolved address reveals which
+source answered — without that, a test could not distinguish a real preference
+order from two sources that happen to agree. All three visibilities are
+checked against it, plus: `EXPORTED_ONLY` refusing to fall back when a trie
+exists but lacks the symbol; `EXPORTED_ONLY` falling back without a trie *and*
+still rejecting a local symbol; `PRIVATE_ALLOWED` reaching the trie for an
+export stripped from the symbol table; re-exports reported with no invented
+address; and both source constructors end to end, the loaded-image one over a
+deliberately non-degenerate `__LINKEDIT` layout.
+
+**Verified to have teeth:** removing the name-length check turns the prefixed
+candidate copy into an ASan `stack-buffer-overflow` — a **WRITE of size 1031**,
+the more dangerous direction — while the real code returns
+`HK_RESOLVE_NAME_TOO_LONG`. The exact boundary (a name of precisely
+`HK_RESOLVE_MAX_NAME`, which still fits `'_' + name + NUL`) is asserted to be
+*accepted*, so an off-by-one in either direction fails the suite.
+
+Also refactored while here: the `__LINKEDIT` base computation and range check
+now live in shared helpers used by both the symbol-table and export-trie
+loaded-image paths, rather than being repeated per table. Both pre-existing
+suites re-verified green after the change.
+
+**Deferred with a reason, not avoided:** resolving a `hk_symbol_target_t`
+against the *image catalog* (matching images by selector, then resolving in
+each) needs a per-entry "how many bytes are safely readable from this header"
+on `hk_image_entry_t`. That value is naturally produced by the dyld populator
+— a device-only piece — so adding the field is better done together with it
+than invented now.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
 **State: not started.** Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.

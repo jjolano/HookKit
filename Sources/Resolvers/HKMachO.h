@@ -206,6 +206,16 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
 hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
                                             size_t *out_offset, size_t *out_size);
 
+// Loaded-image counterpart: the trie's declared offset is __LINKEDIT-relative,
+// so it needs the same translation hk_macho_symtab_view_for_loaded_image
+// performs. Returns a pointer into the mapped __LINKEDIT, validated to lie
+// within that segment's declared file range.
+hk_macho_status_t hk_macho_export_trie_for_loaded_image(const void *header,
+                                                        size_t header_region_size,
+                                                        uintptr_t slide,
+                                                        const void **out_trie,
+                                                        size_t *out_size);
+
 #ifdef __cplusplus
 }
 #endif

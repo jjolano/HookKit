@@ -357,6 +357,17 @@ hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
 
 // ---- loaded-image symbol table -----------------------------------------
 
+// Defined with the other loaded-image helpers below; declared here because
+// the symbol table path is the first user.
+static hk_macho_status_t linkedit_mapping(const void *header, size_t region_size,
+                                          uintptr_t slide,
+                                          hk_macho_segment_t *out_segment,
+                                          uintptr_t *out_base,
+                                          uint64_t *out_file_start,
+                                          uint64_t *out_file_end);
+static bool within_linkedit(uint64_t offset, uint64_t length,
+                            uint64_t file_start, uint64_t file_end);
+
 hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
                                                         size_t header_region_size,
                                                         uintptr_t slide,
@@ -366,8 +377,11 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
     }
 
     hk_macho_segment_t linkedit;
-    hk_macho_status_t status =
-        hk_macho_find_segment(header, header_region_size, "__LINKEDIT", &linkedit);
+    uintptr_t linkedit_base = 0;
+    uint64_t le_start = 0, le_end = 0;
+    hk_macho_status_t status = linkedit_mapping(header, header_region_size, slide,
+                                                &linkedit, &linkedit_base,
+                                                &le_start, &le_end);
     if (status != HK_MACHO_OK) {
         return status;
     }
@@ -391,26 +405,14 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
 
     // Both tables must lie inside __LINKEDIT's declared file range, so a
     // corrupt LC_SYMTAB cannot point at unrelated memory.
-    if (linkedit.filesize > UINT64_MAX - linkedit.fileoff) {
-        return HK_MACHO_MALFORMED;
-    }
-    uint64_t le_start = linkedit.fileoff;
-    uint64_t le_end = linkedit.fileoff + linkedit.filesize;
-
     uint64_t nlist_bytes = nsyms * (uint64_t)sizeof(hk_macho_nlist64_t);  // nsyms is 32-bit; no overflow in 64
-    if (symoff < le_start || symoff > le_end || nlist_bytes > le_end - symoff) {
+    if (!within_linkedit(symoff, nlist_bytes, le_start, le_end)) {
         return HK_MACHO_MALFORMED;
     }
-    if (stroff < le_start || stroff > le_end || strsize > le_end - stroff) {
+    if (!within_linkedit(stroff, strsize, le_start, le_end)) {
         return HK_MACHO_MALFORMED;
     }
 
-    // linkedit_base = slide + vmaddr - fileoff. The subtraction is done first
-    // and guarded: a fileoff larger than vmaddr is malformed, not a wrap.
-    if (linkedit.fileoff > linkedit.vmaddr) {
-        return HK_MACHO_MALFORMED;
-    }
-    uintptr_t linkedit_base = slide + (uintptr_t)(linkedit.vmaddr - linkedit.fileoff);
     uintptr_t nlist_addr = linkedit_base + (uintptr_t)symoff;
 
     // Same typed-pointer alignment requirement as the file-image path.
@@ -464,11 +466,11 @@ static bool export_trie_visit(void *ctx, uint32_t cmd, size_t offset, uint32_t c
     return true;
 }
 
-hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
-                                            size_t *out_offset, size_t *out_size) {
-    if (!image || !out_offset || !out_size) {
-        return HK_MACHO_NOT_MACHO;
-    }
+// The load-command half, shared by both layouts: reports the trie's declared
+// FILE range without validating it, because what it must be validated against
+// differs (the image itself vs. __LINKEDIT).
+static hk_macho_status_t export_trie_file_range(const void *image, size_t size,
+                                                uint32_t *out_off, uint32_t *out_size) {
     export_trie_ctx_t e;
     e.base = (const uint8_t *)image;
     e.data_off = 0;
@@ -487,10 +489,96 @@ hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
     if (!e.found || e.data_size == 0) {
         return HK_MACHO_NOT_FOUND;  // an empty trie is "no exports", not an error
     }
-    if (e.data_off > size || e.data_size > size - e.data_off) {
+    *out_off = e.data_off;
+    *out_size = e.data_size;
+    return HK_MACHO_OK;
+}
+
+hk_macho_status_t hk_macho_find_export_trie(const void *image, size_t size,
+                                            size_t *out_offset, size_t *out_size) {
+    if (!image || !out_offset || !out_size) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    uint32_t off = 0, len = 0;
+    hk_macho_status_t status = export_trie_file_range(image, size, &off, &len);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (off > size || len > size - off) {
         return HK_MACHO_MALFORMED;
     }
-    *out_offset = e.data_off;
-    *out_size = e.data_size;
+    *out_offset = off;
+    *out_size = len;
+    return HK_MACHO_OK;
+}
+
+// ---- loaded-image __LINKEDIT translation (shared) ----------------------
+
+// Locates __LINKEDIT and computes its mapped base:
+//     linkedit_base = slide + vmaddr - fileoff
+// Used by both loaded-image lookups so the arithmetic and its guards live in
+// one place rather than being repeated per table.
+static hk_macho_status_t linkedit_mapping(const void *header, size_t region_size,
+                                          uintptr_t slide,
+                                          hk_macho_segment_t *out_segment,
+                                          uintptr_t *out_base,
+                                          uint64_t *out_file_start,
+                                          uint64_t *out_file_end) {
+    hk_macho_status_t status =
+        hk_macho_find_segment(header, region_size, "__LINKEDIT", out_segment);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (out_segment->filesize > UINT64_MAX - out_segment->fileoff) {
+        return HK_MACHO_MALFORMED;
+    }
+    // A fileoff beyond vmaddr would wrap the subtraction below.
+    if (out_segment->fileoff > out_segment->vmaddr) {
+        return HK_MACHO_MALFORMED;
+    }
+    *out_file_start = out_segment->fileoff;
+    *out_file_end = out_segment->fileoff + out_segment->filesize;
+    *out_base = slide + (uintptr_t)(out_segment->vmaddr - out_segment->fileoff);
+    return HK_MACHO_OK;
+}
+
+// True if [offset, offset+length) lies within __LINKEDIT's declared file range.
+static bool within_linkedit(uint64_t offset, uint64_t length,
+                            uint64_t file_start, uint64_t file_end) {
+    if (offset < file_start || offset > file_end) {
+        return false;
+    }
+    return length <= file_end - offset;
+}
+
+hk_macho_status_t hk_macho_export_trie_for_loaded_image(const void *header,
+                                                        size_t header_region_size,
+                                                        uintptr_t slide,
+                                                        const void **out_trie,
+                                                        size_t *out_size) {
+    if (!header || !out_trie || !out_size) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    uint32_t off = 0, len = 0;
+    hk_macho_status_t status =
+        export_trie_file_range(header, header_region_size, &off, &len);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+
+    hk_macho_segment_t linkedit;
+    uintptr_t linkedit_base = 0;
+    uint64_t file_start = 0, file_end = 0;
+    status = linkedit_mapping(header, header_region_size, slide, &linkedit,
+                              &linkedit_base, &file_start, &file_end);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (!within_linkedit(off, len, file_start, file_end)) {
+        return HK_MACHO_MALFORMED;
+    }
+
+    *out_trie = (const void *)(linkedit_base + (uintptr_t)off);
+    *out_size = len;
     return HK_MACHO_OK;
 }
