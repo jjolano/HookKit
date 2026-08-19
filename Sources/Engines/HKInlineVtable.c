@@ -11,6 +11,12 @@ static hk_engine_capabilities_t inline_describe(void) {
     caps.engine_id = "inline-terminal";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    // NONE only, and this is the engine's defining limit rather than a
+    // conservative guess: it overwrites the prologue outright, so there is no
+    // predecessor to hand back and no continuation to call. Declaring it here
+    // is what lets the router pick the relocating engine for a request this
+    // one would only refuse at prepare.
+    caps.original_requirements = HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_NONE);
     return caps;
 }
 

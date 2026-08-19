@@ -2575,7 +2575,7 @@ applying the lesson from the inline adapter rather than rediscovering it.
 | Task | State | Evidence |
 |---|---|---|
 | Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | this commit — see below |
-| Runtime adapter | not started — same shape as the other four, but blocked on a routing question found while starting it (below) | |
+| Runtime adapter | not started — the routing question that blocked it is now resolved (below), so this is next | |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2720,6 +2720,44 @@ invisible — so this is a pure precondition: a capability field added after
 this point defaults to "declares nothing" rather than to stack garbage.
 Committed on its own so that if it *had* changed anything, the change would be
 attributable to it and not buried in a feature commit.
+
+**Step two done: the routing gap is closed.** `hk_engine_capabilities_t` gained
+`original_requirements`, a bitmask of which `hk_original_requirement_t` values
+an engine can satisfy, and `hk_engine_eligible_minimal_full` checks it. The
+terminal inline engine now declares `HK_ORIGINAL_NONE` only — its defining
+limit, stated in its capabilities rather than discovered at prepare.
+
+**Zero means "any", not "none", and that is the load-bearing decision.** An
+engine that declares nothing behaves exactly as it did before the field
+existed, so adding the field cannot silently make a previously-eligible engine
+ineligible. That is why all seven pre-existing fake engines and the other three
+adapters needed no edit at all — and it is tested directly, not assumed.
+
+The change **improved an existing behaviour rather than preserving it**, and
+the test that had to be rewritten is the evidence: a
+`HK_ORIGINAL_CALLABLE_CONTINUATION` request against the terminal engine used to
+route successfully and then fail at prepare with `FAILED_SAFE`. It now fails at
+*routing* with `NO_ROUTE` and `retryable` set, because an engine that cannot
+serve the request is never selected. That is strictly better — it is precisely
+what lets the relocating engine be chosen instead when both are registered —
+and the engine-level refusal remains as defence in depth, asserted directly.
+
+Three teeth-proofs, all caught: ignoring the requirement entirely, treating
+zero as "none" instead of "any", and the router passing a constant
+`HK_ORIGINAL_NONE` instead of the hook's actual requirement.
+
+**Two of those were initially invalid**, and the reason is worth recording
+because it will recur: the first attempt shadowed `HKEngineInternal.h` with a
+patched copy on the include path, which does nothing — the test reaches that
+header through a *relative* include (`"../../Sources/Core/..."`), and a quoted
+relative include always resolves against the including file, never `-I`. Both
+variants reported NOT CAUGHT, which read as a test gap and was actually a
+harness that never compiled the patch. Re-run by patching the real header in
+place and restoring it afterwards, both are caught. A baseline ASan run of the
+unmodified code was checked first, as now standard.
+
+`make test` (265 assertions, exit 0) and `./build.sh all` (all 4 lanes)
+verified green.
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**

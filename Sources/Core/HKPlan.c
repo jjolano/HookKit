@@ -574,7 +574,9 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_
 
     for (size_t i = 0; i < plan->runtime->engine_count; i++) {
         hk_engine_capabilities_t caps = plan->runtime->engines[i]->describe();
-        if (!hk_engine_eligible_minimal(&caps, hook->spec.target_kind, hook->spec.required_reach)) {
+        if (!hk_engine_eligible_minimal_full(&caps, hook->spec.target_kind,
+                                             hook->spec.required_reach,
+                                             hook->spec.original_requirement)) {
             continue;
         }
         out->outcome = HK_OUTCOME_ANALYZED;

@@ -213,6 +213,38 @@ static inline hk_engine_capabilities_t fake_no_commit_one_describe(void) {
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
     return caps;
 }
+// Two engines that describe themselves IDENTICALLY except for which originals
+// they serve -- the exact shape of the terminal/relocating inline pair. They
+// exist to test that the router picks on that axis, without pulling either
+// real engine (and its device seams) into a router test.
+static inline hk_engine_capabilities_t fake_original_none_describe(void) {
+    hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.engine_id = "orig-none-only";
+    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.original_requirements = HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_NONE);
+    return caps;
+}
+static const hk_engine_vtable_t fake_original_none_engine = {
+    .describe = fake_original_none_describe,
+    .prepare_one = fake_commit_helper_prepare_one,
+};
+
+static inline hk_engine_capabilities_t fake_original_any_describe(void) {
+    hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.engine_id = "orig-any";
+    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.original_requirements = HK_ORIGINAL_REQ_ALL;
+    return caps;
+}
+static const hk_engine_vtable_t fake_original_any_engine = {
+    .describe = fake_original_any_describe,
+    .prepare_one = fake_commit_helper_prepare_one,
+};
+
 static const hk_engine_vtable_t fake_no_commit_one_engine = {
     .describe = fake_no_commit_one_describe,
     .prepare_one = fake_commit_helper_prepare_one,

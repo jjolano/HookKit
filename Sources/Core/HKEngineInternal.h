@@ -29,6 +29,14 @@
 #include "../../Headers/HookKit/HookKitTargets.h"
 #include "HKArtifactLedger.h"  // hk_artifact_sink_t
 
+// One bit per hk_original_requirement_t value, so an engine can say which
+// kinds of "original" it is able to hand back.
+typedef uint32_t hk_original_requirement_mask_t;
+#define HK_ORIGINAL_REQ_BIT(req) (1u << (uint32_t)(req))
+#define HK_ORIGINAL_REQ_ALL (HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_NONE) | \
+                             HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_DIRECT_PREDECESSOR) | \
+                             HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_CALLABLE_CONTINUATION))
+
 // One bit per hk_target_kind_t value -- lets a descriptor say "I handle
 // symbol and address targets" without a variable-length list.
 typedef uint32_t hk_target_kind_mask_t;
@@ -44,6 +52,19 @@ typedef struct {
     // subset of this depending on the specific target; a fake engine used
     // for router testing doesn't need that nuance.
     hk_reachability_t achievable_reach;
+
+    // Which hk_original_requirement_t values this engine can satisfy, as a
+    // bitmask (HK_ORIGINAL_REQ_BIT). Zero means "declares nothing", which is
+    // treated as "any" -- see hk_engine_eligible_minimal for why that default
+    // is the safe one rather than the lazy one.
+    //
+    // This exists because two engines now differ ONLY on this axis: terminal
+    // inline destroys the prologue and can serve HK_ORIGINAL_NONE alone, while
+    // relocating inline preserves it in a trampoline and can serve all three.
+    // They otherwise describe themselves identically (function-address target,
+    // entry-point reach), so without this the first registered wins and the
+    // other's capability is unreachable.
+    hk_original_requirement_mask_t original_requirements;
 } hk_engine_capabilities_t;
 
 // What a preparation attempt actually concluded. See prepare_one_ctx_status.
@@ -189,15 +210,39 @@ typedef struct hk_engine_vtable {
 // later Milestone 4/8/10 work) -- this function will grow more criteria
 // as those land, the same incremental way the header above says the
 // vtable will.
+static inline bool hk_engine_eligible_minimal_full(
+    const hk_engine_capabilities_t *caps,
+    hk_target_kind_t target_kind,
+    hk_reachability_t required_reach,
+    hk_original_requirement_t original_requirement)
+{
+    if (!(caps->target_kinds & HK_TARGET_KIND_BIT(target_kind))) {
+        return false;
+    }
+    if ((required_reach & ~caps->achievable_reach) != 0) {
+        return false;
+    }
+    // Zero means the engine declared nothing, which is read as "any" rather
+    // than "none". That is deliberate and it is the SAFE default, not the lazy
+    // one: an engine that says nothing about originals behaves exactly as it
+    // did before this field existed, so adding the field cannot silently make
+    // a previously-eligible engine ineligible. An engine that genuinely cannot
+    // serve a requirement says so, and is then correctly skipped.
+    if (caps->original_requirements != 0 &&
+        !(caps->original_requirements & HK_ORIGINAL_REQ_BIT(original_requirement))) {
+        return false;
+    }
+    return true;
+}
+
+// Kept as the two-criterion form for callers that have no requirement in hand.
 static inline bool hk_engine_eligible_minimal(
     const hk_engine_capabilities_t *caps,
     hk_target_kind_t target_kind,
     hk_reachability_t required_reach)
 {
-    if (!(caps->target_kinds & HK_TARGET_KIND_BIT(target_kind))) {
-        return false;
-    }
-    return (required_reach & ~caps->achievable_reach) == 0;
+    return hk_engine_eligible_minimal_full(caps, target_kind, required_reach,
+                                           HK_ORIGINAL_NONE);
 }
 
 // Defined in HKRuntime.c. `vtable` is not owned or copied -- the caller

@@ -134,21 +134,31 @@ static void test_continuation_request_fails_at_prepare(void) {
     assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
 
-    // Asking for a callable original. Terminal inline destroys the prologue,
-    // so it must refuse rather than allocate a trampoline behind the caller's
-    // back. (continuation_policy stays ANY here: the point is that the ENGINE
-    // refuses on the requirement, not that the plan pre-rejects the pair.)
+    // Asking for a callable original. Terminal inline destroys the prologue, so
+    // it cannot serve one -- and since it now DECLARES that
+    // (caps.original_requirements), the refusal happens at ROUTING rather than
+    // at prepare. That is strictly better than the previous behaviour: an
+    // engine that cannot serve the request is never selected, which is what
+    // lets a relocating engine be chosen instead when one is registered.
+    // With only this engine registered, the honest answer is NO_ROUTE.
     hk_hook_spec_t spec = address_spec("hook.wants.original", target, (void *)(target + 0x1000),
                                        HK_ORIGINAL_CALLABLE_CONTINUATION, NULL, 0);
     spec.continuation_policy = HK_CONTINUATION_ANY;
     hk_hook_t *hook = NULL;
     assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
     assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
-    assert(hook->matched_engine == hk_inline_vtable());       // routed on capability...
+    assert(hook->matched_engine == NULL);                    // not selected at all
+    assert(hook->result.outcome == HK_OUTCOME_NO_ROUTE);
+    assert(hook->result.retryable);   // registering a relocating engine changes this
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
-    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);   // ...then refused
-    assert(hk_plan_state(plan) == HK_PLAN_FAILED);
     assert(fn[0] == A64_NOP);  // untouched
+
+    // The engine still refuses the requirement itself, as defence in depth --
+    // routing is not the only thing standing between a bad request and a
+    // destroyed prologue.
+    hk_inline_plan_t direct;
+    assert(hk_inline_prepare(target, target + 0x1000, HK_ORIGINAL_CALLABLE_CONTINUATION,
+                             NULL, 0, &direct) == HK_INLINE_NEEDS_CONTINUATION);
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
@@ -231,9 +241,6 @@ static void test_refusals_carry_distinct_diagnostics(void) {
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
 
     hk_hook_spec_t s_align = address_spec("h.align", target + 1, near, HK_ORIGINAL_NONE, NULL, 0);
-    hk_hook_spec_t s_cont  = address_spec("h.cont", target, near,
-                                          HK_ORIGINAL_CALLABLE_CONTINUATION, NULL, 0);
-    s_cont.continuation_policy = HK_CONTINUATION_ANY;
     hk_hook_spec_t s_pin   = address_spec("h.pin", target, near, HK_ORIGINAL_NONE,
                                           (const uint8_t *)&pinned_wrong, 4);
     // A one-instruction function patched with a FAR branch: the 16-byte window
@@ -244,9 +251,8 @@ static void test_refusals_carry_distinct_diagnostics(void) {
                                           (void *)((uintptr_t)tinyfn + (1ull << 40)),
                                           HK_ORIGINAL_NONE, NULL, 0);
 
-    hk_hook_t *ha = NULL, *hc = NULL, *hp = NULL, *hs = NULL;
+    hk_hook_t *ha = NULL, *hp = NULL, *hs = NULL;
     assert(hk_plan_add_hook(plan, &s_align, &ha) == HK_STATUS_OK);
-    assert(hk_plan_add_hook(plan, &s_cont, &hc) == HK_STATUS_OK);
     assert(hk_plan_add_hook(plan, &s_pin, &hp) == HK_STATUS_OK);
     assert(hk_plan_add_hook(plan, &s_short, &hs) == HK_STATUS_OK);
     assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
@@ -254,20 +260,16 @@ static void test_refusals_carry_distinct_diagnostics(void) {
 
     // All four are genuine failures, not satisfied requests.
     assert(ha->result.outcome == HK_OUTCOME_FAILED_SAFE);
-    assert(hc->result.outcome == HK_OUTCOME_FAILED_SAFE);
     assert(hp->result.outcome == HK_OUTCOME_FAILED_SAFE);
     assert(hs->result.outcome == HK_OUTCOME_FAILED_SAFE);
     assert(hk_plan_state(plan) == HK_PLAN_FAILED);
 
     // ...and each carries its own reason.
     assert(ha->result.error_code == (int64_t)HK_INLINE_MISALIGNED);
-    assert(hc->result.error_code == (int64_t)HK_INLINE_NEEDS_CONTINUATION);
     assert(hp->result.error_code == (int64_t)HK_INLINE_PRECONDITION_FAILED);
     assert(hs->result.error_code == (int64_t)HK_INLINE_TARGET_TOO_SHORT);
-    assert(ha->result.error_message.data && hc->result.error_message.data);
-    assert(hp->result.error_message.data && hs->result.error_message.data);
-    assert(strcmp(hc->result.error_message.data,
-                  "terminal inline cannot provide an original; use a relocating engine") == 0);
+    assert(ha->result.error_message.data && hp->result.error_message.data);
+    assert(hs->result.error_message.data);
     // The domain is this engine, filled by the core from describe().
     assert(hs->result.error_domain.data &&
            strcmp(hs->result.error_domain.data, "inline-terminal") == 0);
