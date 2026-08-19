@@ -52,24 +52,26 @@ static hk_hook_spec_t memory_spec(const char *id, uintptr_t address, bool relati
     return spec;
 }
 
-static void set_env(uintptr_t image_base) {
-    hk_memory_binding_env_t env;
-    env.image_base = image_base;
-    env.write = buffer_write;
-    env.write_ctx = NULL;
-    hk_memory_vtable_set_environment_for_testing(&env);
+// The engine context is an ordinary caller-owned struct now -- no file-scoped
+// environment, so each test owns its own.
+static hk_memory_engine_ctx_t engine_ctx_for(uintptr_t image_base) {
+    hk_memory_engine_ctx_t c;
+    c.image_base = image_base;
+    c.write = buffer_write;
+    c.write_ctx = NULL;
+    return c;
 }
 
 static void test_absolute_patch_full_lifecycle(void) {
     uint8_t region[REGION];
     memcpy(region, ORIGINAL, REGION);
 
+    hk_memory_engine_ctx_t ectx = engine_ctx_for(0);  // absolute addressing needs no image base
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_memory_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_memory_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(0);  // absolute addressing needs no image base
 
     hk_hook_spec_t spec = memory_spec("patch.abs", (uintptr_t)region, false,
                                       ORIGINAL, REPLACEMENT);
@@ -103,7 +105,6 @@ static void test_absolute_patch_full_lifecycle(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_memory_vtable_reset_for_testing();
     printf("  absolute-patch-full-lifecycle: PASS\n");
 }
 
@@ -112,13 +113,13 @@ static void test_image_relative_patch(void) {
     memcpy(region, ORIGINAL, REGION);
     const uintptr_t offset = 0x40;
 
+    // image_base chosen so base + offset resolves to the region.
+    hk_memory_engine_ctx_t ectx = engine_ctx_for((uintptr_t)region - offset);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_memory_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_memory_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    // image_base chosen so base + offset resolves to the region.
-    set_env((uintptr_t)region - offset);
 
     hk_hook_spec_t spec = memory_spec("patch.rel", offset, true, ORIGINAL, REPLACEMENT);
     hk_hook_t *hook = NULL;
@@ -133,7 +134,6 @@ static void test_image_relative_patch(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_memory_vtable_reset_for_testing();
     printf("  image-relative-patch: PASS\n");
 }
 
@@ -142,12 +142,12 @@ static void test_precondition_failure_surfaces_at_prepare(void) {
     memcpy(region, ORIGINAL, REGION);
     uint8_t wrong_expected[REGION] = {0x11, 0x22, 0x33, 0x99};
 
+    hk_memory_engine_ctx_t ectx = engine_ctx_for(0);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_memory_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_memory_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(0);
 
     hk_hook_spec_t spec = memory_spec("patch.bad", (uintptr_t)region, false,
                                       wrong_expected, REPLACEMENT);
@@ -162,7 +162,6 @@ static void test_precondition_failure_surfaces_at_prepare(void) {
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_memory_vtable_reset_for_testing();
     printf("  precondition-failure-surfaces-at-prepare: PASS\n");
 }
 

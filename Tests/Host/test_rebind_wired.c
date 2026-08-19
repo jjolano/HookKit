@@ -105,14 +105,16 @@ static hk_hook_spec_t symbol_spec(const char *id, const char *symbol, void *repl
     return spec;
 }
 
-static void set_env(uint8_t *img) {
-    hk_rebind_binding_env_t env;
-    env.image_base = img;
-    env.image_size = IMG_SIZE;
-    env.slide = (uintptr_t)img - (uintptr_t)V_BASE;
-    env.write = buffer_write;
-    env.write_ctx = NULL;
-    hk_rebind_vtable_set_environment_for_testing(&env);
+// The engine context is an ordinary caller-owned struct now -- no file-scoped
+// environment, so each test owns its own.
+static hk_rebind_engine_ctx_t engine_ctx_for(uint8_t *img) {
+    hk_rebind_engine_ctx_t c;
+    c.image_base = img;
+    c.image_size = IMG_SIZE;
+    c.slide = (uintptr_t)img - (uintptr_t)V_BASE;
+    c.write = buffer_write;
+    c.write_ctx = NULL;
+    return c;
 }
 
 // ---- tests --------------------------------------------------------------
@@ -122,12 +124,12 @@ static void test_full_lifecycle_rebinds_and_reports(void) {
     assert(img);
     build_image(img);
 
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for(img);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(img);
 
     hk_hook_spec_t spec = symbol_spec("hook.malloc", "malloc", (void *)(uintptr_t)REPLACEMENT);
     hk_hook_t *hook = NULL;
@@ -169,7 +171,6 @@ static void test_full_lifecycle_rebinds_and_reports(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_rebind_vtable_reset_for_testing();
     free(img);
     printf("  full-lifecycle-rebinds-and-reports: PASS\n");
 }
@@ -181,12 +182,12 @@ static void test_absent_symbol_fails_at_prepare(void) {
     assert(img);
     build_image(img);
 
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for(img);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(img);
 
     hk_hook_spec_t spec = symbol_spec("hook.absent", "not_imported", (void *)0x1);
     hk_hook_t *hook = NULL;
@@ -204,20 +205,18 @@ static void test_absent_symbol_fails_at_prepare(void) {
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_rebind_vtable_reset_for_testing();
     free(img);
     printf("  absent-symbol-fails-at-prepare: PASS\n");
 }
 
 static void test_no_environment_fails_cleanly(void) {
-    // With no environment set, prepare has no image to work on and must fail
-    // cleanly rather than crash -- the router routed on capability alone.
+    // Registered with NO context, prepare has no image to work on and must
+    // fail cleanly rather than crash -- the router routed on capability alone.
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_rebind_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), NULL));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    hk_rebind_vtable_reset_for_testing();  // explicitly no environment
 
     hk_hook_spec_t spec = symbol_spec("hook.x", "malloc", (void *)0x1);
     hk_hook_t *hook = NULL;

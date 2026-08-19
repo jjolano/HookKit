@@ -1,59 +1,28 @@
 // Memory-patch engine <-> runtime adapter. See HKMemoryVtable.h.
+//
+// No file-scoped state: the writer and image base come from the registered
+// engine context, and the prepared plan is handed back by the core.
 
 #include "HKMemoryVtable.h"
 
+#include <stdlib.h>
 #include <string.h>
 
-static hk_memory_binding_env_t g_env;
-static bool g_env_set;
-
-#define HK_MEMORY_STASH_MAX 16u
+// A prepared memory patch needs the resolved address at commit as well as the
+// engine's plan -- resolving it twice would let an image-relative target land
+// somewhere else if the context moved in between.
 typedef struct {
-    char hook_id[64];
     hk_mempatch_plan_t plan;
-    uintptr_t address;   // resolved once at prepare, reused at commit
-    bool used;
-} stash_entry_t;
-static stash_entry_t g_stash[HK_MEMORY_STASH_MAX];
+    uintptr_t address;
+} prepared_patch_t;
 
-static stash_entry_t *stash_find(const char *id) {
-    if (!id) return NULL;
-    for (unsigned i = 0; i < HK_MEMORY_STASH_MAX; i++) {
-        if (g_stash[i].used && strcmp(g_stash[i].hook_id, id) == 0) return &g_stash[i];
-    }
-    return NULL;
-}
-static stash_entry_t *stash_put(const char *id) {
-    if (!id || strlen(id) >= sizeof(g_stash[0].hook_id)) return NULL;
-    stash_entry_t *e = stash_find(id);
-    if (!e) {
-        for (unsigned i = 0; i < HK_MEMORY_STASH_MAX; i++) {
-            if (!g_stash[i].used) { e = &g_stash[i]; break; }
-        }
-    }
-    if (!e) return NULL;
-    memset(e, 0, sizeof(*e));
-    strcpy(e->hook_id, id);
-    e->used = true;
-    return e;
-}
-
-void hk_memory_vtable_set_environment_for_testing(const hk_memory_binding_env_t *env) {
-    memset(g_stash, 0, sizeof(g_stash));
-    if (env) { g_env = *env; g_env_set = true; }
-    else { memset(&g_env, 0, sizeof(g_env)); g_env_set = false; }
-}
-
-void hk_memory_vtable_reset_for_testing(void) {
-    hk_memory_vtable_set_environment_for_testing(NULL);
-}
-
-// The spec carries the target's offset/absolute address; the environment
-// carries where an image-relative target's image is mapped. An absolute target
+// The spec carries the target's offset/absolute address; the context carries
+// where an image-relative target's image is mapped. An absolute target
 // resolves to its own address.
-static uintptr_t resolve_address(const hk_memory_target_t *mem) {
+static uintptr_t resolve_address(const hk_memory_engine_ctx_t *ctx,
+                                 const hk_memory_target_t *mem) {
     if (mem->address_is_image_relative) {
-        return g_env.image_base + (uintptr_t)mem->address;
+        return ctx->image_base + (uintptr_t)mem->address;
     }
     return (uintptr_t)mem->address;
 }
@@ -66,43 +35,54 @@ static hk_engine_capabilities_t memory_describe(void) {
     return caps;
 }
 
-static bool memory_prepare_one(const hk_hook_spec_t *spec) {
-    if (!g_env_set || !spec || spec->target_kind != HK_TARGET_MEMORY_PATCH) {
+static bool memory_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
+                                   void **out_prepared) {
+    const hk_memory_engine_ctx_t *ctx = engine_ctx;
+    if (!ctx || !spec || !out_prepared || spec->target_kind != HK_TARGET_MEMORY_PATCH) {
         return false;
     }
     const hk_memory_target_t *mem = &spec->target.memory;
-    stash_entry_t *e = stash_put(spec->stable_hook_id);
-    if (!e) {
+
+    prepared_patch_t *p = malloc(sizeof(*p));
+    if (!p) {
         return false;
     }
-    e->address = resolve_address(mem);
-    hk_mempatch_status_t st = hk_mempatch_prepare(e->address, mem->size,
+    p->address = resolve_address(ctx, mem);
+    hk_mempatch_status_t st = hk_mempatch_prepare(p->address, mem->size,
                                                   mem->expected_bytes, mem->expected_mask,
-                                                  &e->plan);
+                                                  &p->plan);
     if (st != HK_MEMPATCH_OK) {
-        e->used = false;  // precondition failed / too large / invalid: clean fail
+        free(p);  // precondition failed / too large / invalid: clean fail
         return false;
     }
+    *out_prepared = p;
     return true;
 }
 
-static hk_mutation_state_t memory_commit_one(const hk_hook_spec_t *spec,
-                                             hk_artifact_sink_t *sink) {
-    if (!g_env_set || !spec) {
+static hk_mutation_state_t memory_commit_one_ctx(void *engine_ctx,
+                                                 const hk_hook_spec_t *spec,
+                                                 void *prepared,
+                                                 hk_artifact_sink_t *sink) {
+    const hk_memory_engine_ctx_t *ctx = engine_ctx;
+    if (!ctx || !spec || !prepared) {
         return HK_MUTATION_NONE;
     }
-    stash_entry_t *e = stash_find(spec->stable_hook_id);
-    if (!e) {
-        return HK_MUTATION_NONE;
-    }
-    return hk_mempatch_commit(e->address, &e->plan, spec->target.memory.replacement_bytes,
-                              g_env.write, g_env.write_ctx, sink);
+    prepared_patch_t *p = prepared;
+    return hk_mempatch_commit(p->address, &p->plan,
+                              spec->target.memory.replacement_bytes,
+                              ctx->write, ctx->write_ctx, sink);
+}
+
+static void memory_release_prepared(void *engine_ctx, void *prepared) {
+    (void)engine_ctx;
+    free(prepared);
 }
 
 static const hk_engine_vtable_t g_memory_vtable = {
     .describe = memory_describe,
-    .prepare_one = memory_prepare_one,
-    .commit_one = memory_commit_one,
+    .prepare_one_ctx = memory_prepare_one_ctx,
+    .commit_one_ctx = memory_commit_one_ctx,
+    .release_prepared = memory_release_prepared,
 };
 
 const hk_engine_vtable_t *hk_memory_vtable(void) {

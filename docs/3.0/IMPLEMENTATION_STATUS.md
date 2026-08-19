@@ -1806,11 +1806,12 @@ device-verified.
 | Task | State | Evidence |
 |---|---|---|
 | Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
-| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts | this commit — see below |
+| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts; converted to per-engine context + prepared-state handoff | commit `030ea2f`, converted `eb36f9d`+ |
 | Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
-| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end | this commit — see below |
+| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end; converted to per-engine context + prepared-state handoff | commit `e5fc3b2`, converted `eb36f9d`+ |
 | ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | this commit — see below |
-| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | in progress (host-verified) — ObjC engine wired into the plan lifecycle; first engine to reach `HK_TARGET_OBJC_METHOD`, so it exercises the plan's ObjC-target path end to end | this commit — see below |
+| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | in progress (host-verified) — ObjC engine wired into the plan lifecycle; first engine to reach `HK_TARGET_OBJC_METHOD`, so it exercises the plan's ObjC-target path end to end; first adapter on per-engine context + prepared-state handoff | commit `87503a6`, converted `eb36f9d` |
+| Engine-vtable context + prepared-state handoff (`HKEngineInternal.h`, `HKPlan.c`) | complete (host-verified) — additive `prepare_one_ctx`/`commit_one_ctx`/`release_prepared` + `hk_runtime_register_engine_with_context`; retires the file-scoped-environment and stash ceiling in all three adapters | commit `eb36f9d` — see below |
 | Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey, commit `e5fc3b2` |
 
 **Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
@@ -2156,13 +2157,28 @@ exactly one `release_prepared` for every `prepare_one_ctx` that returned
 true** — at `hk_hook_free`, whether or not commit ever ran. A plan that is
 analyzed, prepared, and then simply dropped does not leak.
 
-**HKObjCVtable converted as the proof**, and the diff is deletion-heavy: the
-file-scoped environment, the 16-entry stash keyed by `stable_hook_id`, and
-both `*_for_testing` entry points are gone. The context is now an ordinary
-caller-owned `hk_objc_engine_ctx_t`. `HKRebindVtable` and `HKMemoryVtable`
-are deliberately left on the context-free pair for now — that is not an
-oversight but the point: it proves both paths coexist in one build. Converting
-them is mechanical follow-up work.
+**All three adapters converted**, and the diff is deletion-heavy: three copies
+of a file-scoped environment, three 16-entry stashes keyed by
+`stable_hook_id`, and six `*_for_testing` entry points are gone, replaced by
+three caller-owned context structs (`hk_rebind_engine_ctx_t`,
+`hk_memory_engine_ctx_t`, `hk_objc_engine_ctx_t`). No adapter in
+`Sources/Engines/` has any file-scoped state left — verified by grep, the only
+surviving occurrence of the word being a comment saying so.
+
+Two small things fell out of converting the other two rather than stopping at
+one. `HKRebindVtable`'s "no environment set" test now registers the engine
+with a **NULL context** instead of calling a reset function, which is a
+better test of the same property: it exercises the real "registered without a
+context" path a caller could actually hit, rather than a fixture-only reset.
+And `HKMemoryVtable` gained a `prepared_patch_t` wrapping the engine plan
+alongside the address resolved at prepare — previously the address was
+recomputed at commit from the file-scoped base, which would have silently
+retargeted an image-relative patch if the context changed in between.
+Resolving once and carrying it is both simpler and correct by construction.
+
+Coexistence of the two paths is still proven, just not by these: the eight
+fake engines in `Tests/Host/fake_engines.h` remain on the context-free pair
+and were never touched, which is the stronger demonstration anyway.
 
 Five teeth-proofs, and **one of them found a real gap rather than confirming
 what was already true** — which is the reason to run them:
