@@ -73,6 +73,19 @@ struct hk_hook {
     // different one if the registry changed between analyze and prepare).
     const hk_engine_vtable_t *matched_engine;
 
+    // The context matched_engine was registered with, captured at the same
+    // moment for the same reason: prepare and commit must reach the engine
+    // analysis chose, with the context it was registered with, even if the
+    // registry changed since. Not owned.
+    void *matched_engine_ctx;
+
+    // What the engine's prepare_one_ctx produced, handed back to
+    // commit_one_ctx. OWNED in the sense that the core guarantees exactly
+    // one release_prepared call for it -- on re-preparation, and again at
+    // hk_hook_free whether or not commit ever ran. NULL for an engine using
+    // the context-free prepare_one/commit_one pair, which stashes its own.
+    void *prepared_state;
+
     // Set by hk_plan_commit when this hook goes ACTIVE and its engine
     // published an original. NOT owned: points into the process-global
     // installed registry (HKInstalled.h), which outlives this hook -- that

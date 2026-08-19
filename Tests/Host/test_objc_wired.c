@@ -10,6 +10,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "fake_objc_runtime.h"
@@ -44,21 +45,23 @@ static hk_hook_spec_t objc_spec(const char *id, void *cls, const char *sel_name,
     return spec;
 }
 
-static void set_env(fake_rt_t *ctx) {
-    hk_objc_binding_env_t env;
-    env.runtime = make_runtime(ctx);
-    hk_objc_vtable_set_environment_for_testing(&env);
+// The engine context is an ordinary caller-owned struct now -- no file-scoped
+// environment, so each test owns its own and they cannot collide.
+static hk_objc_engine_ctx_t engine_ctx_for(fake_rt_t *ctx) {
+    hk_objc_engine_ctx_t e;
+    e.runtime = make_runtime(ctx);
+    return e;
 }
 
 static void test_local_method_full_lifecycle(void) {
     world_t w; world_init(&w);
 
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_objc_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(&w.rt);
 
     hk_hook_spec_t spec = objc_spec("hook.bar", &w.child, "bar",
                                     HK_OBJC_INSTANCE_METHOD,
@@ -101,19 +104,18 @@ static void test_local_method_full_lifecycle(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_objc_vtable_reset_for_testing();
     printf("  local-method-full-lifecycle: PASS\n");
 }
 
 static void test_class_method_through_the_lifecycle(void) {
     world_t w; world_init(&w);
 
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_objc_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(&w.rt);
 
     // +ping lives on the metaclass only; the adapter must carry the method
     // kind through for this to resolve at all.
@@ -134,19 +136,18 @@ static void test_class_method_through_the_lifecycle(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_objc_vtable_reset_for_testing();
     printf("  class-method-through-the-lifecycle: PASS\n");
 }
 
 static void test_inherited_override_reports_irreversible(void) {
     world_t w; world_init(&w);
 
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_objc_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(&w.rt);
 
     // -foo is inherited from Base; hooking it on Child ADDS an override, which
     // is not cleanly reversible -- and that has to survive all the way into
@@ -175,19 +176,18 @@ static void test_inherited_override_reports_irreversible(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_objc_vtable_reset_for_testing();
     printf("  inherited-override-reports-irreversible: PASS\n");
 }
 
 static void test_unresolvable_target_fails_at_prepare(void) {
     world_t w; world_init(&w);
 
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_for_testing(rt, hk_objc_vtable()));
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
-    set_env(&w.rt);
 
     // -foo is inherited, and the request insists on a local method: the engine
     // refuses, and the refusal must surface as a clean prepare failure with
@@ -208,8 +208,218 @@ static void test_unresolvable_target_fails_at_prepare(void) {
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    hk_objc_vtable_reset_for_testing();
     printf("  unresolvable-target-fails-at-prepare: PASS\n");
+}
+
+// ---- the context/prepared-state mechanism itself -----------------------
+
+// The property the file-scoped environment made impossible, and the reason
+// the vtable grew context-carrying entry points: two runtimes driving the
+// SAME engine against DIFFERENT ObjC runtimes at the same time. Under the old
+// adapter the second set_environment call would have clobbered the first, and
+// both plans would have patched the same world.
+static void test_two_runtimes_with_different_contexts(void) {
+    world_t w1; world_init(&w1);
+    world_t w2; world_init(&w2);
+    hk_objc_engine_ctx_t ectx1 = engine_ctx_for(&w1.rt);
+    hk_objc_engine_ctx_t ectx2 = engine_ctx_for(&w2.rt);
+
+    hk_runtime_t *rt1 = NULL; hk_runtime_t *rt2 = NULL;
+    hk_plan_t *p1 = NULL; hk_plan_t *p2 = NULL;
+    assert(hk_runtime_create(NULL, &rt1) == HK_STATUS_OK);
+    assert(hk_runtime_create(NULL, &rt2) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt1, hk_objc_vtable(), &ectx1));
+    assert(hk_runtime_register_engine_with_context(rt2, hk_objc_vtable(), &ectx2));
+    assert(hk_plan_create(rt1, NULL, &p1) == HK_STATUS_OK);
+    assert(hk_plan_create(rt2, NULL, &p2) == HK_STATUS_OK);
+
+    // Same hook id and same selector in both, deliberately: if any state were
+    // shared -- an environment or a stash keyed by that id -- these would
+    // collide.
+    hk_hook_spec_t s1 = objc_spec("same.id", &w1.child, "bar",
+                                  HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                  (void *)imp_replacement);
+    hk_hook_spec_t s2 = objc_spec("same.id", &w2.child, "bar",
+                                  HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                  (void *)imp_someone_else);
+    hk_hook_t *h1 = NULL; hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook(p1, &s1, &h1) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(p2, &s2, &h2) == HK_STATUS_OK);
+
+    // Interleaved on purpose: both prepared before either commits, so any
+    // single-slot shared state would have been overwritten by the time the
+    // first one commits.
+    assert(hk_plan_analyze(p1, NULL) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p1, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p2, NULL) == HK_STATUS_OK);
+    assert(h1->result.outcome == HK_OUTCOME_PREPARED);
+    assert(h2->result.outcome == HK_OUTCOME_PREPARED);
+    // Each hook carries its own prepared state, and they are distinct objects.
+    assert(h1->prepared_state && h2->prepared_state);
+    assert(h1->prepared_state != h2->prepared_state);
+
+    hk_report_t *r1 = NULL; hk_report_t *r2 = NULL;
+    assert(hk_plan_commit(p1, &r1) == HK_STATUS_OK);
+    assert(hk_plan_commit(p2, &r2) == HK_STATUS_OK);
+
+    // Each patched its OWN world with its OWN replacement.
+    assert(imp_on(&w1.child, "bar") == (void *)imp_replacement);
+    assert(imp_on(&w2.child, "bar") == (void *)imp_someone_else);
+    assert(w1.rt.replace_calls == 1 && w2.rt.replace_calls == 1);
+
+    hk_report_release(r1); hk_report_release(r2);
+    hk_plan_release(p1); hk_plan_release(p2);
+    hk_runtime_release(rt1); hk_runtime_release(rt2);
+    printf("  two-runtimes-with-different-contexts: PASS\n");
+}
+
+// Prepared state must be released even when commit never runs -- otherwise a
+// plan that is analyzed, prepared, and then simply dropped leaks one
+// allocation per hook. Under ASan+UBSan (how this suite is also run) a missing
+// release is a reported leak, which is what gives this test teeth.
+static void test_prepared_state_released_without_commit(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = objc_spec("hook.dropped", &w.child, "bar",
+                                    HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                    (void *)imp_replacement);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->prepared_state != NULL);
+
+    // Dropped without committing. The method is untouched and the prepared
+    // allocation is the plan's to release.
+    hk_plan_release(plan);
+    assert(imp_on(&w.child, "bar") == (void *)imp_child_bar);
+    assert(w.rt.replace_calls == 0);
+
+    hk_runtime_release(rt);
+    printf("  prepared-state-released-without-commit: PASS\n");
+}
+
+// A second prepare is refused by the state machine rather than producing a
+// second prepared state -- which is WHY the release-before-assign guard in
+// hk_plan_prepare is unreachable today, and is worth pinning down here so
+// that if the lifecycle ever gains a retry path, this test is the thing that
+// notices the guard has become live.
+static void test_second_prepare_is_refused_by_state(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = objc_spec("hook.twice", &w.child, "bar",
+                                    HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                    (void *)imp_replacement);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    void *first = hook->prepared_state;
+    assert(first != NULL);
+
+    // The lifecycle is one-way: analyze needs DRAFT, prepare needs ANALYZED.
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_INVALID_STATE);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_INVALID_STATE);
+    // The refusal changed nothing: same prepared state, nothing written.
+    assert(hook->prepared_state == first);
+    assert(w.rt.replace_calls == 0);
+
+    // And that state is still the one commit uses.
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(w.rt.replace_calls == 1);
+
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  second-prepare-is-refused-by-state: PASS\n");
+}
+
+// A deliberately misbehaving engine: it writes *out_prepared and THEN returns
+// false, which the prepare_one_ctx contract forbids ("returning false must
+// leave *out_prepared untouched"). Storing that pointer anyway would hand a
+// failed preparation's state to release_prepared at plan release -- here, a
+// double free of memory the engine already released.
+//
+// This exists because a teeth-proof found the gap: swapping the core's
+// `ok ? prepared : NULL` for a plain `prepared` changed NOTHING against
+// well-behaved engines, since prepared starts NULL and a conforming engine
+// never writes it on failure. The guard is only load-bearing against an
+// engine like this one, so this is the test that makes it so.
+static bool g_liar_released;
+static void *g_liar_freed_ptr;
+
+static hk_engine_capabilities_t liar_describe(void) {
+    hk_engine_capabilities_t caps;
+    caps.engine_id = "liar";
+    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
+    caps.achievable_reach = HK_REACH_OBJC_DISPATCH;
+    return caps;
+}
+static bool liar_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
+                                 void **out_prepared) {
+    (void)engine_ctx; (void)spec;
+    void *p = malloc(16);
+    *out_prepared = p;   // contract violation: written on the failure path
+    free(p);             // ...and already released, so retaining it is a UAF
+    g_liar_freed_ptr = p;
+    return false;
+}
+static void liar_release_prepared(void *engine_ctx, void *prepared) {
+    (void)engine_ctx; (void)prepared;
+    g_liar_released = true;   // must never happen for a failed preparation
+}
+static const hk_engine_vtable_t g_liar_engine = {
+    .describe = liar_describe,
+    .prepare_one_ctx = liar_prepare_one_ctx,
+    .release_prepared = liar_release_prepared,
+};
+
+static void test_failed_preparation_retains_no_state(void) {
+    world_t w; world_init(&w);
+    g_liar_released = false;
+    g_liar_freed_ptr = NULL;
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, &g_liar_engine, NULL));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = objc_spec("hook.liar", &w.child, "bar",
+                                    HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                    (void *)imp_replacement);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(g_liar_freed_ptr != NULL);     // the engine really did write one
+    assert(hook->prepared_state == NULL); // ...and the core kept none of it
+
+    // Releasing the plan must not hand that pointer back to the engine.
+    hk_plan_release(plan);
+    assert(!g_liar_released);
+
+    hk_runtime_release(rt);
+    printf("  failed-preparation-retains-no-state: PASS\n");
 }
 
 int main(void) {
@@ -217,6 +427,10 @@ int main(void) {
     test_class_method_through_the_lifecycle();
     test_inherited_override_reports_irreversible();
     test_unresolvable_target_fails_at_prepare();
+    test_two_runtimes_with_different_contexts();
+    test_prepared_state_released_without_commit();
+    test_second_prepare_is_refused_by_state();
+    test_failed_preparation_retains_no_state();
     printf("all objc wired tests passed\n");
     return 0;
 }

@@ -99,10 +99,25 @@ static hk_status_t hk_image_selector_copy(
 // hk_plan_release (every hook) and hk_plan_add_hook's error-unwind path
 // (the one partially-built hook when a later deep-copy step fails) --
 // same cleanup either way, written once.
+// Releases whatever prepare_one_ctx produced for this hook, if anything.
+// Called both on re-preparation and at free, so every successful preparation
+// is balanced by exactly one release even when commit never runs.
+static void hk_hook_release_prepared(struct hk_hook *hook) {
+    if (!hook || !hook->prepared_state) {
+        return;
+    }
+    if (hook->matched_engine && hook->matched_engine->release_prepared) {
+        hook->matched_engine->release_prepared(hook->matched_engine_ctx,
+                                               hook->prepared_state);
+    }
+    hook->prepared_state = NULL;
+}
+
 static void hk_hook_free(struct hk_hook *hook) {
     if (!hook) {
         return;
     }
+    hk_hook_release_prepared(hook);
     free(hook->stable_hook_id_owned);
     free(hook->owned_symbol_name);
     free(hook->owned_symbol_defining_image_path);
@@ -572,6 +587,7 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_
         // found, rather than re-searching (and risking a different result
         // if the registry changed between analyze and prepare).
         hook->matched_engine = plan->runtime->engines[i];
+        hook->matched_engine_ctx = plan->runtime->engine_ctxs[i];
         return;
     }
 
@@ -589,6 +605,7 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_
     out->diagnostic_engine_id.data = NULL;
     out->diagnostic_engine_id.length = 0;
     hook->matched_engine = NULL;
+    hook->matched_engine_ctx = NULL;
 }
 
 hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {
@@ -747,12 +764,36 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
             continue;
         }
 
+        // Releases whatever a previous attempt produced, so the assignment
+        // below cannot strand an earlier allocation. UNREACHABLE TODAY, and
+        // said plainly rather than left to look load-bearing: the state
+        // machine is one-way (analyze requires DRAFT, prepare requires
+        // ANALYZED), so no hook can reach this loop twice. It is here because
+        // it makes the assignment safe by construction rather than safe only
+        // because a distant state check happens to forbid the second visit --
+        // and a retry path would make it live.
+        hk_hook_release_prepared(hook);
+
         // An engine that was eligible for describe() but never implemented
-        // prepare_one is a real inconsistency, not a silent skip -- treated
-        // as a preparation failure, the same as prepare_one() itself
-        // returning false.
-        bool ok = hook->matched_engine && hook->matched_engine->prepare_one
-                && hook->matched_engine->prepare_one(&hook->spec);
+        // either preparation entry point is a real inconsistency, not a
+        // silent skip -- treated as a preparation failure, the same as
+        // prepare_one() itself returning false.
+        //
+        // The context-carrying variant wins when present: an engine that
+        // filled it meant it, and it is the only one that can hand state
+        // forward to commit.
+        bool ok;
+        if (hook->matched_engine && hook->matched_engine->prepare_one_ctx) {
+            void *prepared = NULL;
+            ok = hook->matched_engine->prepare_one_ctx(hook->matched_engine_ctx,
+                                                       &hook->spec, &prepared);
+            // Only a successful preparation may hand state forward; a false
+            // return means nothing was reserved, so nothing is retained.
+            hook->prepared_state = ok ? prepared : NULL;
+        } else {
+            ok = hook->matched_engine && hook->matched_engine->prepare_one
+                    && hook->matched_engine->prepare_one(&hook->spec);
+        }
 
         if (ok) {
             out->outcome = HK_OUTCOME_PREPARED;
@@ -854,11 +895,21 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
 
         sink.request_id = hook->hook_id;  // this hook is the artifact's originating request
         sink.published_original = NULL;   // each hook's engine publishes its own, or none
-        hk_mutation_state_t mutation = (hook->matched_engine && hook->matched_engine->commit_one)
-            ? hook->matched_engine->commit_one(&hook->spec, &sink)
-            : HK_MUTATION_UNKNOWN;  // matched_engine gone, or never implemented commit_one -- an
-                                     // engine this inconsistent cannot be trusted to have done
-                                     // nothing, so this is UNKNOWN, not the more optimistic NONE.
+        // Same preference as at prepare, and it has to be the same: an engine
+        // whose prepare produced state must be the one handed it back.
+        hk_mutation_state_t mutation;
+        if (hook->matched_engine && hook->matched_engine->commit_one_ctx) {
+            mutation = hook->matched_engine->commit_one_ctx(hook->matched_engine_ctx,
+                                                            &hook->spec,
+                                                            hook->prepared_state, &sink);
+        } else if (hook->matched_engine && hook->matched_engine->commit_one) {
+            mutation = hook->matched_engine->commit_one(&hook->spec, &sink);
+        } else {
+            // matched_engine gone, or never implemented commit_one -- an
+            // engine this inconsistent cannot be trusted to have done
+            // nothing, so this is UNKNOWN, not the more optimistic NONE.
+            mutation = HK_MUTATION_UNKNOWN;
+        }
         out->mutation = mutation;
 
         switch (mutation) {

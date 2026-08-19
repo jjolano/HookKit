@@ -94,9 +94,10 @@ hk_id_t hk_runtime_owner_id(const hk_runtime_t *runtime) {
 // module eventually) must keep it alive for the runtime's lifetime, the
 // same non-ownership convention hk_hook_spec_t.replacement already uses
 // for a caller-owned function pointer.
-bool hk_runtime_register_engine_for_testing(
+bool hk_runtime_register_engine_with_context(
     hk_runtime_t *runtime,
-    const hk_engine_vtable_t *vtable)
+    const hk_engine_vtable_t *vtable,
+    void *engine_ctx)
 {
     if (!runtime || !vtable) {
         return false;
@@ -104,8 +105,17 @@ bool hk_runtime_register_engine_for_testing(
     if (runtime->engine_count >= HK_RUNTIME_MAX_ENGINES) {
         return false;
     }
-    runtime->engines[runtime->engine_count++] = vtable;
+    runtime->engines[runtime->engine_count] = vtable;
+    runtime->engine_ctxs[runtime->engine_count] = engine_ctx;
+    runtime->engine_count++;
     return true;
+}
+
+bool hk_runtime_register_engine_for_testing(
+    hk_runtime_t *runtime,
+    const hk_engine_vtable_t *vtable)
+{
+    return hk_runtime_register_engine_with_context(runtime, vtable, NULL);
 }
 
 // Nothing can be pending yet: the late-image delta queue this drains

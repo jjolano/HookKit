@@ -36,6 +36,12 @@ struct hk_runtime {
     // which point "for_testing" in the function name stops being
     // accurate and it should be renamed, not left misleading).
     const hk_engine_vtable_t *engines[HK_RUNTIME_MAX_ENGINES];
+    // Parallel to engines[] -- the context each was registered with, passed
+    // to that engine's *_ctx entry points. NULL for an engine registered
+    // without one. Kept as a parallel array rather than folded into a struct
+    // so the existing engines[] indexing and its non-ownership convention
+    // stay exactly as they were.
+    void *engine_ctxs[HK_RUNTIME_MAX_ENGINES];
     size_t engine_count;
 };
 

@@ -77,6 +77,48 @@ typedef struct hk_engine_vtable {
     // called. An engine that refuses (returns NONE) records nothing.
     hk_mutation_state_t (*commit_one)(const hk_hook_spec_t *spec,
                                       hk_artifact_sink_t *sink);
+
+    // ---- context-carrying variants (optional, additive) ----------------
+    //
+    // The pair above is context-free, which forces any engine with real
+    // prepared state into two workarounds: a file-scoped environment
+    // (so only ONE can be configured at a time) and a side stash keyed by
+    // stable_hook_id (so prepare can hand something to commit). All three
+    // Milestone 6 adapters did exactly that and each said so in its header.
+    // These variants retire both: the engine gets the context it was
+    // registered with, and whatever prepare produced comes straight back at
+    // commit.
+    //
+    // Purely additive. Existing engines use designated initializers, which
+    // zero-fill omitted members, so every engine written before these
+    // existed keeps working unchanged with these left NULL -- and the core
+    // already NULL-checks before calling. An engine implements EITHER the
+    // context-free pair OR this one; when both are present the core prefers
+    // these, since an engine that filled them meant them.
+    //
+    // Register with hk_runtime_register_engine_with_context to supply the
+    // context; registering without one passes NULL, which is fine for an
+    // engine whose context is genuinely nothing.
+
+    // `out_prepared` receives whatever the engine wants handed back at
+    // commit -- ownership passes to the caller, which guarantees exactly one
+    // release_prepared call for every true return, whether or not commit
+    // ever runs. Returning false must leave *out_prepared untouched.
+    bool (*prepare_one_ctx)(void *engine_ctx, const hk_hook_spec_t *spec,
+                            void **out_prepared);
+
+    // `prepared` is exactly what prepare_one_ctx produced for THIS hook.
+    // Does not release it; the core does that.
+    hk_mutation_state_t (*commit_one_ctx)(void *engine_ctx,
+                                          const hk_hook_spec_t *spec,
+                                          void *prepared,
+                                          hk_artifact_sink_t *sink);
+
+    // Releases prepared state. Called exactly once per successful
+    // prepare_one_ctx -- on plan release, on re-preparation, and after a
+    // commit alike. May be NULL when the state needs no cleanup (an engine
+    // that hands back a small integer cast to void*, say).
+    void (*release_prepared)(void *engine_ctx, void *prepared);
 } hk_engine_vtable_t;
 
 // Eligibility per spec section 9, minimal subset: target kind supported,
@@ -106,5 +148,13 @@ static inline bool hk_engine_eligible_minimal(
 bool hk_runtime_register_engine_for_testing(
     hk_runtime_t *runtime,
     const hk_engine_vtable_t *vtable);
+
+// Same, plus the context handed to the vtable's *_ctx entry points. Neither
+// `vtable` nor `engine_ctx` is owned or copied; both must outlive the
+// runtime. Registering without a context is the same as passing NULL here.
+bool hk_runtime_register_engine_with_context(
+    hk_runtime_t *runtime,
+    const hk_engine_vtable_t *vtable,
+    void *engine_ctx);
 
 #endif // HK_CORE_ENGINE_INTERNAL_H

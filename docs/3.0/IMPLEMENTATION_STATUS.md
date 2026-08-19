@@ -2120,6 +2120,87 @@ to reference every symbol in it.
 `make test` (218 assertions, exit 0), both new suites under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
 
+**Engine-vtable extension: per-engine context + prepared-state handoff**,
+this iteration (`Sources/Core/HKEngineInternal.h`, `HKRuntime.c`,
+`HKRuntimeInternal.h`, `HKPlanInternal.h`, `HKPlan.c`). This retires the
+ceiling all three Milestone 6 adapters shared and each apologized for in its
+own header.
+
+The survey came first, and it found the conflict risk was **smaller than
+flagged**. The mission warned this "touches every fake engine"; in fact all
+eight fake vtables live in one file (`Tests/Host/fake_engines.h`), the core
+calls the vtable from exactly two places in `HKPlan.c`, and — the decisive
+point — C designated initializers zero-fill omitted members, and the core
+already NULL-checks every entry point before calling it. So a purely
+**additive** extension needs *zero* edits to any existing engine. That was
+verified before writing the adapters: the extension landed first and the full
+218-assertion suite stayed green with no engine touched.
+
+What was added, all optional:
+
+- `prepare_one_ctx(engine_ctx, spec, **out_prepared)` /
+  `commit_one_ctx(engine_ctx, spec, prepared, sink)` /
+  `release_prepared(engine_ctx, prepared)` on `hk_engine_vtable_t`. When
+  present the core prefers them, on the reasoning that an engine that filled
+  them meant them.
+- `hk_runtime_register_engine_with_context()`, with
+  `hk_runtime_register_engine_for_testing()` now a one-line call into it
+  passing NULL — so the old registration is not a parallel path, it is the
+  new one with an empty context.
+- `hk_runtime_t.engine_ctxs[]` parallel to `engines[]`, and
+  `hk_hook_t.matched_engine_ctx` / `.prepared_state`.
+
+The ownership rule is the part worth stating precisely, because it is what
+makes the feature safe rather than merely convenient: **the core guarantees
+exactly one `release_prepared` for every `prepare_one_ctx` that returned
+true** — at `hk_hook_free`, whether or not commit ever ran. A plan that is
+analyzed, prepared, and then simply dropped does not leak.
+
+**HKObjCVtable converted as the proof**, and the diff is deletion-heavy: the
+file-scoped environment, the 16-entry stash keyed by `stable_hook_id`, and
+both `*_for_testing` entry points are gone. The context is now an ordinary
+caller-owned `hk_objc_engine_ctx_t`. `HKRebindVtable` and `HKMemoryVtable`
+are deliberately left on the context-free pair for now — that is not an
+oversight but the point: it proves both paths coexist in one build. Converting
+them is mechanical follow-up work.
+
+Five teeth-proofs, and **one of them found a real gap rather than confirming
+what was already true** — which is the reason to run them:
+
+- removing the release at `hk_hook_free` → LeakSanitizer reports a 48-byte
+  leak (real code clean)
+- never capturing `matched_engine_ctx` → caught
+- not handing `prepared_state` to commit → caught
+- `hook->prepared_state = prepared` instead of `ok ? prepared : NULL` →
+  **NOT caught**. The reason is instructive: a *conforming* engine never
+  writes `*out_prepared` on failure and `prepared` starts NULL, so the
+  variant was behaviorally identical. The guard is only load-bearing against
+  an engine that violates the contract — so a deliberately misbehaving fake
+  engine was added (writes `*out_prepared`, frees it, then returns false),
+  which turns retaining that pointer into a double free at plan release. With
+  that test in place the variant **is** caught. The guard was right; nothing
+  proved it until now.
+
+One honest downgrade came out of writing these tests. A test asserting that
+re-preparation releases the first attempt's state **failed**, because
+re-preparation is unreachable: `hk_plan_analyze` requires `HK_PLAN_DRAFT` and
+`hk_plan_prepare` requires `HK_PLAN_ANALYZED`, so the lifecycle is strictly
+one-way and no hook reaches the prepare loop twice. The release-before-assign
+call there is therefore **unreachable today**, and both the source comment and
+the replacement test say so rather than leaving it looking load-bearing; the
+test now pins down the actual behavior (a second prepare returns
+`HK_STATUS_INVALID_STATE` and disturbs nothing), so if a retry path is ever
+added, that test is what notices the guard has become live.
+
+Still not retired, and stated because this extension does *not* fix it:
+`prepare_one_ctx` returns `bool`, so `HK_OBJC_NOT_APPLICABLE` — an absent
+*optional* target, which is a satisfied request rather than a failure — still
+collapses into the same `false` as a genuine inability. That needs a richer
+prepare result, which is a different change from this one.
+
+`make test` (222 assertions, exit 0), the wired suite under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
+
 **Correction to the plan recorded one commit earlier.** The v2.1.1 entry above
 said the next step would be adding a `provenance` enum to
 `Schemas/hookkit-abi-baseline.schema.json` so a declaration-derived `v1.0.1`
