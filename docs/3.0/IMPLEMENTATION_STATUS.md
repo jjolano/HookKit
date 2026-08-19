@@ -2575,7 +2575,7 @@ applying the lesson from the inline adapter rather than rediscovering it.
 | Task | State | Evidence |
 |---|---|---|
 | Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | this commit — see below |
-| Runtime adapter | not started — same shape as the other four, on the context-carrying vtable entry points | |
+| Runtime adapter | not started — same shape as the other four, but blocked on a routing question found while starting it (below) | |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2684,6 +2684,33 @@ a proof again.
 
 `make test` (263 assertions, exit 0), the suite under ASan+UBSan (clean), and
 `./build.sh all` (all 4 lanes) verified green.
+
+**A routing gap found while starting the adapter, recorded before writing
+code.** The relocating engine wants the same `describe()` as the terminal one:
+`HK_TARGET_FUNCTION_ADDRESS` + `HK_REACH_ENTRYPOINT`. They differ *only* on
+which `hk_original_requirement_t` values they can serve — terminal serves
+`HK_ORIGINAL_NONE` alone, relocating serves all three. But
+`hk_engine_eligible_minimal` does not consider the original requirement; its
+own comment has always listed "original requirement / continuation policy
+compatibility" among the things explicitly not checked yet. So with both
+registered, the first eligible wins and the second is unreachable.
+
+The failure is **asymmetric**, which is what makes it worth stating rather than
+just noting: relocating-first is merely wasteful (it serves `ORIGINAL_NONE`
+correctly, just with a trampoline nobody needed), while terminal-first makes
+every `HK_ORIGINAL_CALLABLE_CONTINUATION` request fail — a capability that
+exists becomes unreachable.
+
+The obvious fix is a capability field (which original requirements this engine
+satisfies) checked in eligibility. It was **not** done in this pass, for a
+concrete reason: every `describe()` in the codebase builds
+`hk_engine_capabilities_t` field-by-field on an uninitialized local, so adding
+a field silently leaves it holding stack garbage in all thirteen — the exact
+bug pattern that segfaulted the inline tests and that both adapter ctx helpers
+were later `memset` to prevent. Doing it safely means zeroing all thirteen
+`describe()` bodies FIRST, in their own commit, then adding the field. That
+ordering is the work, and it is a wide edit that should be deliberate rather
+than smuggled into an adapter commit.
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**
