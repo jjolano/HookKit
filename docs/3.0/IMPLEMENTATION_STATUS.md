@@ -378,12 +378,32 @@ builds the armv7/armv7s slices and fails at link — build them with an explicit
 `SDKBINPATH` instead. Worktree removed cleanly afterward; the extract ran from
 the main tree against the worktree binary via `--repo-root`, so it did not
 depend on `Tools/abi/extract_abi.py` existing in the old tag. **`v2.3.0` also done** (`Tests/LegacyABI/Baselines/v2.3.0.json`, schema-valid,
-same build recipe, versions `2.3.0`, same export allowlist). Half the named
-set is now extracted (v2.5.0, v2.4.0, v2.3.0); **3 remain**: `v2.2.5`,
-`v2.1.1`, `v1.0.1`. The older v1/v2.1/v2.2 tags may need more build coaxing
-(they predate more of the toolchain setup); assessed per tag, and a tag that
-genuinely will not build with the current toolchain is recorded as such rather
-than chased through many failed builds.
+same build recipe, versions `2.3.0`, same export allowlist). **`v2.2.5` also
+done** (`Tests/LegacyABI/Baselines/v2.2.5.json`, schema-valid, same recipe,
+versions `2.2.5`, same export allowlist). It built clean on the first attempt
+— the "older tags may need coaxing" worry did not materialize at v2.2.5, whose
+tree already carries `vendor/gum` and the same framework Makefile shape.
+
+Four of the six named baselines are now extracted (v2.5.0, v2.4.0, v2.3.0,
+v2.2.5); **2 remain**: `v2.1.1`, `v1.0.1`.
+
+One finding worth recording, which only became visible once four baselines
+existed side by side: the `Headers/HookKit.h` checksum is **byte-identical
+across v2.2.5, v2.3.0, and v2.4.0** (`834c389c6767…`) and changes only at
+v2.5.0 (`2056504695f1…`). So the public header surface was frozen for three
+consecutive releases while the implementation moved underneath it. That is
+what a stable ABI boundary is supposed to look like, and it also cross-checks
+the extractor: three independent builds of three different trees agreeing on
+a checksum is not something a broken hasher produces by accident. The export
+allowlist (`_OBJC_CLASS_$_HKSubstitutor`, `_OBJC_METACLASS_$_HKSubstitutor`,
+per-arch) is likewise identical across all four — the linker-enforced boundary
+has not moved once in the extracted range.
+
+The remaining v1.0.1/v2.1.1 tags predate more of the toolchain setup; assessed
+per tag, and a tag that genuinely will not build with the current toolchain is
+recorded as such (which tag, which error) rather than chased through many
+failed builds. A source-derived baseline is an acceptable fallback there only
+if labelled as source-derived rather than binary-extracted.
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same

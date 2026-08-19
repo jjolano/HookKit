@@ -1,0 +1,25 @@
+{
+  "architectures": [
+    "arm64",
+    "arm64e"
+  ],
+  "compatibility_version": "2.2.5",
+  "current_version": "2.2.5",
+  "exported_symbols": {
+    "arm64": [
+      "_OBJC_CLASS_$_HKSubstitutor",
+      "_OBJC_METACLASS_$_HKSubstitutor"
+    ],
+    "arm64e": [
+      "_OBJC_CLASS_$_HKSubstitutor",
+      "_OBJC_METACLASS_$_HKSubstitutor"
+    ]
+  },
+  "extractor_version": "0.1.0",
+  "generated_at": "2026-08-19T01:57:32Z",
+  "header_checksums": {
+    "Headers/HookKit.h": "834c389c67674dccea3cf669b16227f75bbcead5596a87f2c1535499ab0d0e67"
+  },
+  "install_name": "@rpath/HookKit.framework/HookKit",
+  "tag": "v2.2.5"
+}
