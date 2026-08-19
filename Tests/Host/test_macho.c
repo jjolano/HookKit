@@ -658,6 +658,95 @@ static void test_null_tolerance(void) {
     printf("  null-tolerance: PASS\n");
 }
 
+// ---- image span ---------------------------------------------------------
+
+// The span is what answers "does this address belong to this image", so both
+// ends and the slide have to be right. The fixture's __TEXT is
+// [text_vmaddr, +0x1000) and __LINKEDIT is [text_vmaddr+0x140, +0x200), so
+// __TEXT alone determines the span -- __LINKEDIT is entirely inside it.
+static void test_image_span(void) {
+    uint8_t img[SEG_IMG_SIZE];
+    const uint64_t base = 0x100000000ull;
+    build_segment_image(img, base);
+
+    uintptr_t start = 0, end = 0;
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_OK);
+    assert(start == (uintptr_t)base);
+    assert(end == (uintptr_t)(base + 0x1000));
+
+    // The slide moves both ends by exactly the slide, which is the whole point
+    // of taking one: a catalog entry records where an image actually landed.
+    const uintptr_t slide = 0x7F000000u;
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, slide, &start, &end)
+           == HK_MACHO_OK);
+    assert(start == (uintptr_t)base + slide);
+    assert(end == (uintptr_t)(base + 0x1000) + slide);
+
+    assert(hk_macho_image_span_for_loaded_image(NULL, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_NOT_MACHO);
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, NULL, &end)
+           == HK_MACHO_NOT_MACHO);
+    printf("  image-span: PASS\n");
+}
+
+// __PAGEZERO is the reason this function cannot just take min(vmaddr): the
+// main executable maps it at 0 with a huge vmsize so null-ish dereferences
+// fault. Counting it would start the span at 0 and make almost any address
+// "inside" the image -- the exact opposite of a containment check.
+static void test_image_span_excludes_pagezero(void) {
+    uint8_t img[SEG_IMG_SIZE];
+    const uint64_t base = 0x100000000ull;
+    build_segment_image(img, base);
+
+    // Turn __LINKEDIT into a __PAGEZERO at vmaddr 0 spanning 4GB, exactly as a
+    // real main executable declares it.
+    write_segment(img, SEG_LE_OFF, "__PAGEZERO", HK_SEGMENT_COMMAND_64_SIZE,
+                  0, 0x100000000ull, 0, 0, 0);
+
+    uintptr_t start = 0, end = 0;
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_OK);
+    // __TEXT alone, not [0, 4GB).
+    assert(start == (uintptr_t)base);
+    assert(end == (uintptr_t)(base + 0x1000));
+
+    // A zero-length segment maps nothing and must not widen the span either.
+    build_segment_image(img, base);
+    write_segment(img, SEG_LE_OFF, "__HUGE", HK_SEGMENT_COMMAND_64_SIZE,
+                  base - 0x9000, 0, 0, 0, 0);
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_OK);
+    assert(start == (uintptr_t)base);
+    printf("  image-span-excludes-pagezero: PASS\n");
+}
+
+// A segment BELOW __TEXT and one ABOVE __TEXT each have to move their own end
+// of the span -- a min/max that only ever tracked one direction would pass the
+// fixture above by accident, since there __TEXT happens to be both.
+static void test_image_span_tracks_both_ends(void) {
+    uint8_t img[SEG_IMG_SIZE];
+    const uint64_t base = 0x100000000ull;
+
+    build_segment_image(img, base);
+    write_segment(img, SEG_LE_OFF, "__BELOW", HK_SEGMENT_COMMAND_64_SIZE,
+                  base - 0x2000, 0x1000, 0x40, 0x200, 0);
+    uintptr_t start = 0, end = 0;
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_OK);
+    assert(start == (uintptr_t)(base - 0x2000));   // the low segment moved start
+    assert(end == (uintptr_t)(base + 0x1000));     // __TEXT still ends it
+
+    build_segment_image(img, base);
+    write_segment(img, SEG_LE_OFF, "__ABOVE", HK_SEGMENT_COMMAND_64_SIZE,
+                  base + 0x5000, 0x1000, 0x40, 0x200, 0);
+    assert(hk_macho_image_span_for_loaded_image(img, SEG_IMG_SIZE, 0, &start, &end)
+           == HK_MACHO_OK);
+    assert(start == (uintptr_t)base);              // __TEXT still starts it
+    assert(end == (uintptr_t)(base + 0x6000));     // the high segment moved end
+    printf("  image-span-tracks-both-ends: PASS\n");
+}
+
 int main(void) {
     test_valid_header();
     test_magic_dispatch();
@@ -681,6 +770,9 @@ int main(void) {
     test_loaded_image_symtab_translation();
     test_loaded_image_validates_against_linkedit();
     test_iterate_segments();
+    test_image_span();
+    test_image_span_excludes_pagezero();
+    test_image_span_tracks_both_ends();
     test_null_tolerance();
     printf("all mach-o tests passed\n");
     return 0;

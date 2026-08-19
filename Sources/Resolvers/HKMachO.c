@@ -533,6 +533,65 @@ static hk_macho_status_t linkedit_mapping(const void *header, size_t region_size
 static bool within_linkedit(uint64_t offset, uint64_t length,
                             uint64_t file_start, uint64_t file_end);
 
+// Accumulates the widest [min vmaddr, max vmaddr+vmsize) across mappable
+// segments. See the header for why __PAGEZERO and empty segments are skipped.
+typedef struct {
+    uint64_t min_vmaddr;
+    uint64_t max_end;
+    bool any;
+} span_acc_t;
+
+static bool span_visit(void *ctx, uint32_t index, const hk_macho_segment_t *seg) {
+    (void)index;
+    span_acc_t *acc = ctx;
+    if (seg->vmsize == 0) {
+        return true;  // contributes no mapped bytes
+    }
+    // segname is the parser's own NUL-terminated copy (the on-disk field is
+    // fixed-width and need not be terminated), so this is a safe C compare.
+    if (strcmp(seg->segname, "__PAGEZERO") == 0) {
+        return true;
+    }
+    uint64_t end = seg->vmaddr + seg->vmsize;
+    if (end < seg->vmaddr) {
+        return true;  // overflowing segment: refuse to let it widen the span
+    }
+    if (!acc->any || seg->vmaddr < acc->min_vmaddr) {
+        acc->min_vmaddr = seg->vmaddr;
+    }
+    if (!acc->any || end > acc->max_end) {
+        acc->max_end = end;
+    }
+    acc->any = true;
+    return true;
+}
+
+hk_macho_status_t hk_macho_image_span_for_loaded_image(const void *header,
+                                                       size_t header_region_size,
+                                                       uintptr_t slide,
+                                                       uintptr_t *out_start,
+                                                       uintptr_t *out_end) {
+    if (!header || !out_start || !out_end) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    span_acc_t acc;
+    acc.min_vmaddr = 0;
+    acc.max_end = 0;
+    acc.any = false;
+
+    hk_macho_status_t status = hk_macho_iterate_segments(header, header_region_size,
+                                                         span_visit, &acc);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (!acc.any) {
+        return HK_MACHO_NOT_FOUND;  // nothing mappable to bound
+    }
+    *out_start = (uintptr_t)(acc.min_vmaddr + slide);
+    *out_end = (uintptr_t)(acc.max_end + slide);
+    return HK_MACHO_OK;
+}
+
 hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
                                                         size_t header_region_size,
                                                         uintptr_t slide,

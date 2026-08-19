@@ -240,6 +240,28 @@ hk_macho_status_t hk_macho_symtab_view_for_loaded_image(const void *header,
                                                         uintptr_t slide,
                                                         hk_symbol_table_view_t *out_view);
 
+// The image's mapped VM span: [out_start, out_end) as RUNTIME addresses, i.e.
+// segment vmaddrs with `slide` applied. This is what answers "does this
+// address belong to that image", which nothing else here can -- a name-by-name
+// segment lookup cannot bound an image, and the catalog only records where an
+// image's header is, not how far it reaches.
+//
+// `header_region_size` bounds the load-command parsing exactly as above.
+//
+// __PAGEZERO IS EXCLUDED, and that is not a detail: the main executable maps
+// it at vmaddr 0 with a multi-gigabyte vmsize purely so null-ish dereferences
+// fault. Counting it would start every main-executable span at 0 and make
+// essentially any address "inside" the image -- the precise opposite of what
+// a containment check is for. Zero-length segments are skipped for the same
+// reason (they contribute no mapped bytes).
+//
+// HK_MACHO_NOT_FOUND if the image declares no mappable segment at all.
+hk_macho_status_t hk_macho_image_span_for_loaded_image(const void *header,
+                                                       size_t header_region_size,
+                                                       uintptr_t slide,
+                                                       uintptr_t *out_start,
+                                                       uintptr_t *out_end);
+
 // Locates the export trie's byte range. Modern images carry
 // LC_DYLD_EXPORTS_TRIE; older ones put export_off/export_size inside
 // LC_DYLD_INFO(_ONLY). Both are checked, in that order, so a caller never has

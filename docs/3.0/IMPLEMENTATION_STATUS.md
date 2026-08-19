@@ -2414,6 +2414,46 @@ ignored entirely.
 `make test` (240 assertions, exit 0), both wired suites under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
 
+### Image span — the primitive the `expected_image` gap needs
+
+`hk_macho_image_span_for_loaded_image` (`Sources/Resolvers/HKMachO.{h,c}`):
+the image's mapped VM range as runtime addresses, i.e. segment vmaddrs with
+the slide applied. Added as its own step because it is the missing piece under
+the inline adapter's recorded `expected_image`/`expected_uuid` gap — nothing
+in the codebase could answer "does this address belong to that image". The
+catalog records where an image's header *is*, not how far it *reaches*, and a
+name-by-name segment lookup cannot bound an image either.
+
+The survey found the work already scoped for it:
+`hk_macho_iterate_segments`'s own header comment says it exists so callers can
+"work out an image's VM layout -- computing its mapped span". So this is a
+short accumulator over an existing, already-host-tested walk, not new parsing.
+
+**`__PAGEZERO` is excluded, and that is the whole correctness content of the
+function.** The main executable maps it at vmaddr 0 with a multi-gigabyte
+vmsize purely so null-ish dereferences fault. Counting it would start every
+main-executable span at 0 and make essentially any address "inside" the image
+— the precise opposite of what a containment check is for. Zero-length
+segments are skipped for the same reason, and a segment whose `vmaddr+vmsize`
+overflows is refused rather than allowed to widen the span.
+
+Five teeth-proofs, all caught by their intended assertions: counting
+`__PAGEZERO`, counting empty segments, forgetting the slide, never lowering
+the start, and never raising the end. The last two matter because the original
+fixture's `__TEXT` happens to be both the lowest and highest segment, so a
+min/max that only tracked one direction would have passed it by accident — the
+"tracks both ends" test exists specifically to remove that accident, with a
+segment below `__TEXT` and one above it.
+
+The first proof run was **invalid, not failing**: the variants exited on a
+link error (`hk_symbol_table_find` undefined) because the ad-hoc link line
+omitted `HKSymbolTable.c`. Caught by reading how the variant died rather than
+just that it did — the same check that turned up a real use-after-free one
+commit earlier.
+
+`make test` (243 assertions, exit 0), the Mach-O suite under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
+
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists
 and is host-tested (`make test-reloc`) — this milestone hardens/ports it, not
