@@ -286,7 +286,7 @@ own description and the tool's code comment.
 | `HookKitObjC.h` | not started | typed Class/SEL convenience wrappers |
 | `HookKitSwift.h` | not started | |
 | `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
-| ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet) | `Tools/abi/extract_abi.py`, this commit — see below |
+| ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet). Baseline EXTRACTION is complete: 5 tags, `v1.0.1` dropped by decision | `Tools/abi/extract_abi.py`; baselines `5037211`, `37ffe6b`, `18a91d5` |
 
 Deliberately safe by construction, not just by intent: the Makefile's
 `HookKit_PUBLIC_HEADERS` still lists only the legacy `Headers/HookKit.h` —
@@ -388,8 +388,9 @@ tree already carries `vendor/gum` and the same framework Makefile shape.
 same recipe, versions `2.1.1`, same export allowlist) — it too built clean on
 the first attempt, so the whole v2.x range extracts with one recipe.
 
-Five of the six named baselines are now extracted: v2.5.0, v2.4.0, v2.3.0,
-v2.2.5, v2.1.1. **`v1.0.1` is blocked** — see below.
+Five baselines are extracted — v2.5.0, v2.4.0, v2.3.0, v2.2.5, v2.1.1 — and
+that is now the **complete** set: `v1.0.1`, the sixth originally named, was
+dropped by decision (see below).
 
 One finding worth recording, which only became visible once several baselines
 existed side by side: the `Headers/HookKit.h` checksum is **byte-identical
@@ -403,57 +404,40 @@ The export allowlist (`_OBJC_CLASS_$_HKSubstitutor`,
 `_OBJC_METACLASS_$_HKSubstitutor`, per-arch) is likewise identical across all
 five — the linker-enforced boundary has not moved once in the extracted range.
 
-### `v1.0.1`: blocked, not skipped
+### `v1.0.1`: dropped by decision, not blocked
 
-`v1.0.1` is a different product generation, not just an older tag: no
-`native/`, no `Backends/`, no `build.sh`; the framework is
+**The user's call, 2026-08-19: "i think we just don't worry about modulous
+anymore."** So the named-baseline set is **five, complete** — v2.5.0, v2.4.0,
+v2.3.0, v2.2.5, v2.1.1 — and `v1.0.1` is out of scope. It is not a pending
+task, not a TODO, and not something a later iteration should re-attempt.
+
+Kept because it explains the shape of the set rather than because anything is
+outstanding: `v1.0.1` is a different product generation, not just an older tag.
+No `native/`, no `Backends/`, no `build.sh`; the framework is
 `Core.m Module.m Module+Internal.m Hook.m Compat.m`, and it links an external
-framework (`HookKit_EXTRA_FRAMEWORKS = Modulous`, `-Fvendor`).
+framework (`HookKit_EXTRA_FRAMEWORKS = Modulous`, `-Fvendor`) whose
+`vendor/Modulous.framework` is a git submodule not present locally. Building it
+would have meant fetching that submodule, which the sandbox declined. The
+toolchain was never the obstacle — the pinned `iPhoneOS14.5.sdk` is installed
+and the remote was reachable.
 
-`vendor/Modulous.framework` is a **git submodule** at that tag
-(`https://github.com/jjolano/Modulous.git`, pinned at
-`6b30445edc1e75c1def67a2903c2909a50784252`), and it is not present locally —
-`git worktree add` materializes a gitlink as an empty directory, and
-`.git/modules/` has never fetched it. The build therefore cannot link, and
-cannot even compile `Core.m`, which does `#import <Modulous/Loader.h>`.
+That also settles a question left open earlier in this document: the
+`provenance` enum proposed for
+`Schemas/hookkit-abi-baseline.schema.json` is **not needed and is not being
+added**. Its only motivation was labelling a declaration-derived `v1.0.1.json`
+distinctly from real extractions, and no such file will exist.
+`Tests/LegacyABI/Baselines/` therefore keeps its stronger, simpler invariant
+with no schema change at all: **everything in it is binary-extracted from a
+real build.** Five files, one provenance, nothing to label.
 
-The blocker is **not** the toolchain: the pinned `iPhoneOS14.5.sdk` this tag
-targets is installed, and the remote is reachable
-(`git ls-remote` on the Modulous repo succeeds). The blocker is that fetching
-the submodule is a network clone, which this environment's sandbox declined.
-That is a one-permission unblock, not a dead end, so it is recorded as blocked
-rather than written off.
-
-Deliberately **not** done in the meantime: stubbing `ModulousLoader` to force a
-link. The dependency is shallow enough to stub — three references, all in
-`Core.m` (the import, one ivar, one `+loaderWithPath:` call) — but a binary
-built against a stub is not the v1.0.1 binary, and filing its symbol table as
-a binary extraction would be exactly the kind of unearned claim the rest of
-this ledger exists to prevent.
-
-A fallback does exist and is better than source inference: the tag ships
-`HookKit.tbd`, a declared ABI stub — install-name
-`@rpath/HookKit.framework/HookKit`, archs `[armv7, armv7s, arm64, arm64e]`,
-current/compatibility version `0`, and an explicit seven-class export list
-(`_HookKitCore`, `_HookKitModule`, `_HookKitHook`, `_HookKitFunctionHook`,
-`_HookKitMemoryHook`, `_HookKitClassHook`, `_HKSubstitutor`). Note that
-`.tbd`'s `current-version: 0`, where the package `control` says `1.0.1` —
-which is itself the sort of declared-vs-actual drift a `.tbd` cannot settle.
-A `.tbd` is a *declaration* of the export surface, not an observation of what
-the linker emitted, so a baseline derived from it is not interchangeable with
-the five real extractions.
-
-Writing that fallback needs one small prerequisite first, and it is the
-blocking reason it was not written this iteration:
-`Schemas/hookkit-abi-baseline.schema.json` is `additionalProperties: false`
-and has **no provenance field**. A declaration-derived `v1.0.1.json` dropped
-into `Tests/LegacyABI/Baselines/` would be indistinguishable on disk from the
-five binary extractions beside it, with the caveat living only in this
-document. The fix is to make the distinction in-band — a required
-`provenance` enum (`binary-extracted` | `declaration-derived`) written by
-`Tools/abi/extract_abi.py` and back-stamped onto the existing five — and that
-is a code change, so it is sequenced as its own commit with the full
-`make test` + four-lane gate rather than smuggled into a data-only one.
+Also settled: stubbing `ModulousLoader` to force a link was declined at the
+time and stays declined — a binary built against a stub is not the v1.0.1
+binary, and filing its symbol table as an extraction would have been exactly
+the unearned claim this ledger exists to prevent. The tag's shipped
+`HookKit.tbd` (declaring a seven-class export list and `current-version: 0`,
+where the package `control` says `1.0.1`) was likewise not turned into a
+baseline: a `.tbd` is a *declaration* of the export surface, not an
+observation of what the linker emitted.
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same
@@ -2221,16 +2205,10 @@ below.**
 **Correction to the plan recorded one commit earlier.** The v2.1.1 entry above
 said the next step would be adding a `provenance` enum to
 `Schemas/hookkit-abi-baseline.schema.json` so a declaration-derived `v1.0.1`
-baseline could be labelled in-band. On reflection that was building a field
-for a file that should not be written: `Tests/LegacyABI/Baselines/` currently
-holds five genuine binary extractions, and the stronger, cheaper invariant is
-that *everything in that directory is binary-extracted*. Adding a schema field
-whose only non-default value would be used by one archival file is scaffolding
-for a case that has a better fix — granting the one-line clone permission and
-extracting `v1.0.1` for real. The finding stands recorded; the schema is
-unchanged. If `v1.0.1` is ever genuinely unbuildable rather than
-permission-blocked, the provenance field becomes the right answer and this
-note is where to start.
+baseline could be labelled in-band. That is now moot twice over: it was already
+the wrong shape (a field whose only non-default value would be used by one
+archival file), and `v1.0.1` has since been dropped by decision, so no such
+file will ever exist. The schema is unchanged and stays that way.
 
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
