@@ -384,26 +384,76 @@ versions `2.2.5`, same export allowlist). It built clean on the first attempt
 — the "older tags may need coaxing" worry did not materialize at v2.2.5, whose
 tree already carries `vendor/gum` and the same framework Makefile shape.
 
-Four of the six named baselines are now extracted (v2.5.0, v2.4.0, v2.3.0,
-v2.2.5); **2 remain**: `v2.1.1`, `v1.0.1`.
+**`v2.1.1` also done** (`Tests/LegacyABI/Baselines/v2.1.1.json`, schema-valid,
+same recipe, versions `2.1.1`, same export allowlist) — it too built clean on
+the first attempt, so the whole v2.x range extracts with one recipe.
 
-One finding worth recording, which only became visible once four baselines
+Five of the six named baselines are now extracted: v2.5.0, v2.4.0, v2.3.0,
+v2.2.5, v2.1.1. **`v1.0.1` is blocked** — see below.
+
+One finding worth recording, which only became visible once several baselines
 existed side by side: the `Headers/HookKit.h` checksum is **byte-identical
-across v2.2.5, v2.3.0, and v2.4.0** (`834c389c6767…`) and changes only at
-v2.5.0 (`2056504695f1…`). So the public header surface was frozen for three
-consecutive releases while the implementation moved underneath it. That is
-what a stable ABI boundary is supposed to look like, and it also cross-checks
-the extractor: three independent builds of three different trees agreeing on
-a checksum is not something a broken hasher produces by accident. The export
-allowlist (`_OBJC_CLASS_$_HKSubstitutor`, `_OBJC_METACLASS_$_HKSubstitutor`,
-per-arch) is likewise identical across all four — the linker-enforced boundary
-has not moved once in the extracted range.
+across v2.1.1, v2.2.5, v2.3.0, and v2.4.0** (`834c389c6767…`) and changes only
+at v2.5.0 (`2056504695f1…`). So the public header surface was frozen across
+four consecutive releases while the implementation moved underneath it. That
+is what a stable ABI boundary is supposed to look like, and it also
+cross-checks the extractor: four independent builds of four different trees
+agreeing on a checksum is not something a broken hasher produces by accident.
+The export allowlist (`_OBJC_CLASS_$_HKSubstitutor`,
+`_OBJC_METACLASS_$_HKSubstitutor`, per-arch) is likewise identical across all
+five — the linker-enforced boundary has not moved once in the extracted range.
 
-The remaining v1.0.1/v2.1.1 tags predate more of the toolchain setup; assessed
-per tag, and a tag that genuinely will not build with the current toolchain is
-recorded as such (which tag, which error) rather than chased through many
-failed builds. A source-derived baseline is an acceptable fallback there only
-if labelled as source-derived rather than binary-extracted.
+### `v1.0.1`: blocked, not skipped
+
+`v1.0.1` is a different product generation, not just an older tag: no
+`native/`, no `Backends/`, no `build.sh`; the framework is
+`Core.m Module.m Module+Internal.m Hook.m Compat.m`, and it links an external
+framework (`HookKit_EXTRA_FRAMEWORKS = Modulous`, `-Fvendor`).
+
+`vendor/Modulous.framework` is a **git submodule** at that tag
+(`https://github.com/jjolano/Modulous.git`, pinned at
+`6b30445edc1e75c1def67a2903c2909a50784252`), and it is not present locally —
+`git worktree add` materializes a gitlink as an empty directory, and
+`.git/modules/` has never fetched it. The build therefore cannot link, and
+cannot even compile `Core.m`, which does `#import <Modulous/Loader.h>`.
+
+The blocker is **not** the toolchain: the pinned `iPhoneOS14.5.sdk` this tag
+targets is installed, and the remote is reachable
+(`git ls-remote` on the Modulous repo succeeds). The blocker is that fetching
+the submodule is a network clone, which this environment's sandbox declined.
+That is a one-permission unblock, not a dead end, so it is recorded as blocked
+rather than written off.
+
+Deliberately **not** done in the meantime: stubbing `ModulousLoader` to force a
+link. The dependency is shallow enough to stub — three references, all in
+`Core.m` (the import, one ivar, one `+loaderWithPath:` call) — but a binary
+built against a stub is not the v1.0.1 binary, and filing its symbol table as
+a binary extraction would be exactly the kind of unearned claim the rest of
+this ledger exists to prevent.
+
+A fallback does exist and is better than source inference: the tag ships
+`HookKit.tbd`, a declared ABI stub — install-name
+`@rpath/HookKit.framework/HookKit`, archs `[armv7, armv7s, arm64, arm64e]`,
+current/compatibility version `0`, and an explicit seven-class export list
+(`_HookKitCore`, `_HookKitModule`, `_HookKitHook`, `_HookKitFunctionHook`,
+`_HookKitMemoryHook`, `_HookKitClassHook`, `_HKSubstitutor`). Note that
+`.tbd`'s `current-version: 0`, where the package `control` says `1.0.1` —
+which is itself the sort of declared-vs-actual drift a `.tbd` cannot settle.
+A `.tbd` is a *declaration* of the export surface, not an observation of what
+the linker emitted, so a baseline derived from it is not interchangeable with
+the five real extractions.
+
+Writing that fallback needs one small prerequisite first, and it is the
+blocking reason it was not written this iteration:
+`Schemas/hookkit-abi-baseline.schema.json` is `additionalProperties: false`
+and has **no provenance field**. A declaration-derived `v1.0.1.json` dropped
+into `Tests/LegacyABI/Baselines/` would be indistinguishable on disk from the
+five binary extractions beside it, with the caveat living only in this
+document. The fix is to make the distinction in-band — a required
+`provenance` enum (`binary-extracted` | `declaration-derived`) written by
+`Tools/abi/extract_abi.py` and back-stamped onto the existing five — and that
+is a code change, so it is sequenced as its own commit with the full
+`make test` + four-lane gate rather than smuggled into a data-only one.
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same
