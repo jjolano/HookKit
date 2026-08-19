@@ -149,6 +149,15 @@ test-memory-engine:
 test-objc-engine:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_objc_engine Tests/Host/test_objc_engine.c Sources/Engines/HKObjCEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_objc_engine$(ECHO_END)
 
+# HookKit 3.0 native TERMINAL inline engine (Milestone 7). Overwrites a
+# function entry with a branch and stops there: no relocation, no trampoline,
+# no executable allocation (spec 13.4). Reuses native/hk_arm64.c as-is -- that
+# file is Darwin-free by design and test-reloc already runs it here. Only the
+# store is device-only, and it is behind a seam.
+.PHONY: test-inline-engine
+test-inline-engine:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_inline_engine Tests/Host/test_inline_engine.c Sources/Engines/HKInlineEngine.c native/hk_arm64.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_inline_engine$(ECHO_END)
+
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL ObjC engine
 # through its runtime adapter (Milestone 6). Third engine wired in, and the
 # first to reach HK_TARGET_OBJC_METHOD -- so this is what exercises the plan's
@@ -180,7 +189,7 @@ conformance:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-rebind-engine test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-substitute-classifier test-inline-guard test-original-publication test-header-compile test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-rebind-engine test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.

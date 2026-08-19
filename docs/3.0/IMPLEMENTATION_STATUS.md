@@ -2234,11 +2234,89 @@ note is where to start.
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
 ## Milestone 7 — Native terminal inline
-**State: not started.** Note: the atomicity work committed at `3e6bbdb`
-(one-page-per-trampoline, atomic near-branch via inbound thunk) is a real
-head start on this milestone's mechanism, done inside the 2.x engine. Formal
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | in progress (host-verified) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; write behind a device seam | this commit — see below |
+| Runtime adapter | not started — same shape as the other three adapters, now on the context-carrying vtable entry points | |
+
+Note: the atomicity work committed at `3e6bbdb` (one-page-per-trampoline,
+atomic near-branch via inbound thunk) is a real head start on this milestone's
+mechanism, done inside the 2.x engine.
+
+**Terminal inline engine**, this iteration. It overwrites a function's entry
+with a branch to a replacement and stops: the original body is not preserved,
+relocated, or reachable. Reach is `HK_REACH_ENTRYPOINT` — every call that
+reaches the function, however it got there, which is strictly more than the
+rebind engine's cross-image-only reach, and the reason to pay the costs.
+
+**The survey changed nothing about the plan but changed a lot about the
+effort**, and it landed the opposite way from the Swift one. The mechanism
+core is `native/hk_arm64.{h,c}`, and it is reused **as-is, not
+reimplemented**: that file has *zero* arch gating — no `#if` at all — and its
+own header says it is "free of Mach/Darwin dependencies so the encoder/decoder
+can be unit-tested on the build host". `make test`'s `test-reloc` already
+compiles and runs it on this Linux host. So unlike `native/hk_swift.c`
+(`#if arm64` device code, hence the deferred Swift engine), there was nothing
+to port and no reason to duplicate. `hk_arm64_branch_size`,
+`hk_arm64_emit_branch`, `hk_arm64_is_terminator`,
+`hk_arm64_has_early_terminator` and `hk_arm64_insn_is_trap` are called
+directly.
+
+What is deliberately **not** reused is `Internal/HKInlinePreflight.m`. It is
+Objective-C, and its central check is `hk_native_range_executable` — a
+live-process VM query, device-only by nature. The instruction-inspection half
+of preflight that it delegates to lives in `hk_arm64.c` and is used here
+directly; the memory-probing half stays where it belongs.
+
+**What "terminal" buys, and the one thing it costs.** Because nothing ever
+executes the overwritten prologue again, there is no instruction to relocate,
+no trampoline to allocate, no executable page to manage or leak — spec §13.4's
 "zero relocation / zero trampoline / zero executable allocation for strict
-requests" separation per spec §13.4 is not yet implemented.
+requests", achieved by mechanism rather than by policy. The price is exact:
+**there is no original**. The engine serves `HK_ORIGINAL_NONE` and refuses
+both `HK_ORIGINAL_DIRECT_PREDECESSOR` and `HK_ORIGINAL_CALLABLE_CONTINUATION`
+rather than quietly allocating a trampoline to satisfy them — which would be
+exactly the hidden fallback the design forbids, and would silently turn a
+Milestone 7 hook into a Milestone 8 one.
+
+**The single most likely thing to get wrong by copying 2.x, and the reason
+this is its own milestone.** `hk_arm64_has_aarch64_literal_load` exists to
+refuse ADR/ADRP and load-literal forms whose *relocation* is fragile. Terminal
+inline relocates nothing, so a literal load inside the overwrite window is
+harmless — it is being replaced and will never run. Applying that check here
+would decline safe targets for a reason that does not exist in this mechanism,
+so it is deliberately **not** applied.
+
+What does still apply is **overrun**, and the bound differs from the
+relocating backends' in a way worth spelling out. If the target function ends
+inside the window being overwritten, the tail of the branch lands in whatever
+follows — usually the next function. But a terminator at the **last**
+instruction of the window is fine: the window ends exactly where the function
+does. Only a terminator *earlier* than that means overrun. So the scan covers
+`size - 4` bytes, not `size`. A relocating backend cannot use this bound — it
+has to re-execute what it displaced, and a terminator among those instructions
+would return or branch from the middle of the relocated copy. Terminal inline
+re-executes nothing, which is precisely why it can be this permissive. A
+one-instruction `RET` function patched with a 4-byte branch is accepted here
+and would be refused by a whole-window scan.
+
+Also enforced: 4-byte alignment (a misaligned "entry" is not one, and patching
+it would corrupt two instructions), trap-stub refusal (`BRK`/`HLT`/`UDF` — the
+shared cache builds private-API stubs this way, so the "original" is a trap
+and hooking it is never meaningful), the optional
+`expected_initial_bytes` precondition, and revalidation before the write.
+
+**Eight teeth-proofs, all caught**, each by the test written for it: the 2.x
+whole-window terminator scan (caught by the last-instruction case — so the
+more precise bound is genuinely exercised on both sides, not just asserted),
+no overrun check at all, applying the literal-load check, no revalidation,
+serving a continuation request anyway, ignoring alignment, always using a
+4-byte branch, and skipping the trap check.
+
+`make test` (232 assertions, exit 0), the suite under ASan+UBSan (clean), and
+`./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists
