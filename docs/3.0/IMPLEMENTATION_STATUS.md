@@ -2454,6 +2454,40 @@ commit earlier.
 `make test` (243 assertions, exit 0), the Mach-O suite under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
 
+**What still stands between this and the `expected_image` check itself**, so
+the next step starts from a decision rather than re-deriving one. The check
+wants to walk an entry's load commands, and every loaded-image helper here
+takes an explicit `header_region_size` bound. A catalog entry
+(`hk_image_entry_t`) records `header` and `slide` but not how many bytes are
+readable from that header, so the bound has to come from somewhere.
+
+Two options were considered and one is clearly better:
+
+- Add a `header_region_size` field to `hk_image_entry_t`. Rejected: it is new
+  data that only the dyld populator could authoritatively fill, and that
+  populator is device-only and unbuilt — so the field would be a value host
+  tests invent and device code cannot yet supply.
+- Derive it. For a *loaded* image the mach header is always mapped, so
+  `sizeof(mach_header_64) + sizeofcmds` is readable straight off the header
+  and is exactly the right bound. The only thing missing is a way to read
+  those fields *without* first asserting the load-command region fits —
+  `hk_macho_read_header` validates that region against `size`, which is the
+  wrong order of operations here. A small `hk_macho_peek_header` (fixed fields
+  only, no load-command validation) closes it, needs no new data, and needs
+  nothing from the populator.
+
+So the remaining work is: `hk_macho_peek_header`, then a scope check over
+catalog + selector + uuid + span, then wiring it into the inline adapter.
+**Policy decision already made, and it matters:** when no catalog is supplied
+the check must be SKIPPED, not failed. The populator is unbuilt, so on device
+the catalog is empty; failing closed would make every inline hook fail, which
+is a fabricated safety rather than a real one. Skipping keeps the gap open on
+device — honestly, and visibly — and the check goes live the moment the
+populator lands. The rebind and memory adapters have the same shape of gap
+(`hk_symbol_target_t`'s defining-image selector and
+`hk_memory_target_t.base_image`) and are the obvious next consumers once the
+check exists.
+
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists
 and is host-tested (`make test-reloc`) — this milestone hardens/ports it, not
