@@ -1809,10 +1809,9 @@ device-verified.
 | Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts | this commit — see below |
 | Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
 | Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end | this commit — see below |
-| Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey this commit |
-| ObjC engine | not started | |
-| Memory engine | not started | |
-| Swift engine | not started | native/hk_swift.c exists (2.x), a reuse candidate |
+| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | this commit — see below |
+| ObjC runtime adapter | not started — the engine is built and tested; wiring it as an `hk_engine_vtable_t` is the next step, same shape as the rebind/memory adapters | |
+| Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey, commit `e5fc3b2` |
 
 **Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
 the first engine, and the point where every Milestone 5 resolver becomes an
@@ -1989,7 +1988,111 @@ deferred with a concrete unblock (a small `hk_swift_slot_address(cls, index)`
 primitive, best added in coordination) rather than faked or forced; the memory
 wiring above was taken as the clean adjacent Milestone 6 win instead.
 
-`make test` and `./build.sh all` (all 4 lanes) verified clean.
+**ObjC method engine**, this iteration (`Sources/Engines/HKObjCEngine.{h,c}`) —
+the third Milestone 6 engine. It redirects a selector's dispatch by replacing
+the implementation the runtime hands out for it. Reach is
+`HK_REACH_OBJC_DISPATCH`: every message send to that selector on that class
+and its subclasses, and nothing else — a caller that already holds the IMP and
+calls it directly is unaffected, which is a property of the mechanism rather
+than a gap to close.
+
+The survey was done first, as required, and it landed differently from the
+Swift one. HookKit 2.x does this in `hk_apply_message_hook`
+(`HKSubstitutor.m:152`), which is a good reference and already gets the two
+subtle parts right — it publishes the original before the replace, and it
+knows `class_replaceMethod`'s return value is authoritative only when the
+method was local. What it is not is reusable: one fused function with the
+runtime calls inlined, no prepare/commit split, and it predates the
+mutation-state and artifact contracts. Worth stating explicitly because it is
+counter-intuitive: the `Backends/` adapters are *not* the reference for this
+engine. 2.x message hooks deliberately bypass every backend and go straight to
+the ObjC runtime (that is what the "central message-hook implementation"
+comment on `HKSubstitutor.m:145` is about), so there is no backend logic to
+lift. `Backends/HKMSBackends.m` is 499 lines about `MSHookFunction`-style
+function hooking, not method hooking.
+
+**Why this was a clean host win, stated precisely, because the honest version
+is narrower than "the ObjC engine is host-tested".** There is no Objective-C
+runtime on this Linux host at all — not a stub, none: `objc/runtime.h` does
+not exist and no `libobjc` is installed (verified, not assumed). The repo's
+existing `.m` suites use `tests/fake_headers`, which are declaration-only
+stubs that give the compiler front end an `NSObject`/`Class`/`SEL` vocabulary;
+nothing in them ever executes a runtime call. So the engine takes the whole
+runtime as a seam — `hk_objc_runtime_t`, eight function pointers, each mapping
+to exactly one libobjc call with no added behavior, so the device binding is a
+set of one-line forwarders — and the host suite drives it with an in-memory
+class table. That is the same seam discipline as `hk_rebind_write_fn` and
+`hk_mempatch_write_fn`, applied to a wider surface. What it verifies is every
+*decision* the engine makes. What it does **not** verify is real libobjc
+behavior, which is device-only and is not claimed.
+
+Four things the engine gets right that are easy to get wrong, each with a test
+that fails if it is wrong (proven, see below):
+
+- **Class methods live on the metaclass.** `HK_OBJC_CLASS_METHOD` resolves and
+  replaces on `object_getClass(cls)`, which is the entire difference between
+  the two method kinds. The fixture puts `+ping` on the metaclass *only*, so an
+  engine that skips the hop fails to resolve rather than silently doing
+  something plausible.
+- **Local vs inherited**, computed as "resolving from `cls` and from its
+  superclass give different answers". This is not bookkeeping: it decides
+  whether `HK_OBJC_LOCAL_METHOD_ONLY` is satisfiable, and it decides
+  reversibility (below). The root-class case needs no special handling because
+  the seam contract says a NULL class resolves to NULL.
+- **`class_replaceMethod`'s return is authoritative only when non-NULL.** NULL
+  means it *added* an override over an inherited method and replaced nothing,
+  so the IMP read at prepare is the only correct original. An engine that
+  trusts the return unconditionally publishes NULL as the predecessor of a live
+  replacement.
+- **Reversibility is per-artifact, not per-engine.** Replacing a *local* method
+  back is a clean restore. Undoing an *added* override is not — putting the
+  inherited IMP back leaves the class holding a local method it never had,
+  changing what a later hook of the ancestor reaches. So
+  `mechanically_reversible` is set from `plan.is_local` rather than hardcoded
+  true, which is exactly why that flag lives on the artifact.
+
+Availability is honored rather than flattened: `OPTIONAL_IF_PRESENT` on an
+absent class or selector returns `HK_OBJC_NOT_APPLICABLE` (a satisfied
+request, not a failure) where `REQUIRED_NOW` returns `CLASS_NOT_FOUND` /
+`METHOD_NOT_FOUND`. `DEFER_UNTIL_AVAILABLE` returns
+`HK_OBJC_UNSUPPORTED_POLICY` — deferral needs an image-load callback to retry
+from, which this codebase has not built, and silently downgrading it to
+"required now" would turn a caller's "whenever it appears" into a hard failure
+at a moment they did not choose.
+
+**Tests proven to have teeth**, not just passing. Five naive implementations
+were swapped in and each was caught by the specific test written for it:
+always-local (caught by the inherited-override test), no revalidation (caught
+by the changed-IMP test), publish-after-replace (caught by the ordering probe),
+no metaclass hop (caught by the class-method test), and trusting
+`replace_method`'s return unconditionally (caught by the published-original
+assertion). The first run of this proof was **inconclusive and is recorded as
+such**: the variants exited 127, which was the copied source failing to find
+its own header, not the tests failing — the same shape of false proof hit
+earlier in this rewrite, caught here by checking the exit code rather than
+reading "non-zero" as success.
+
+The publish-before-replace check deserves a note because assertions after the
+fact cannot prove ordering: the fake runtime samples the caller's
+`out_original` cell *at the instant* `replace_method` is entered, so invariant
+#5 is observed rather than assumed.
+
+`make test` (214 assertions, exit 0), the suite under ASan+UBSan (clean), and
+`./build.sh all` (all 4 lanes: arm64, arm, legacy-arm, arm64e) verified green.
+
+**Correction to the plan recorded one commit earlier.** The v2.1.1 entry above
+said the next step would be adding a `provenance` enum to
+`Schemas/hookkit-abi-baseline.schema.json` so a declaration-derived `v1.0.1`
+baseline could be labelled in-band. On reflection that was building a field
+for a file that should not be written: `Tests/LegacyABI/Baselines/` currently
+holds five genuine binary extractions, and the stronger, cheaper invariant is
+that *everything in that directory is binary-extracted*. Adding a schema field
+whose only non-default value would be used by one archival file is scaffolding
+for a case that has a better fix — granting the one-line clone permission and
+extracting `v1.0.1` for real. The finding stands recorded; the schema is
+unchanged. If `v1.0.1` is ever genuinely unbuildable rather than
+permission-blocked, the provenance field becomes the right answer and this
+note is where to start.
 
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
