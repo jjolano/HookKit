@@ -11,6 +11,9 @@
 #import <Foundation/Foundation.h>
 
 #include "../../Headers/HookKit/HookKit.h"
+// The typed ObjC wrapper is not in the umbrella (it needs <objc/runtime.h>),
+// so it is imported explicitly here -- which is exactly how a caller uses it.
+#include "../../Headers/HookKit/HookKitObjC.h"
 
 typedef struct { HK_STRUCT_HEADER; int x; } hk_test_struct_t;
 _Static_assert(offsetof(hk_test_struct_t, struct_size) == 0, "struct_size must be first");
@@ -63,7 +66,46 @@ static hk_objc_target_t make_sample_objc_target(void) {
     return target;
 }
 
+// The wrapper exists so the COMPILER checks Class/SEL instead of a void* that
+// accepts anything. These calls are the check: they would not compile if the
+// parameter types were wrong, and they pin the documented defaults.
+static void exercise_objc_wrapper(void) {
+    Class cls = (Class)0;
+    SEL sel = (SEL)"hk_wrapper_selector";
+
+    hk_objc_target_t inst = hk_objc_instance_method(cls, sel);
+    assert(inst.method_kind == HK_OBJC_INSTANCE_METHOD);
+    assert(inst.cls == (void *)cls && inst.sel == (void *)sel);
+    assert(inst.struct_size == sizeof(hk_objc_target_t));
+    // Documented defaults: the conservative choice on both axes.
+    assert(inst.inheritance_policy == HK_OBJC_LOCAL_METHOD_ONLY);
+    assert(inst.availability == HK_AVAILABILITY_REQUIRED_NOW);
+
+    hk_objc_target_t klass = hk_objc_class_method(cls, sel);
+    assert(klass.method_kind == HK_OBJC_CLASS_METHOD);   // never inferred
+
+    hk_objc_target_t named = hk_objc_target_make_named("NSString", "length",
+                                                       HK_OBJC_INSTANCE_METHOD);
+    assert(named.cls == NULL && named.sel == NULL);      // resolved later, not here
+    assert(named.class_name && named.selector_name);
+
+    // The spec initializer sets target_kind for the caller: a spec whose kind
+    // disagrees with the filled union member is a silent misroute.
+    hk_hook_spec_t spec;
+    int replacement = 0;
+    hk_objc_spec_init(&spec, "wrapper.hook", named, &replacement);
+    assert(spec.target_kind == HK_TARGET_OBJC_METHOD);
+    assert(spec.required_reach == HK_REACH_OBJC_DISPATCH);
+    assert(spec.replacement == &replacement);
+    assert(spec.target.objc.class_name == named.class_name);
+    // The two availability fields mirror rather than disagree by omission.
+    assert(spec.availability == named.availability);
+
+    hk_objc_spec_init(NULL, "ignored", named, &replacement);  // tolerates NULL
+}
+
 int main(void) {
+    exercise_objc_wrapper();
     hk_objc_target_t target = make_sample_objc_target();
     if (target.sel == NULL || target.method_kind != HK_OBJC_INSTANCE_METHOD) {
         return 1;

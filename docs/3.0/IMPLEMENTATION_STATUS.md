@@ -2432,6 +2432,41 @@ commit earlier.
 `make test` (257 assertions, exit 0) and `./build.sh all` (all 4 lanes)
 verified green.
 
+### `HookKitObjC.h` — the typed wrapper the targets header named
+
+`HookKitTargets.h` has said since it was written that `cls`/`sel` are `void *`
+"to keep this header importable from plain C without `<objc/runtime.h>`" and
+that "HookKitObjC.h (not yet written) is where a typed convenience wrapper
+belongs". Now written.
+
+Constructors only, all `static inline`, allocating nothing: `hk_objc_target_make`
+(by pointer), `hk_objc_target_make_named` (by string, resolved at preparation
+rather than at request time), the `hk_objc_instance_method` /
+`hk_objc_class_method` spellings, and `hk_objc_spec_init`. There is no behavior
+here to get wrong — the value is that the **compiler** checks `Class`/`SEL`
+instead of a `void *` that accepts anything.
+
+Two deliberate calls:
+
+- **Not included by `HookKit.h`.** The umbrella stays C-only; a C caller
+  including it must not acquire an Objective-C dependency it never asked for.
+  A `#error` under `!__OBJC__` makes the opt-in explicit rather than producing
+  a confusing failure deep in `<objc/runtime.h>`. The umbrella now says where
+  the header is instead of listing it as unwritten.
+- **`hk_objc_spec_init` sets `target_kind` itself.** A spec whose `target_kind`
+  disagrees with the union member actually filled is a silent misroute, and
+  this is the one place it can be prevented by construction rather than
+  documented. It also mirrors the target's `availability` up to the spec so the
+  two cannot disagree by omission.
+
+Covered by extending `test-header-compile`, which already builds the headers
+under C, ObjC, C++ and ObjC++. The wrapper checks run in the **ObjC and ObjC++
+variants only** — the C and C++ ones must keep proving the umbrella stays
+ObjC-free, so adding the wrapper there would destroy the property being tested.
+The ObjC++ pass is not redundant: the header wraps its declarations in
+`extern "C"`, and a static-inline-only header getting that wrong shows up
+there and nowhere else.
+
 ### `expected_image` / `expected_uuid` — gap closed
 
 Built exactly as the previous commit's design said, with no re-litigation.

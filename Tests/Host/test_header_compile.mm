@@ -11,7 +11,11 @@
 
 #import <Foundation/Foundation.h>
 
+#include <cassert>
 #include "../../Headers/HookKit/HookKit.h"
+// The typed ObjC wrapper is not in the umbrella (it needs <objc/runtime.h>),
+// so it is imported explicitly here -- which is exactly how a caller uses it.
+#include "../../Headers/HookKit/HookKitObjC.h"
 
 typedef struct { HK_STRUCT_HEADER; int x; } hk_test_struct_t;
 static_assert(offsetof(hk_test_struct_t, struct_size) == 0, "struct_size must be first");
@@ -55,7 +59,37 @@ static hk_memory_target_t make_sample_memory_target() {
     return target;
 }
 
+// Same wrapper checks as the ObjC variant. Worth repeating under ObjC++
+// specifically: the header wraps its declarations in extern "C", and a
+// static-inline-only header getting that wrong shows up here and nowhere else.
+static void exercise_objc_wrapper(void) {
+    Class cls = (Class)0;
+    SEL sel = (SEL)"hk_wrapper_selector";
+
+    hk_objc_target_t inst = hk_objc_instance_method(cls, sel);
+    assert(inst.method_kind == HK_OBJC_INSTANCE_METHOD);
+    assert(inst.cls == (void *)cls && inst.sel == (void *)sel);
+    assert(inst.inheritance_policy == HK_OBJC_LOCAL_METHOD_ONLY);
+    assert(inst.availability == HK_AVAILABILITY_REQUIRED_NOW);
+
+    hk_objc_target_t klass = hk_objc_class_method(cls, sel);
+    assert(klass.method_kind == HK_OBJC_CLASS_METHOD);   // never inferred
+
+    hk_objc_target_t named = hk_objc_target_make_named("NSString", "length",
+                                                       HK_OBJC_INSTANCE_METHOD);
+    assert(named.cls == NULL && named.sel == NULL);      // resolved later, not here
+
+    hk_hook_spec_t spec;
+    int replacement = 0;
+    hk_objc_spec_init(&spec, "wrapper.hook", named, &replacement);
+    assert(spec.target_kind == HK_TARGET_OBJC_METHOD);
+    assert(spec.required_reach == HK_REACH_OBJC_DISPATCH);
+    assert(spec.availability == named.availability);
+    hk_objc_spec_init(NULL, "ignored", named, &replacement);  // tolerates NULL
+}
+
 int main() {
+    exercise_objc_wrapper();
     hk_memory_target_t target = make_sample_memory_target();
     SEL sel = (SEL)"hk_test_selector";
 

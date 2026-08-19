@@ -18,8 +18,12 @@
 #include "HookKitPlan.h"
 #include "HookKitArtifacts.h"
 
-// Not yet written (docs/3.0/IMPLEMENTATION_STATUS.md tracks each):
-//   HookKitObjC.h       -- typed Class/SEL convenience wrappers
+// HookKitObjC.h (typed Class/SEL convenience) exists but is deliberately NOT
+// included here: it requires <objc/runtime.h>, and a C caller including this
+// umbrella must not acquire an Objective-C dependency it never asked for.
+// Import it directly from a .m/.mm.
+//
+// Not yet written (docs/3.0/IMPLEMENTATION_STATUS.md tracks it):
 //   HookKitSwift.h      -- Swift vtable hooking, a separate API surface
 
 #endif // HOOKKIT3_H
