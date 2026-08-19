@@ -207,11 +207,80 @@ static void test_no_context_fails_cleanly(void) {
     printf("  no-context-fails-cleanly: PASS\n");
 }
 
+// Four distinct refusals that used to arrive as one undifferentiated
+// "prepare failed". They still share HK_OUTCOME_FAILED_SAFE -- none of them is
+// a satisfied request -- but each now says which one it was.
+static void test_refusals_carry_distinct_diagnostics(void) {
+    const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(body, 5);
+    uintptr_t target = (uintptr_t)fn;
+    void *near = (void *)(target + 0x1000);
+    const uint32_t pinned_wrong = A64_RET;
+
+    hk_inline_engine_ctx_t ectx = engine_ctx();
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t s_align = address_spec("h.align", target + 1, near, HK_ORIGINAL_NONE, NULL, 0);
+    hk_hook_spec_t s_cont  = address_spec("h.cont", target, near,
+                                          HK_ORIGINAL_CALLABLE_CONTINUATION, NULL, 0);
+    s_cont.continuation_policy = HK_CONTINUATION_ANY;
+    hk_hook_spec_t s_pin   = address_spec("h.pin", target, near, HK_ORIGINAL_NONE,
+                                          (const uint8_t *)&pinned_wrong, 4);
+    // A one-instruction function patched with a FAR branch: the 16-byte window
+    // runs past its RET.
+    const uint32_t tiny[] = {A64_RET, A64_NOP, A64_NOP, A64_NOP};
+    uint32_t *tinyfn = make_fn(tiny, 4);
+    hk_hook_spec_t s_short = address_spec("h.short", (uintptr_t)tinyfn,
+                                          (void *)((uintptr_t)tinyfn + (1ull << 40)),
+                                          HK_ORIGINAL_NONE, NULL, 0);
+
+    hk_hook_t *ha = NULL, *hc = NULL, *hp = NULL, *hs = NULL;
+    assert(hk_plan_add_hook(plan, &s_align, &ha) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &s_cont, &hc) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &s_pin, &hp) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &s_short, &hs) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    // All four are genuine failures, not satisfied requests.
+    assert(ha->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hc->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hp->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hs->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hk_plan_state(plan) == HK_PLAN_FAILED);
+
+    // ...and each carries its own reason.
+    assert(ha->result.error_code == (int64_t)HK_INLINE_MISALIGNED);
+    assert(hc->result.error_code == (int64_t)HK_INLINE_NEEDS_CONTINUATION);
+    assert(hp->result.error_code == (int64_t)HK_INLINE_PRECONDITION_FAILED);
+    assert(hs->result.error_code == (int64_t)HK_INLINE_TARGET_TOO_SHORT);
+    assert(ha->result.error_message.data && hc->result.error_message.data);
+    assert(hp->result.error_message.data && hs->result.error_message.data);
+    assert(strcmp(hc->result.error_message.data,
+                  "terminal inline cannot provide an original; use a relocating engine") == 0);
+    // The domain is this engine, filled by the core from describe().
+    assert(hs->result.error_domain.data &&
+           strcmp(hs->result.error_domain.data, "inline-terminal") == 0);
+
+    // Nothing was written by any of them.
+    assert(fn[0] == A64_NOP && tinyfn[0] == A64_RET);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    free(fn); free(tinyfn);
+    printf("  refusals-carry-distinct-diagnostics: PASS\n");
+}
+
 int main(void) {
     test_full_lifecycle_patches_and_reports();
     test_continuation_request_fails_at_prepare();
     test_pinned_prologue_mismatch_fails_at_prepare();
     test_no_context_fails_cleanly();
+    test_refusals_carry_distinct_diagnostics();
     printf("all inline wired tests passed\n");
     return 0;
 }

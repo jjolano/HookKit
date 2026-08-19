@@ -54,15 +54,27 @@ typedef struct {
 } fake_rt_t;
 
 // Selectors are interned so pointer identity works the way SEL does.
-static const char *g_sel_pool[16];
+//
+// The pool OWNS its strings -- it copies rather than retaining the caller's
+// pointer. That is not tidiness: the pool is file-scoped and outlives every
+// plan, while a selector name arriving from a hook spec points into the
+// plan's deep copy (hk_hook_t.owned_objc_selector_name), which hk_plan_release
+// frees. Retaining that pointer left the pool holding freed memory, and the
+// next intern_sel's strcmp read it. It stayed invisible for a while because
+// every selector the fixture itself uses is interned from a literal during
+// world_init first, so the engine's lookup matched the existing entry and
+// never stored the heap copy -- only a selector the fixture does NOT define
+// (a deliberately absent one) reached the storing path. Found by ASan; a plain
+// run read the freed bytes and passed.
+static char g_sel_pool[16][32];
 static unsigned g_sel_count;
 static void *intern_sel(const char *name) {
     for (unsigned i = 0; i < g_sel_count; i++) {
-        if (strcmp(g_sel_pool[i], name) == 0) return (void *)g_sel_pool[i];
+        if (strcmp(g_sel_pool[i], name) == 0) return g_sel_pool[i];
     }
-    assert(g_sel_count < 16);
-    g_sel_pool[g_sel_count] = name;
-    return (void *)g_sel_pool[g_sel_count++];
+    assert(g_sel_count < 16 && strlen(name) < sizeof(g_sel_pool[0]));
+    strcpy(g_sel_pool[g_sel_count], name);
+    return g_sel_pool[g_sel_count++];
 }
 
 static void *f_get_class(void *ctx, const char *name) {

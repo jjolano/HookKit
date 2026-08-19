@@ -13,17 +13,48 @@ static hk_engine_capabilities_t inline_describe(void) {
     return caps;
 }
 
-static bool inline_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
-                                   void **out_prepared) {
+// The four refusals this engine can make are genuinely different diagnoses,
+// and flattening them made every one read as "prepare failed". None of them is
+// NOT_APPLICABLE: an entry that cannot be patched is a real failure, not a
+// satisfied conditional request. Messages are literals, per the diag contract.
+static hk_prepare_result_t inline_classify(hk_inline_status_t st, hk_prepare_diag_t *diag) {
+    if (st == HK_INLINE_OK) {
+        return HK_PREPARE_OK;
+    }
+    diag->error_code = (int64_t)st;
+    switch (st) {
+        case HK_INLINE_MISALIGNED:
+            diag->error_message = "target is not 4-byte aligned, so it is not an A64 entry point"; break;
+        case HK_INLINE_TARGET_TOO_SHORT:
+            diag->error_message = "function ends inside the overwrite window; the patch would run past it"; break;
+        case HK_INLINE_TRAP_STUB:
+            diag->error_message = "entry is a trap stub (BRK/HLT/UDF); there is no original to replace"; break;
+        case HK_INLINE_PRECONDITION_FAILED:
+            diag->error_message = "prologue does not match the bytes the request pinned"; break;
+        case HK_INLINE_NEEDS_CONTINUATION:
+            diag->error_message = "terminal inline cannot provide an original; use a relocating engine"; break;
+        case HK_INLINE_INVALID_ARGUMENT:
+        case HK_INLINE_OK:
+            diag->error_message = "invalid inline target"; break;
+    }
+    return HK_PREPARE_FAILED;
+}
+
+static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
+                                                         const hk_hook_spec_t *spec,
+                                                         void **out_prepared,
+                                                         hk_prepare_diag_t *out_diag) {
     const hk_inline_engine_ctx_t *ctx = engine_ctx;
     if (!ctx || !spec || !out_prepared || spec->target_kind != HK_TARGET_FUNCTION_ADDRESS) {
-        return false;
+        out_diag->error_message = "inline engine invoked without a writer or with a non-address target";
+        return HK_PREPARE_FAILED;
     }
     const hk_address_target_t *addr = &spec->target.address;
 
     hk_inline_plan_t *plan = malloc(sizeof(*plan));
     if (!plan) {
-        return false;
+        out_diag->error_message = "out of memory";
+        return HK_PREPARE_FAILED;
     }
     // original_requirement comes from the SPEC, not the target: it is the
     // caller's demand, and this engine refusing it is the whole reason
@@ -35,17 +66,13 @@ static bool inline_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
                                               addr->expected_initial_bytes,
                                               addr->expected_initial_bytes_size,
                                               plan);
-    if (st != HK_INLINE_OK) {
-        // Every non-OK status is a clean prepare failure: nothing was written.
-        // The distinctions the engine makes (too short, trap stub, needs a
-        // continuation, precondition failed) are all collapsed into `false`
-        // here -- the same bool ceiling the ObjC adapter records, and the same
-        // fix applies.
-        free(plan);
-        return false;
+    hk_prepare_result_t result = inline_classify(st, out_diag);
+    if (result != HK_PREPARE_OK) {
+        free(plan);  // nothing was written on any non-OK status
+        return result;
     }
     *out_prepared = plan;
-    return true;
+    return HK_PREPARE_OK;
 }
 
 static hk_mutation_state_t inline_commit_one_ctx(void *engine_ctx,
@@ -75,7 +102,7 @@ static void inline_release_prepared(void *engine_ctx, void *prepared) {
 
 static const hk_engine_vtable_t g_inline_vtable = {
     .describe = inline_describe,
-    .prepare_one_ctx = inline_prepare_one_ctx,
+    .prepare_one_ctx_status = inline_prepare_one_ctx_status,
     .commit_one_ctx = inline_commit_one_ctx,
     .release_prepared = inline_release_prepared,
 };

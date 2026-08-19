@@ -2208,11 +2208,12 @@ test now pins down the actual behavior (a second prepare returns
 `HK_STATUS_INVALID_STATE` and disturbs nothing), so if a retry path is ever
 added, that test is what notices the guard has become live.
 
-Still not retired, and stated because this extension does *not* fix it:
-`prepare_one_ctx` returns `bool`, so `HK_OBJC_NOT_APPLICABLE` — an absent
-*optional* target, which is a satisfied request rather than a failure — still
-collapses into the same `false` as a genuine inability. That needs a richer
-prepare result, which is a different change from this one.
+Still not retired at the time of that commit, and stated because that
+extension did *not* fix it: `prepare_one_ctx` returns `bool`, so
+`HK_OBJC_NOT_APPLICABLE` — an absent *optional* target, which is a satisfied
+request rather than a failure — still collapsed into the same `false` as a
+genuine inability. **Retired since; see the richer-prepare-result section
+below.**
 
 `make test` (222 assertions, exit 0), the wired suite under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
@@ -2354,6 +2355,63 @@ covers this" from "nothing can reach this" is the point of running the proof
 at all.
 
 `make test` (236 assertions, exit 0), both new suites under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
+
+### Richer preparation result — and the bug it turned out to be hiding
+
+The last stated vtable ceiling, retired the same additive way as the context
+one: an optional `prepare_one_ctx_status` returning `hk_prepare_result_t`
+(`OK` / `FAILED` / `NOT_APPLICABLE`) plus an `hk_prepare_diag_t` out-param.
+Landed first with nothing converted, and all 236 assertions stayed green with
+every existing engine and all eight fakes untouched — the same proof of
+additivity that worked before.
+
+**This was filed as a labelling problem and was actually a correctness bug.**
+`hk_plan_prepare` counts every `false` toward `failed`, and *any* failure puts
+the plan in `HK_PLAN_FAILED`. So a single absent `OPTIONAL_IF_PRESENT` target —
+a request that was fully satisfied, since "if present" is exactly the
+condition that was not met — failed the entire plan, taking every sibling hook
+down with it. That is now a distinct `HK_PREPARE_NOT_APPLICABLE` counting
+toward neither `prepared` nor `failed`.
+
+The outcome it maps to is an **approximation, and is labelled as one in the
+source**: the spec's `hk_outcome_t` is fixed and has no "not applicable"
+value. `HK_OUTCOME_NO_ROUTE` is the only non-failure value that honestly says
+"there is nothing here to hook", so that is what is used, with `retryable` set
+for the same reason the analyze-time `NO_ROUTE` sets it. It is imperfect —
+elsewhere `NO_ROUTE` means no engine was eligible, whereas here an engine was
+eligible and found nothing to act on. Inventing an enum value would break the
+public ABI, so the approximation is the honest choice and the comment says so.
+
+The diagnostic half matters for the inline engine, whose four distinct
+refusals (misaligned, too short, trap stub, needs a continuation, precondition
+failed) all previously arrived as one undifferentiated failure. They still
+share `HK_OUTCOME_FAILED_SAFE` — none of them is a satisfied request — but each
+now carries its own `error_code` and `error_message`, with `error_domain`
+filled by the core from the engine's own `engine_id` so engines do not repeat
+it. Messages must be string literals, since the result carries them without
+copying.
+
+**A teeth-proof found a real bug — in the test fixture, not the code under
+test, and only under ASan.** The `diagnostic-dropped` variant was "caught",
+but by a heap-use-after-free rather than by an assertion, which is not a valid
+proof. Chasing it found that the real code had the same fault:
+`fake_objc_runtime.h`'s `intern_sel` retained the *caller's* pointer in a
+file-scoped pool that outlives every plan, while a selector name arriving from
+a hook spec points into `hk_hook_t.owned_objc_selector_name`, which
+`hk_plan_release` frees. It stayed invisible for four commits because every
+selector the fixture defines is interned from a literal during `world_init`
+first, so the engine's lookup matched the existing entry and never reached the
+storing path — only a selector the fixture does *not* define (a deliberately
+absent one, which these new tests were the first to use) got there. A plain
+run read the freed bytes and passed. The pool now owns its strings. With that
+fixed, the variant is caught by the assertion it was supposed to be caught by.
+
+Four core-plumbing teeth-proofs, all caught: NOT_APPLICABLE counted as failed,
+counted as prepared, the diagnostic dropped, and the status entry point
+ignored entirely.
+
+`make test` (240 assertions, exit 0), both wired suites under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 8 — Native relocating inline

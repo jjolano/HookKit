@@ -18,33 +18,60 @@ static hk_engine_capabilities_t objc_describe(void) {
     return caps;
 }
 
-static bool objc_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
-                                 void **out_prepared) {
+// Every refusal the engine can make, carried through instead of flattened.
+// The messages are literals, as the diag contract requires.
+static hk_prepare_result_t objc_classify(hk_objc_status_t st, hk_prepare_diag_t *diag) {
+    diag->error_code = (int64_t)st;
+    switch (st) {
+        case HK_OBJC_NOT_APPLICABLE:
+            // The one status that is NOT a failure: the request said
+            // OPTIONAL_IF_PRESENT and the target is absent, so it is
+            // satisfied. This is the whole reason for the richer result.
+            diag->error_message = NULL;
+            diag->error_code = 0;
+            return HK_PREPARE_NOT_APPLICABLE;
+        case HK_OBJC_CLASS_NOT_FOUND:
+            diag->error_message = "class not found"; break;
+        case HK_OBJC_METHOD_NOT_FOUND:
+            diag->error_message = "selector not found on the class or its ancestors"; break;
+        case HK_OBJC_INHERITED_REFUSED:
+            diag->error_message = "method is inherited and the request required a local method"; break;
+        case HK_OBJC_NO_IMPLEMENTATION:
+            diag->error_message = "method has no implementation to publish as the original"; break;
+        case HK_OBJC_UNSUPPORTED_POLICY:
+            diag->error_message = "DEFER_UNTIL_AVAILABLE needs an image-load callback, which is unbuilt"; break;
+        case HK_OBJC_INVALID_ARGUMENT:
+            diag->error_message = "invalid objc target"; break;
+        case HK_OBJC_OK:
+            diag->error_code = 0; diag->error_message = NULL;
+            return HK_PREPARE_OK;
+    }
+    return HK_PREPARE_FAILED;
+}
+
+static hk_prepare_result_t objc_prepare_one_ctx_status(void *engine_ctx,
+                                                       const hk_hook_spec_t *spec,
+                                                       void **out_prepared,
+                                                       hk_prepare_diag_t *out_diag) {
     hk_objc_engine_ctx_t *ctx = engine_ctx;
     if (!ctx || !spec || !out_prepared || spec->target_kind != HK_TARGET_OBJC_METHOD) {
-        return false;
+        out_diag->error_message = "objc engine invoked without a runtime or with a non-objc target";
+        return HK_PREPARE_FAILED;
     }
 
     hk_objc_plan_t *plan = malloc(sizeof(*plan));
     if (!plan) {
-        return false;
+        out_diag->error_message = "out of memory";
+        return HK_PREPARE_FAILED;
     }
     hk_objc_status_t st = hk_objc_prepare(&ctx->runtime, &spec->target.objc, plan);
-    if (st != HK_OBJC_OK) {
-        // Every non-OK status is a clean prepare failure at this contract:
-        // nothing was reserved and nothing was touched. That includes
-        // NOT_APPLICABLE -- an absent optional target is a satisfied request,
-        // but both preparation entry points return bool and cannot say
-        // "correctly nothing to do" distinctly from "could not". Stated
-        // rather than glossed: the distinction exists in the engine and is
-        // lost here. Retiring it needs a richer prepare result, which is a
-        // separate change from the context/prepared-state one this adapter
-        // is the first to use.
-        free(plan);
-        return false;
+    hk_prepare_result_t result = objc_classify(st, out_diag);
+    if (result != HK_PREPARE_OK) {
+        free(plan);  // nothing reserved on any non-OK result
+        return result;
     }
     *out_prepared = plan;
-    return true;
+    return HK_PREPARE_OK;
 }
 
 static hk_mutation_state_t objc_commit_one_ctx(void *engine_ctx,
@@ -68,7 +95,7 @@ static void objc_release_prepared(void *engine_ctx, void *prepared) {
 
 static const hk_engine_vtable_t g_objc_vtable = {
     .describe = objc_describe,
-    .prepare_one_ctx = objc_prepare_one_ctx,
+    .prepare_one_ctx_status = objc_prepare_one_ctx_status,
     .commit_one_ctx = objc_commit_one_ctx,
     .release_prepared = objc_release_prepared,
 };

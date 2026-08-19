@@ -46,6 +46,25 @@ typedef struct {
     hk_reachability_t achievable_reach;
 } hk_engine_capabilities_t;
 
+// What a preparation attempt actually concluded. See prepare_one_ctx_status.
+typedef enum {
+    HK_PREPARE_OK = 0,
+    // Could not prepare. Nothing was reserved and nothing was touched -- the
+    // bool contract's `false`, and what becomes HK_OUTCOME_FAILED_SAFE.
+    HK_PREPARE_FAILED,
+    // Correctly nothing to do: the request was conditional
+    // (HK_AVAILABILITY_OPTIONAL_IF_PRESENT) and its target is absent, so it
+    // is SATISFIED. Must not count toward a plan's failures.
+    HK_PREPARE_NOT_APPLICABLE,
+} hk_prepare_result_t;
+
+// Optional detail an engine may attach to a preparation result.
+// `error_message` must have static lifetime -- it is carried, not copied.
+typedef struct {
+    int64_t error_code;         // engine-defined; 0 when none
+    const char *error_message;  // NULL when none
+} hk_prepare_diag_t;
+
 typedef struct hk_engine_vtable {
     hk_engine_capabilities_t (*describe)(void);
 
@@ -119,6 +138,44 @@ typedef struct hk_engine_vtable {
     // commit alike. May be NULL when the state needs no cleanup (an engine
     // that hands back a small integer cast to void*, say).
     void (*release_prepared)(void *engine_ctx, void *prepared);
+
+    // ---- richer preparation result (optional, additive) ----------------
+    //
+    // Both preparation entry points above return bool, which conflates two
+    // genuinely different things:
+    //
+    //   "I could not prepare this"        -- a failure
+    //   "there is correctly nothing here" -- a SATISFIED request
+    //
+    // The second is what HK_AVAILABILITY_OPTIONAL_IF_PRESENT means: hook it
+    // if it exists, and if it does not, that is the requested behavior. Under
+    // the bool contract it lands in the same `false` as a real failure, which
+    // is not merely a labelling problem -- hk_plan_prepare counts every false
+    // toward `failed`, and any failure puts the whole plan in HK_PLAN_FAILED.
+    // So one absent optional target currently fails a plan that did exactly
+    // what it was asked.
+    //
+    // It also flattens every distinct refusal an engine can make (the inline
+    // engine alone has four) into one undifferentiated failure with no reason
+    // attached.
+    //
+    // Purely additive, same as the context entry points: an engine that does
+    // not implement this keeps working unchanged, and the core prefers this
+    // one when present because an engine that filled it meant it.
+
+    // Prepared state is handed back the same way prepare_one_ctx does, with
+    // the same ownership rule: exactly one release_prepared per HK_PREPARE_OK.
+    // Anything other than HK_PREPARE_OK must leave *out_prepared untouched.
+    //
+    // `out_diag` is never NULL and starts zeroed. An engine may fill
+    // error_code and error_message to say WHY; error_message must be a string
+    // with static lifetime (a literal), since it is carried in the result
+    // without being copied. The core fills error_domain from the engine's own
+    // engine_id, so engines do not repeat it.
+    hk_prepare_result_t (*prepare_one_ctx_status)(void *engine_ctx,
+                                                  const hk_hook_spec_t *spec,
+                                                  void **out_prepared,
+                                                  hk_prepare_diag_t *out_diag);
 } hk_engine_vtable_t;
 
 // Eligibility per spec section 9, minimal subset: target kind supported,

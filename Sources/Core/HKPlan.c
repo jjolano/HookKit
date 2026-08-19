@@ -782,22 +782,69 @@ hk_status_t hk_plan_prepare(hk_plan_t *plan, hk_report_t **out_report) {
         // The context-carrying variant wins when present: an engine that
         // filled it meant it, and it is the only one that can hand state
         // forward to commit.
-        bool ok;
-        if (hook->matched_engine && hook->matched_engine->prepare_one_ctx) {
+        hk_prepare_result_t result;
+        hk_prepare_diag_t diag;
+        memset(&diag, 0, sizeof(diag));
+
+        // Preference order, richest first. An engine implementing a later
+        // entry point meant it; the earlier ones are what an engine written
+        // before that entry point existed still uses.
+        if (hook->matched_engine && hook->matched_engine->prepare_one_ctx_status) {
             void *prepared = NULL;
-            ok = hook->matched_engine->prepare_one_ctx(hook->matched_engine_ctx,
-                                                       &hook->spec, &prepared);
+            result = hook->matched_engine->prepare_one_ctx_status(hook->matched_engine_ctx,
+                                                                  &hook->spec, &prepared, &diag);
+            hook->prepared_state = (result == HK_PREPARE_OK) ? prepared : NULL;
+        } else if (hook->matched_engine && hook->matched_engine->prepare_one_ctx) {
+            void *prepared = NULL;
+            bool ok = hook->matched_engine->prepare_one_ctx(hook->matched_engine_ctx,
+                                                            &hook->spec, &prepared);
             // Only a successful preparation may hand state forward; a false
             // return means nothing was reserved, so nothing is retained.
             hook->prepared_state = ok ? prepared : NULL;
+            result = ok ? HK_PREPARE_OK : HK_PREPARE_FAILED;
         } else {
-            ok = hook->matched_engine && hook->matched_engine->prepare_one
+            bool ok = hook->matched_engine && hook->matched_engine->prepare_one
                     && hook->matched_engine->prepare_one(&hook->spec);
+            result = ok ? HK_PREPARE_OK : HK_PREPARE_FAILED;
         }
 
-        if (ok) {
+        // A diagnostic is carried for any result that has one. error_domain
+        // comes from the engine rather than the engine repeating it, so the
+        // domain is always the engine that actually produced the code.
+        if (diag.error_message || diag.error_code != 0) {
+            out->error_code = diag.error_code;
+            if (diag.error_message) {
+                out->error_message.data = diag.error_message;
+                out->error_message.length = strlen(diag.error_message);
+            }
+            hk_engine_capabilities_t caps = hook->matched_engine->describe();
+            if (caps.engine_id) {
+                out->error_domain.data = caps.engine_id;
+                out->error_domain.length = strlen(caps.engine_id);
+            }
+        }
+
+        if (result == HK_PREPARE_OK) {
             out->outcome = HK_OUTCOME_PREPARED;
             prepared++;
+        } else if (result == HK_PREPARE_NOT_APPLICABLE) {
+            // The request was conditional and its target is absent, so it is
+            // SATISFIED -- it must not count toward `failed`, or one absent
+            // optional target would fail a plan that did exactly what it was
+            // asked. It does not count toward `prepared` either: there is
+            // nothing to commit.
+            //
+            // HK_OUTCOME_NO_ROUTE rather than a FAILED_* value, because the
+            // spec's outcome enum has no "not applicable" and NO_ROUTE is the
+            // only non-failure value that honestly describes "there is
+            // nothing here to hook". Stated because it IS an approximation:
+            // NO_ROUTE elsewhere means no engine was eligible, whereas here an
+            // engine was eligible and found nothing to act on. `retryable` is
+            // set for the same reason it is on the analyze-time NO_ROUTE --
+            // the target appearing later could change the answer.
+            out->outcome = HK_OUTCOME_NO_ROUTE;
+            out->retryable = true;
+            out->currently_valid = false;
         } else {
             // Preparation failing before anything was reserved is exactly
             // what HK_OUTCOME_FAILED_SAFE means -- this minimal contract

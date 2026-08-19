@@ -422,6 +422,139 @@ static void test_failed_preparation_retains_no_state(void) {
     printf("  failed-preparation-retains-no-state: PASS\n");
 }
 
+// The bug the richer prepare result exists to fix. A conditional request
+// (OPTIONAL_IF_PRESENT) whose target is absent is SATISFIED -- it must not
+// fail the plan. Under the bool contract this hook's `false` counted toward
+// `failed`, and any failure puts the plan in HK_PLAN_FAILED, so one absent
+// optional target failed a plan that did exactly what it was asked.
+static void test_absent_optional_target_does_not_fail_the_plan(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    // A real hook that will prepare, plus a conditional one whose selector
+    // does not exist. Both in one plan, so the second cannot be dismissed as
+    // "the plan had nothing in it".
+    hk_hook_spec_t good = objc_spec("hook.real", &w.child, "bar",
+                                    HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                    (void *)imp_replacement);
+    hk_hook_spec_t absent = objc_spec("hook.absent", &w.child, "nosuchselector",
+                                      HK_OBJC_INSTANCE_METHOD, HK_OBJC_ALLOW_INHERITED_OVERRIDE,
+                                      (void *)imp_replacement);
+    absent.target.objc.availability = HK_AVAILABILITY_OPTIONAL_IF_PRESENT;
+
+    hk_hook_t *hg = NULL; hk_hook_t *ha = NULL;
+    assert(hk_plan_add_hook(plan, &good, &hg) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &absent, &ha) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    // The absent one is not a failure...
+    assert(ha->result.outcome != HK_OUTCOME_FAILED_SAFE);
+    assert(ha->result.outcome == HK_OUTCOME_NO_ROUTE);
+    assert(ha->result.retryable);          // the class could gain it later
+    assert(!ha->result.currently_valid);
+    assert(ha->prepared_state == NULL);    // nothing to commit
+    // ...so the plan is still preparable, and the real hook still commits.
+    assert(hk_plan_state(plan) == HK_PLAN_PREPARED);
+    assert(hg->result.outcome == HK_OUTCOME_PREPARED);
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+    assert(hk_plan_state(plan) == HK_PLAN_COMMITTED);
+    assert(hg->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(imp_on(&w.child, "bar") == (void *)imp_replacement);
+    // Exactly one artifact: the absent hook produced none.
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 1);
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  absent-optional-target-does-not-fail-the-plan: PASS\n");
+}
+
+// A REQUIRED_NOW target that is absent is still a failure -- the difference is
+// the request's availability, not the engine being lenient about missing
+// things.
+static void test_absent_required_target_still_fails(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = objc_spec("hook.required", &w.child, "nosuchselector",
+                                    HK_OBJC_INSTANCE_METHOD, HK_OBJC_ALLOW_INHERITED_OVERRIDE,
+                                    (void *)imp_replacement);
+    // availability stays REQUIRED_NOW
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hk_plan_state(plan) == HK_PLAN_FAILED);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  absent-required-target-still-fails: PASS\n");
+}
+
+// Distinct refusals now reach the result with distinct reasons, instead of
+// every one reading as an undifferentiated "prepare failed".
+static void test_refusals_carry_distinct_diagnostics(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    // -foo is inherited; asking for a local method only.
+    hk_hook_spec_t inherited = objc_spec("h.inherited", &w.child, "foo",
+                                         HK_OBJC_INSTANCE_METHOD, HK_OBJC_LOCAL_METHOD_ONLY,
+                                         (void *)imp_replacement);
+    // A selector that does not exist at all.
+    hk_hook_spec_t missing = objc_spec("h.missing", &w.child, "nosuchselector",
+                                       HK_OBJC_INSTANCE_METHOD, HK_OBJC_ALLOW_INHERITED_OVERRIDE,
+                                       (void *)imp_replacement);
+    hk_hook_t *hi = NULL; hk_hook_t *hm = NULL;
+    assert(hk_plan_add_hook(plan, &inherited, &hi) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &missing, &hm) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hi->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hm->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    // Same outcome, different reasons -- which is the whole point.
+    assert(hi->result.error_code == (int64_t)HK_OBJC_INHERITED_REFUSED);
+    assert(hm->result.error_code == (int64_t)HK_OBJC_METHOD_NOT_FOUND);
+    assert(hi->result.error_code != hm->result.error_code);
+    assert(hi->result.error_message.data && hm->result.error_message.data);
+    assert(hi->result.error_message.length > 0);
+    assert(strcmp(hi->result.error_message.data,
+                  "method is inherited and the request required a local method") == 0);
+    // The domain is the engine that produced the code, filled by the core.
+    assert(hi->result.error_domain.data && strcmp(hi->result.error_domain.data, "objc") == 0);
+    assert(hi->result.error_domain.length == 4);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  refusals-carry-distinct-diagnostics: PASS\n");
+}
+
 int main(void) {
     test_local_method_full_lifecycle();
     test_class_method_through_the_lifecycle();
@@ -431,6 +564,9 @@ int main(void) {
     test_prepared_state_released_without_commit();
     test_second_prepare_is_refused_by_state();
     test_failed_preparation_retains_no_state();
+    test_absent_optional_target_does_not_fail_the_plan();
+    test_absent_required_target_still_fails();
+    test_refusals_carry_distinct_diagnostics();
     printf("all objc wired tests passed\n");
     return 0;
 }
