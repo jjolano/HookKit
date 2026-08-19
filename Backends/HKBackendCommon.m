@@ -22,10 +22,34 @@ NSString* HKJBPath(NSString* path) { return path; }
 #endif
 
 // Shared by every backend that scans for a symbol with no image specified.
+extern const void *_dyld_get_shared_cache_range(size_t *length) __attribute__((weak_import));
+
 void *hk_search_loaded_images(void *(^probe)(const char *imageName)) {
     int count = _dyld_image_count();
 
+    // Skip dyld shared-cache images. Every caller is a findSymbolInImage:NULL
+    // fallback reached through -[HKSubstitutor findSymbolInImage:symbolName:],
+    // which already answered cache images before us: dlsym(RTLD_DEFAULT) for
+    // exported symbols and hk_native_find_cache_symbol for private ones. Both
+    // that fast path and this walk's own per-image cache binding read the SAME
+    // shared-cache local-symbols table, so the walk can add nothing for a cache
+    // image — but a MISS still opened and scanned all ~590 of them (~4.3s on an
+    // iPhone 7, the dominant cost of an injected launch). Only non-cache images
+    // (jailbreak dylibs, RTLD_LOCAL handles) still need the per-image scan.
+    size_t cache_len = 0;
+    const void *cache_base = _dyld_get_shared_cache_range ? _dyld_get_shared_cache_range(&cache_len) : NULL;
+    uintptr_t cache_lo = (uintptr_t)cache_base;
+    uintptr_t cache_hi = cache_lo + cache_len;
+
     for(int i = 0; i < count; i++) {
+        if(cache_base) {
+            uintptr_t hdr = (uintptr_t)_dyld_get_image_header(i);
+
+            if(hdr >= cache_lo && hdr < cache_hi) {
+                continue;   // cache image: already covered by the H9 fast path
+            }
+        }
+
         const char *image_name = _dyld_get_image_name(i);
 
         if(!image_name) {
