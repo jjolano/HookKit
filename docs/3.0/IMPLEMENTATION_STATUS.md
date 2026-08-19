@@ -2570,9 +2570,69 @@ Both adapters' test ctx helpers were `memset` **before** the field was added,
 applying the lesson from the inline adapter rather than rediscovering it.
 
 ## Milestone 8 — Native relocating inline
-**State: not started.** Note: `native/hk_arm64.c` relocator already exists
-and is host-tested (`make test-reloc`) — this milestone hardens/ports it, not
-build from zero.
+**State: not started — surveyed, and the seam boundary is settled.**
+
+`native/hk_arm64.c`'s relocator already exists and is host-tested
+(`make test-reloc`), so this milestone ports and hardens rather than builds
+from zero.
+
+**The survey's central question was where the seam goes, and the answer turned
+out to be already decided by an existing signature.**
+`hk_arm64_relocate(src, src_addr, count, dst, dst_capacity)` writes into a
+**caller-provided buffer**. It does not allocate, does not know where the
+trampoline will live, and does not need to — every rewrite it performs
+resolves to an absolute address, which its own header states explicitly
+("where `dst` ends up does not matter"). So the relocation arithmetic is
+already separated from the allocation, with no refactor required. That is the
+same shape that made Milestone 7 a clean host win, and it holds here too.
+
+What is genuinely device-only is narrower than "the trampoline": it is
+**obtaining an executable page**. In 2.x that is `vm_allocate` +
+`vm_protect`, and `native/hk_native.c` records two hard-won facts about it
+that a host cannot verify and this ledger will not claim to have:
+
+- **One page per trampoline**, not a shared arena. The previous design
+  bump-allocated from a shared arena and flipped the whole arena to R-W to
+  build each new trampoline, stripping EXECUTE from up to 127 already-published
+  trampolines for the duration; any thread running an earlier hook in that
+  window faulted on instruction fetch.
+- **A permanently R-W-X arena does not work on iOS, and fails in a way that
+  looks like it works.** `vm_protect(RWX)` returns `KERN_SUCCESS`, and then the
+  first instruction fetch dies with `KERN_PROTECTION_FAILURE`. The R-W → R-X
+  transition is the one iOS actually honours.
+
+So the seam is one function — *give me an executable page, preferably near
+this anchor* — and everything else is buffer arithmetic: the trampoline layout
+(`HK_TRAMPOLINE_THUNK` 16 + `HK_TRAMPOLINE_BODY` 112, both compile-time
+constants), the relocated prologue, the jump back, and the inbound thunk.
+
+**The phase split follows from that, and is different from Milestone 7's.**
+Terminal inline could put everything in commit because it allocates nothing.
+A relocating install has *two* writes, and they are not interchangeable:
+
+1. build and seal the trampoline (executable allocation — a non-target effect,
+   which ARCHITECTURE.md invariant #2 permits at **prepare**, since prepare is
+   forbidden from mutating a *target*, not from having declared effects), then
+2. patch the entry (the target mutation — **commit**).
+
+That ordering is also what makes the original publishable before the
+replacement is reachable (invariant #5): the sealed trampoline *is* the
+original, and it exists before anything branches anywhere.
+
+One property worth preserving deliberately rather than rediscovering: the
+inbound thunk exists so the **entry patch can be a single 4-byte `B`**, which
+is one aligned store and therefore atomic against a thread entering the
+function mid-patch. It is used only when the page landed within ±128MB of the
+target. Dropping it would make the entry patch a 16-byte sequence and
+reintroduce a torn-patch window.
+
+Not surveyed yet and not assumed: whether `HK_TRAMPOLINE_BODY`'s 4-instruction
+worst case is the right bound for the new engine, and how `PARTIAL` is reported
+if the entry patch fails after the trampoline is sealed (invariant #4 forbids
+fallback after a `PARTIAL`/`UNKNOWN` mutation, and a sealed-but-unreferenced
+trampoline is a leaked executable page, not a mutated target — so it may be
+`NONE` with an artifact rather than `PARTIAL`; that needs deciding, not
+guessing).
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**
