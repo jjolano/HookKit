@@ -1810,7 +1810,7 @@ device-verified.
 | Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
 | Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end | this commit — see below |
 | ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | this commit — see below |
-| ObjC runtime adapter | not started — the engine is built and tested; wiring it as an `hk_engine_vtable_t` is the next step, same shape as the rebind/memory adapters | |
+| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | in progress (host-verified) — ObjC engine wired into the plan lifecycle; first engine to reach `HK_TARGET_OBJC_METHOD`, so it exercises the plan's ObjC-target path end to end | this commit — see below |
 | Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey, commit `e5fc3b2` |
 
 **Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
@@ -2077,8 +2077,48 @@ fact cannot prove ordering: the fake runtime samples the caller's
 `out_original` cell *at the instant* `replace_method` is entered, so invariant
 #5 is observed rather than assumed.
 
-`make test` (214 assertions, exit 0), the suite under ASan+UBSan (clean), and
-`./build.sh all` (all 4 lanes: arm64, arm, legacy-arm, arm64e) verified green.
+**ObjC runtime adapter**, same iteration (`Sources/Engines/HKObjCVtable.{h,c}`)
+— the engine wired in as an `hk_engine_vtable_t`, completing the pattern the
+rebind and memory adapters established. This is the third engine registered
+and the **first to reach `HK_TARGET_OBJC_METHOD`**, so it is what exercises the
+plan's ObjC-target path end to end for the first time: routing on the target
+kind, prepare-mutates-nothing, commit, and a real
+`HK_ARTIFACT_OBJC_METHOD_CHANGE` in the report.
+
+Its environment is smaller than the other two adapters' — just the runtime
+seam. The replacement IMP comes from `hk_hook_spec_t.replacement` and the
+target from `hk_hook_spec_t.target.objc`, so unlike the memory adapter there
+is no image base to stand in for a catalog lookup.
+
+Two ceilings stated rather than glossed:
+
+- `hk_objc_commit` can hand the original back through an out-parameter, but
+  `hk_engine_vtable_t.commit_one` has nowhere to put it, so the adapter passes
+  NULL and the original travels in the artifact's `original_pointer` — the
+  same channel the rebind adapter uses. The engine still writes the cell
+  before the replace for a direct caller; the ordering guarantee is unused
+  here, not weakened.
+- `prepare_one` returns `bool`, so `HK_OBJC_NOT_APPLICABLE` — an absent
+  *optional* target, which is a satisfied request rather than a failure —
+  collapses into the same `false` as a genuine inability. The distinction
+  exists in the engine and is lost at this contract. Recovering it needs the
+  richer prepare result the vtable is meant to grow later; it is recorded in
+  the adapter source at the point where the information is discarded.
+
+The wired suite was also proven to have teeth: an adapter that forwards the
+target but drops `method_kind` (forcing `HK_OBJC_INSTANCE_METHOD`) is caught
+by the class-method lifecycle test, which is the failure mode most likely to
+go unnoticed since three of the four tests would still pass.
+
+One refactor came with it: the in-memory fake runtime moved from
+`test_objc_engine.c` into `Tests/Host/fake_objc_runtime.h`, shared by both
+suites rather than copied. Its stand-in IMPs are marked
+`__attribute__((unused))` because the palette is a deliberate superset — under
+`-Werror -Wunused-function` a shared fixture would otherwise force every suite
+to reference every symbol in it.
+
+`make test` (218 assertions, exit 0), both new suites under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
 
 **Correction to the plan recorded one commit earlier.** The v2.1.1 entry above
 said the next step would be adding a `provenance` enum to
