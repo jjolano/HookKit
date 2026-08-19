@@ -367,6 +367,7 @@ static void *g_liar_freed_ptr;
 
 static hk_engine_capabilities_t liar_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "liar";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
     caps.achievable_reach = HK_REACH_OBJC_DISPATCH;

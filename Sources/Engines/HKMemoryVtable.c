@@ -29,6 +29,7 @@ static uintptr_t resolve_address(const hk_memory_engine_ctx_t *ctx,
 
 static hk_engine_capabilities_t memory_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "memory";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
     caps.achievable_reach = HK_REACH_EXACT_MEMORY;

@@ -2707,10 +2707,19 @@ concrete reason: every `describe()` in the codebase builds
 `hk_engine_capabilities_t` field-by-field on an uninitialized local, so adding
 a field silently leaves it holding stack garbage in all thirteen — the exact
 bug pattern that segfaulted the inline tests and that both adapter ctx helpers
-were later `memset` to prevent. Doing it safely means zeroing all thirteen
+were later `memset` to prevent. Doing it safely means zeroing all
 `describe()` bodies FIRST, in their own commit, then adding the field. That
 ordering is the work, and it is a wide edit that should be deliberate rather
 than smuggled into an adapter commit.
+
+**Step one done:** all 12 `hk_engine_capabilities_t` constructors (7 fake
+engines in `Tests/Host/fake_engines.h`, the 4 real adapters, and one in
+`test_objc_wired.c`) now `memset` before assigning. Behaviour is unchanged —
+every field was already being assigned, which is exactly why the hazard was
+invisible — so this is a pure precondition: a capability field added after
+this point defaults to "declares nothing" rather than to stack garbage.
+Committed on its own so that if it *had* changed anything, the change would be
+attributable to it and not buried in a feature commit.
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**

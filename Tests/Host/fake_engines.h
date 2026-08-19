@@ -16,6 +16,7 @@
 // stand-in, without pretending to implement anything beyond that.
 static inline hk_engine_capabilities_t fake_rebind_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-rebind";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
@@ -91,6 +92,7 @@ static const hk_engine_vtable_t fake_rebind_original_engine = {
 // and less order-dependent than a toggle flag on a shared one).
 static inline hk_engine_capabilities_t fake_always_fails_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-always-fails";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
@@ -111,6 +113,7 @@ static const hk_engine_vtable_t fake_always_fails_engine = {
 // inconsistency the router should catch, not silently skip).
 static inline hk_engine_capabilities_t fake_objc_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-objc";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
     caps.achievable_reach = HK_REACH_OBJC_DISPATCH;
@@ -136,6 +139,7 @@ static inline bool fake_commit_helper_prepare_one(const hk_hook_spec_t *spec) {
 
 static inline hk_engine_capabilities_t fake_commit_none_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-commit-none";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
@@ -161,6 +165,7 @@ static const hk_engine_vtable_t fake_commit_none_engine = {
 
 static inline hk_engine_capabilities_t fake_commit_partial_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-commit-partial";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
@@ -180,6 +185,7 @@ static const hk_engine_vtable_t fake_commit_partial_engine = {
 
 static inline hk_engine_capabilities_t fake_commit_unknown_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-commit-unknown";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
@@ -201,6 +207,7 @@ static const hk_engine_vtable_t fake_commit_unknown_engine = {
 // analogue of fake_objc_engine's missing prepare_one.
 static inline hk_engine_capabilities_t fake_no_commit_one_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fake-no-commit-one";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;

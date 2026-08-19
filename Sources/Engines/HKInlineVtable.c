@@ -7,6 +7,7 @@
 
 static hk_engine_capabilities_t inline_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-terminal";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     caps.achievable_reach = HK_REACH_ENTRYPOINT;

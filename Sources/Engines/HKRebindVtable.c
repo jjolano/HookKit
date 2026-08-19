@@ -23,6 +23,7 @@ static hk_rebind_target_t target_from(const hk_rebind_engine_ctx_t *ctx,
 
 static hk_engine_capabilities_t rebind_describe(void) {
     hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
     caps.engine_id = "rebind";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
