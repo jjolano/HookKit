@@ -77,6 +77,27 @@ hk_image_scope_status_t hk_image_scope_check(const hk_image_catalog_t *catalog,
                                              const uint8_t expected_uuid[16],
                                              uintptr_t address);
 
+// Identity, not containment: is the image whose mach header is at `header` one
+// that `selector` names?
+//
+// This is a genuinely different question from hk_image_scope_check, and the
+// distinction is worth stating because conflating them is the obvious mistake.
+// An engine that operates on a whole image (the rebind engine rewrites the
+// IMPORTER's slots) needs to know whether THAT image is in scope. Asking
+// "is the header address inside a matching image" looks equivalent and is not
+// reliably so -- it assumes the header lies within the image's own segment
+// span, which holds for a real Mach-O (__TEXT maps fileoff 0 at the image
+// base) but is not something the check can verify, and a synthetic or unusual
+// image can violate it. Comparing header pointers asks the question directly.
+//
+// Same catalog policy: NULL/empty catalog reports NO_CATALOG, a skip.
+// Never returns ADDRESS_OUTSIDE or UNREADABLE_IMAGE -- no span is computed.
+hk_image_scope_status_t hk_image_scope_check_header(const hk_image_catalog_t *catalog,
+                                                    const hk_image_selector_t *selector,
+                                                    bool expect_uuid,
+                                                    const uint8_t expected_uuid[16],
+                                                    const void *header);
+
 // A short, stable description for a status, for engine diagnostics. Static
 // storage; never NULL.
 const char *hk_image_scope_describe(hk_image_scope_status_t status);

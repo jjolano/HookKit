@@ -23,11 +23,16 @@
 #define HK_ENGINES_REBIND_VTABLE_H
 
 #include "../Core/HKEngineInternal.h"
+#include "../Core/HKImageScope.h"
 #include "HKRebindEngine.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Image-scope refusals are reported with codes offset past hk_rebind_status_t
+// so a caller reading error_code can tell them apart without a second field.
+#define HK_REBIND_DIAG_IMAGE_SCOPE_BASE 100
 
 // What the adapter needs to act: which image, and how to write a slot.
 // Registered as the engine context; caller-owned and not copied, so it must
@@ -38,6 +43,11 @@ typedef struct {
     uintptr_t slide;
     hk_rebind_write_fn write;
     void *write_ctx;
+    // Optional. When present, the target's caller_image_scope is enforced
+    // against the image this context points at, before any slot is read.
+    // NULL means the check is skipped and says so -- see HKImageScope.h.
+    // Not owned.
+    const hk_image_catalog_t *catalog;
 } hk_rebind_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

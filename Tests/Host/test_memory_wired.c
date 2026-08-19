@@ -56,6 +56,7 @@ static hk_hook_spec_t memory_spec(const char *id, uintptr_t address, bool relati
 // environment, so each test owns its own.
 static hk_memory_engine_ctx_t engine_ctx_for(uintptr_t image_base) {
     hk_memory_engine_ctx_t c;
+    memset(&c, 0, sizeof(c));  // a later field must default to "not supplied", not to stack garbage
     c.image_base = image_base;
     c.write = buffer_write;
     c.write_ctx = NULL;
@@ -165,10 +166,97 @@ static void test_precondition_failure_surfaces_at_prepare(void) {
     printf("  precondition-failure-surfaces-at-prepare: PASS\n");
 }
 
+// base_image enforced for an image-relative target. The memory adapter takes
+// image_base by hand (standing in for a catalog lookup the dyld populator will
+// eventually make), so this check is what catches a hand-passed base that
+// disagrees with the image the request actually named.
+static void test_base_image_is_enforced_for_relative_targets(void) {
+    uint8_t region[REGION];
+    memcpy(region, ORIGINAL, REGION);
+    const uintptr_t offset = 0x40;
+    const uintptr_t image_base = (uintptr_t)region - offset;
+
+    // A synthetic image whose __TEXT span covers the region.
+    uint8_t hdr[0x200];
+    memset(hdr, 0, sizeof(hdr));
+    const uint64_t seg_base = (uint64_t)(image_base & ~(uintptr_t)0xFFF);
+    memcpy(hdr + 0, (uint32_t[]){0xFEEDFACFu}, 4);
+    memcpy(hdr + 16, (uint32_t[]){1u}, 4);
+    memcpy(hdr + 20, (uint32_t[]){72u}, 4);
+    memcpy(hdr + 32, (uint32_t[]){0x19u}, 4);
+    memcpy(hdr + 36, (uint32_t[]){72u}, 4);
+    memcpy(hdr + 40, "__TEXT", 6);
+    memcpy(hdr + 56, &seg_base, 8);
+    memcpy(hdr + 64, (uint64_t[]){0x2000ull}, 8);
+
+    hk_image_catalog_t *cat = hk_image_catalog_create();
+    hk_image_entry_t e;
+    memset(&e, 0, sizeof(e));
+    e.path = "/usr/lib/libtarget.dylib";
+    e.header = hdr;
+    assert(hk_image_catalog_add_entry(cat, &e));
+
+    hk_memory_engine_ctx_t ectx = engine_ctx_for(image_base);
+    ectx.catalog = cat;
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_memory_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t right = memory_spec("p.right", offset, true, ORIGINAL, REPLACEMENT);
+    right.target.memory.base_image.struct_size = sizeof(right.target.memory.base_image);
+    right.target.memory.base_image.struct_version = HK_ABI_VERSION_3_0;
+    right.target.memory.base_image.kind = HK_IMAGE_EXACT_PATH;
+    right.target.memory.base_image.path = "/usr/lib/libtarget.dylib";
+
+    hk_hook_spec_t wrong = right;
+    wrong.stable_hook_id = "p.wrong";
+    wrong.target.memory.base_image.path = "/usr/lib/libnotloaded.dylib";
+
+    hk_hook_t *hr = NULL, *hw = NULL;
+    assert(hk_plan_add_hook(plan, &right, &hr) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &wrong, &hw) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hr->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hw->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hw->result.error_code ==
+           HK_MEMORY_DIAG_IMAGE_SCOPE_BASE + (int64_t)HK_IMAGE_SCOPE_NO_MATCH);
+    assert(memcmp(region, ORIGINAL, REGION) == 0);  // neither wrote anything yet
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+
+    // An ABSOLUTE target is not claimed to live anywhere in particular, so the
+    // same wrong base_image must NOT be checked against it -- checking a
+    // selector the request never meant would invent a requirement.
+    hk_runtime_t *rt2 = NULL;
+    hk_plan_t *p2 = NULL;
+    assert(hk_runtime_create(NULL, &rt2) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt2, hk_memory_vtable(), &ectx));
+    assert(hk_plan_create(rt2, NULL, &p2) == HK_STATUS_OK);
+    hk_hook_spec_t absolute = memory_spec("p.abs", (uintptr_t)region, false, ORIGINAL, REPLACEMENT);
+    absolute.target.memory.base_image = wrong.target.memory.base_image;  // deliberately wrong
+    hk_hook_t *habs = NULL;
+    assert(hk_plan_add_hook(p2, &absolute, &habs) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p2, NULL) == HK_STATUS_OK);
+    assert(habs->result.outcome == HK_OUTCOME_PREPARED);
+
+    hk_plan_release(p2);
+    hk_runtime_release(rt2);
+    hk_image_catalog_destroy(cat);
+    printf("  base-image-is-enforced-for-relative-targets: PASS\n");
+}
+
 int main(void) {
     test_absolute_patch_full_lifecycle();
     test_image_relative_patch();
     test_precondition_failure_surfaces_at_prepare();
+    test_base_image_is_enforced_for_relative_targets();
     printf("all memory wired tests passed\n");
     return 0;
 }

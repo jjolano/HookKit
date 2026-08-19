@@ -35,28 +35,69 @@ static hk_engine_capabilities_t memory_describe(void) {
     return caps;
 }
 
-static bool memory_prepare_one_ctx(void *engine_ctx, const hk_hook_spec_t *spec,
-                                   void **out_prepared) {
+// The engine's refusals are distinct diagnoses. Messages are literals, per the
+// diag contract.
+static hk_prepare_result_t memory_classify(hk_mempatch_status_t st, hk_prepare_diag_t *diag) {
+    if (st == HK_MEMPATCH_OK) {
+        return HK_PREPARE_OK;
+    }
+    diag->error_code = (int64_t)st;
+    switch (st) {
+        case HK_MEMPATCH_PRECONDITION_FAILED:
+            diag->error_message = "the region does not hold the bytes the request expected"; break;
+        case HK_MEMPATCH_TOO_LARGE:
+            diag->error_message = "the region is larger than the engine can capture"; break;
+        case HK_MEMPATCH_INVALID_ARGUMENT:
+        case HK_MEMPATCH_OK:
+            diag->error_message = "invalid memory-patch target"; break;
+    }
+    return HK_PREPARE_FAILED;
+}
+
+static hk_prepare_result_t memory_prepare_one_ctx_status(void *engine_ctx,
+                                                         const hk_hook_spec_t *spec,
+                                                         void **out_prepared,
+                                                         hk_prepare_diag_t *out_diag) {
     const hk_memory_engine_ctx_t *ctx = engine_ctx;
     if (!ctx || !spec || !out_prepared || spec->target_kind != HK_TARGET_MEMORY_PATCH) {
-        return false;
+        out_diag->error_message = "memory engine invoked without a writer or with a non-memory target";
+        return HK_PREPARE_FAILED;
     }
     const hk_memory_target_t *mem = &spec->target.memory;
+    const uintptr_t address = resolve_address(ctx, mem);
+
+    // base_image is meaningful only for an image-relative target -- an
+    // absolute address is not claimed to live anywhere in particular, so
+    // checking it against a selector the request never filled would invent a
+    // requirement. Checked BEFORE the region is read: if the address is not in
+    // the image the request named, reading it is already reading the wrong
+    // memory.
+    if (mem->address_is_image_relative) {
+        hk_image_scope_status_t scope =
+            hk_image_scope_check(ctx->catalog, &mem->base_image, false, NULL, address);
+        if (scope != HK_IMAGE_SCOPE_OK && scope != HK_IMAGE_SCOPE_NO_CATALOG) {
+            out_diag->error_code = HK_MEMORY_DIAG_IMAGE_SCOPE_BASE + (int64_t)scope;
+            out_diag->error_message = hk_image_scope_describe(scope);
+            return HK_PREPARE_FAILED;
+        }
+    }
 
     prepared_patch_t *p = malloc(sizeof(*p));
     if (!p) {
-        return false;
+        out_diag->error_message = "out of memory";
+        return HK_PREPARE_FAILED;
     }
-    p->address = resolve_address(ctx, mem);
+    p->address = address;
     hk_mempatch_status_t st = hk_mempatch_prepare(p->address, mem->size,
                                                   mem->expected_bytes, mem->expected_mask,
                                                   &p->plan);
-    if (st != HK_MEMPATCH_OK) {
-        free(p);  // precondition failed / too large / invalid: clean fail
-        return false;
+    hk_prepare_result_t result = memory_classify(st, out_diag);
+    if (result != HK_PREPARE_OK) {
+        free(p);  // nothing reserved on any non-OK status
+        return result;
     }
     *out_prepared = p;
-    return true;
+    return HK_PREPARE_OK;
 }
 
 static hk_mutation_state_t memory_commit_one_ctx(void *engine_ctx,
@@ -80,7 +121,7 @@ static void memory_release_prepared(void *engine_ctx, void *prepared) {
 
 static const hk_engine_vtable_t g_memory_vtable = {
     .describe = memory_describe,
-    .prepare_one_ctx = memory_prepare_one_ctx,
+    .prepare_one_ctx_status = memory_prepare_one_ctx_status,
     .commit_one_ctx = memory_commit_one_ctx,
     .release_prepared = memory_release_prepared,
 };

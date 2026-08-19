@@ -2429,9 +2429,8 @@ omitted `HKSymbolTable.c`. Caught by reading how the variant died rather than
 just that it did — the same check that turned up a real use-after-free one
 commit earlier.
 
-`make test` (253 assertions, exit 0), the Mach-O / image-scope /
-inline-wired suites under ASan+UBSan (clean), and `./build.sh all` (all 4
-lanes) verified green.
+`make test` (257 assertions, exit 0) and `./build.sh all` (all 4 lanes)
+verified green.
 
 ### `expected_image` / `expected_uuid` — gap closed
 
@@ -2492,9 +2491,48 @@ a future field defaults to "not supplied" rather than to whatever was on the
 stack. Nothing about this was subtle once seen — but nothing warned about it
 either, and a field-by-field initializer in a test is exactly where it hides.
 
-The rebind and memory adapters have the same shape of gap
-(`hk_symbol_target_t`'s defining-image selector, `hk_memory_target_t.base_image`)
-and are the obvious next consumers now that the check exists.
+**Extended to the rebind and memory adapters**, which had the same shape of
+gap. Both were also converted to `prepare_one_ctx_status` in the process, so
+all four adapters now carry distinct per-refusal diagnostics, and image-scope
+refusals sit in their own code band
+(`HK_{REBIND,MEMORY,INLINE}_DIAG_IMAGE_SCOPE_BASE`) so a caller can tell them
+from engine refusals without a second field.
+
+- **Rebind** checks `caller_image_scope`, not `defining_image`. The engine
+  rewrites the *importer's* slots, so the importer is what must be in scope;
+  `defining_image` describes where the symbol is exported from, which this
+  mechanism never resolves and must not pretend to check.
+- **Memory** checks `base_image`, and only for an image-relative target. An
+  absolute address is not claimed to live anywhere in particular, so checking
+  it against a selector the request never meant would invent a requirement —
+  asserted directly by a test that gives an absolute target a deliberately
+  wrong `base_image` and expects it to prepare.
+
+**A design error found by a failing test, worth recording because the fix is a
+new primitive.** Rebind was first wired to the containment check, using the
+image's own header address as a proxy for "this image" — reasoning that an
+image contains its own header. The right-image case then failed. The rebind
+fixture has no `__TEXT` at the image base, so its header is genuinely outside
+its own segment span. The assumption holds for a real Mach-O (`__TEXT` maps
+fileoff 0 at the image base) but the check cannot verify it, and a synthetic
+image violates it. The real problem was that rebind asks an **identity**
+question ("is *this* image in scope") and I had forced it into a
+**containment** function. `hk_image_scope_check_header` now asks it directly by
+comparing header pointers, and a scope test pins the difference: an image whose
+segments do not cover its own header is accepted by the identity form and
+`ADDRESS_OUTSIDE` from the containment one.
+
+Six adapter teeth-proofs, all eventually caught by their intended assertions.
+One was **initially invalid and is recorded as such**: disabling the memory
+adapter's scope check via `if (mem->address_is_image_relative)` also hit the
+identical line inside `resolve_address`, so every relative target resolved to
+its raw offset and the variant "passed" via an ASan SEGV rather than the
+assertion it was meant to trip. Re-run against a unique anchor it is caught
+properly. That is the fourth time this session that checking *how* a proof
+failed changed the conclusion.
+
+Both adapters' test ctx helpers were `memset` **before** the field was added,
+applying the lesson from the inline adapter rather than rediscovering it.
 
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists

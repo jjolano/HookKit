@@ -234,6 +234,64 @@ static void test_unreadable_image_is_not_outside(void) {
     printf("  unreadable-image-is-not-outside: PASS\n");
 }
 
+// The identity form asks a different question, and the difference is not
+// cosmetic: an image whose segments do not cover its own header is accepted by
+// the identity check and REJECTED by the containment one. That case is not
+// hypothetical -- it is exactly what the rebind test fixture looks like, and
+// discovering it is why this function exists.
+static void test_identity_form_differs_from_containment(void) {
+    const uint64_t base = 0x100000000ull;
+    // Segments start well ABOVE the header, so the header is outside the span.
+    uint8_t *img = build_image(base + 0x8000, 0x1000);
+
+    hk_image_catalog_t *cat = hk_image_catalog_create();
+    hk_image_entry_t e = entry_for("/usr/lib/libfoo.dylib", img, 0, UUID_A);
+    assert(hk_image_catalog_add_entry(cat, &e));
+    hk_image_selector_t sel = selector_path("/usr/lib/libfoo.dylib");
+
+    // Identity: this IS the image the selector names.
+    assert(hk_image_scope_check_header(cat, &sel, false, NULL, img) == HK_IMAGE_SCOPE_OK);
+    // Containment on the same pointer: the header is not inside the span, so
+    // the two genuinely disagree.
+    assert(hk_image_scope_check(cat, &sel, false, NULL, (uintptr_t)img)
+           == HK_IMAGE_SCOPE_ADDRESS_OUTSIDE);
+
+    // A different image's header is not this one, even though the selector
+    // matches an entry.
+    uint8_t *other = build_image(base, 0x1000);
+    assert(hk_image_scope_check_header(cat, &sel, false, NULL, other)
+           == HK_IMAGE_SCOPE_NO_MATCH);
+    // Selector naming nothing loaded.
+    hk_image_selector_t nosuch = selector_path("/usr/lib/libnotloaded.dylib");
+    assert(hk_image_scope_check_header(cat, &nosuch, false, NULL, img)
+           == HK_IMAGE_SCOPE_NO_MATCH);
+
+    // UUID applies to the identity form too.
+    assert(hk_image_scope_check_header(cat, &sel, true, UUID_A, img) == HK_IMAGE_SCOPE_OK);
+    assert(hk_image_scope_check_header(cat, &sel, true, UUID_B, img)
+           == HK_IMAGE_SCOPE_UUID_MISMATCH);
+
+    // Same catalog policy, and nothing-asked is still OK.
+    assert(hk_image_scope_check_header(NULL, &sel, false, NULL, img)
+           == HK_IMAGE_SCOPE_NO_CATALOG);
+    assert(hk_image_scope_check_header(cat, NULL, false, NULL, img) == HK_IMAGE_SCOPE_OK);
+    // It never computes a span, so it cannot report those statuses -- an
+    // unparseable header is simply not this image or is this image.
+    hk_image_catalog_t *cat2 = hk_image_catalog_create();
+    uint8_t junk[IMG_SIZE];
+    memset(junk, 0xCD, sizeof(junk));
+    hk_image_entry_t je = entry_for("/usr/lib/libjunk.dylib", junk, 0, NULL);
+    assert(hk_image_catalog_add_entry(cat2, &je));
+    hk_image_selector_t jsel = selector_path("/usr/lib/libjunk.dylib");
+    assert(hk_image_scope_check_header(cat2, &jsel, false, NULL, junk) == HK_IMAGE_SCOPE_OK);
+
+    hk_image_catalog_destroy(cat2);
+    hk_image_catalog_destroy(cat);
+    free(other);
+    free(img);
+    printf("  identity-form-differs-from-containment: PASS\n");
+}
+
 static void test_every_status_has_a_description(void) {
     const hk_image_scope_status_t all[] = {
         HK_IMAGE_SCOPE_OK, HK_IMAGE_SCOPE_NO_CATALOG, HK_IMAGE_SCOPE_NO_MATCH,
@@ -260,6 +318,7 @@ int main(void) {
     test_no_catalog_is_a_skip_not_a_failure();
     test_nothing_asked_is_ok();
     test_unreadable_image_is_not_outside();
+    test_identity_form_differs_from_containment();
     test_every_status_has_a_description();
     printf("all image scope tests passed\n");
     return 0;

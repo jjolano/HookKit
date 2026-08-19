@@ -23,11 +23,17 @@
 #define HK_ENGINES_MEMORY_VTABLE_H
 
 #include "../Core/HKEngineInternal.h"
+#include "../Core/HKImageScope.h"
 #include "HKMemoryEngine.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Image-scope refusals are reported with codes offset past
+// hk_mempatch_status_t so a caller reading error_code can tell them apart
+// without a second field.
+#define HK_MEMORY_DIAG_IMAGE_SCOPE_BASE 100
 
 // Registered as the engine context; caller-owned and not copied, so it must
 // outlive the runtime it is registered with.
@@ -37,6 +43,10 @@ typedef struct {
     uintptr_t image_base;
     hk_mempatch_write_fn write;
     void *write_ctx;
+    // Optional. When present, the target's base_image is enforced against the
+    // address the patch will land on, before the region is read. NULL means
+    // the check is skipped and says so -- see HKImageScope.h. Not owned.
+    const hk_image_catalog_t *catalog;
 } hk_memory_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

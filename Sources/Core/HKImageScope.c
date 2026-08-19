@@ -105,6 +105,71 @@ hk_image_scope_status_t hk_image_scope_check(const hk_image_catalog_t *catalog,
     return HK_IMAGE_SCOPE_ADDRESS_OUTSIDE;
 }
 
+// ---- identity form ------------------------------------------------------
+
+typedef struct {
+    const void *header;
+    bool expect_uuid;
+    const uint8_t *expected_uuid;
+    bool saw_entry;
+    bool saw_uuid_match;
+    bool matched;
+} header_ctx_t;
+
+static bool header_visit(void *vctx, size_t index, const hk_image_entry_t *entry) {
+    header_ctx_t *ctx = vctx;
+    (void)index;
+    ctx->saw_entry = true;
+    if (ctx->expect_uuid) {
+        if (!entry->uuid_present ||
+            memcmp(entry->uuid, ctx->expected_uuid, 16) != 0) {
+            return true;
+        }
+    }
+    ctx->saw_uuid_match = true;
+    if (entry->header == ctx->header) {
+        ctx->matched = true;
+        return false;
+    }
+    return true;
+}
+
+hk_image_scope_status_t hk_image_scope_check_header(const hk_image_catalog_t *catalog,
+                                                    const hk_image_selector_t *selector,
+                                                    bool expect_uuid,
+                                                    const uint8_t expected_uuid[16],
+                                                    const void *header) {
+    if (!selector) {
+        return HK_IMAGE_SCOPE_OK;  // nothing was asked
+    }
+    if (expect_uuid && !expected_uuid) {
+        return HK_IMAGE_SCOPE_OK;
+    }
+    if (!catalog || hk_image_catalog_count(catalog) == 0) {
+        return HK_IMAGE_SCOPE_NO_CATALOG;
+    }
+
+    header_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.header = header;
+    ctx.expect_uuid = expect_uuid;
+    ctx.expected_uuid = expected_uuid;
+
+    (void)hk_image_catalog_match(catalog, selector, header_visit, &ctx);
+
+    if (ctx.matched) {
+        return HK_IMAGE_SCOPE_OK;
+    }
+    if (!ctx.saw_entry) {
+        return HK_IMAGE_SCOPE_NO_MATCH;
+    }
+    if (!ctx.saw_uuid_match) {
+        return HK_IMAGE_SCOPE_UUID_MISMATCH;
+    }
+    // Images matching the selector exist, but this is not one of them.
+    return HK_IMAGE_SCOPE_NO_MATCH;
+}
+
 const char *hk_image_scope_describe(hk_image_scope_status_t status) {
     switch (status) {
         case HK_IMAGE_SCOPE_OK:

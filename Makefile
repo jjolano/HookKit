@@ -133,7 +133,7 @@ test-rebind-engine:
 # buffer-backed seam, real artifacts in the report. No fake engine.
 .PHONY: test-memory-wired
 test-memory-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_wired Tests/Host/test_memory_wired.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKMemoryEngine.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c -lpthread && $(THEOS_OBJ_DIR)/test_memory_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_wired Tests/Host/test_memory_wired.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKMemoryEngine.c Sources/Core/HKImageScope.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c -lpthread && $(THEOS_OBJ_DIR)/test_memory_wired$(ECHO_END)
 
 .PHONY: test-memory-engine
 test-memory-engine:
@@ -188,7 +188,7 @@ test-objc-wired:
 # seam, so all decision-making is host-testable against a buffer.
 .PHONY: test-rebind-wired
 test-rebind-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_wired Tests/Host/test_rebind_wired.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_wired Tests/Host/test_rebind_wired.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRebindEngine.c Sources/Core/HKImageScope.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_wired$(ECHO_END)
 
 # Milestone 5 conformance run against a REAL Mach-O image. Deliberately NOT
 # part of `make test`: it needs a specimen pulled off a device, and specimens

@@ -109,6 +109,7 @@ static hk_hook_spec_t symbol_spec(const char *id, const char *symbol, void *repl
 // environment, so each test owns its own.
 static hk_rebind_engine_ctx_t engine_ctx_for(uint8_t *img) {
     hk_rebind_engine_ctx_t c;
+    memset(&c, 0, sizeof(c));  // a later field must default to "not supplied", not to stack garbage
     c.image_base = img;
     c.image_size = IMG_SIZE;
     c.slide = (uintptr_t)img - (uintptr_t)V_BASE;
@@ -230,10 +231,123 @@ static void test_no_environment_fails_cleanly(void) {
     printf("  no-environment-fails-cleanly: PASS\n");
 }
 
+// The image-scope gap, closed for the rebind adapter. The engine rewrites the
+// IMPORTER's slots, so caller_image_scope is the selector that applies -- a
+// request that names a different importer must be refused before any slot is
+// read.
+static void test_caller_image_scope_is_enforced(void) {
+    uint8_t *img = aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+
+    // The catalog describes the very image the context points at.
+    hk_image_catalog_t *cat = hk_image_catalog_create();
+    hk_image_entry_t e;
+    memset(&e, 0, sizeof(e));
+    e.path = "/usr/lib/libimporter.dylib";
+    e.header = img;
+    e.slide = (uintptr_t)img - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(cat, &e));
+
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for(img);
+    ectx.catalog = cat;
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t right = symbol_spec("h.right", "malloc", (void *)(uintptr_t)REPLACEMENT);
+    right.target.symbol.caller_image_scope.struct_size = sizeof(right.target.symbol.caller_image_scope);
+    right.target.symbol.caller_image_scope.struct_version = HK_ABI_VERSION_3_0;
+    right.target.symbol.caller_image_scope.kind = HK_IMAGE_EXACT_PATH;
+    right.target.symbol.caller_image_scope.path = "/usr/lib/libimporter.dylib";
+
+    hk_hook_spec_t wrong = right;
+    wrong.stable_hook_id = "h.wrong";
+    wrong.target.symbol.caller_image_scope.path = "/usr/lib/libsomeoneelse.dylib";
+
+    hk_hook_t *hr = NULL, *hw = NULL;
+    assert(hk_plan_add_hook(plan, &right, &hr) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &wrong, &hw) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hr->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hw->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    // The refusal identifies itself as an image-scope one, not a rebind-engine
+    // one -- that is what the diag-base offset buys.
+    assert(hw->result.error_code ==
+           HK_REBIND_DIAG_IMAGE_SCOPE_BASE + (int64_t)HK_IMAGE_SCOPE_NO_MATCH);
+    assert(hw->result.error_message.data &&
+           strcmp(hw->result.error_message.data,
+                  hk_image_scope_describe(HK_IMAGE_SCOPE_NO_MATCH)) == 0);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+
+    // Same wrong-scope request with NO catalog: skipped, so it prepares. This
+    // is the device path today and the reason the policy is a skip.
+    hk_rebind_engine_ctx_t noctx = engine_ctx_for(img);  // catalog stays NULL
+    hk_runtime_t *rt2 = NULL;
+    hk_plan_t *p2 = NULL;
+    assert(hk_runtime_create(NULL, &rt2) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt2, hk_rebind_vtable(), &noctx));
+    assert(hk_plan_create(rt2, NULL, &p2) == HK_STATUS_OK);
+    hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook(p2, &wrong, &h2) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p2, NULL) == HK_STATUS_OK);
+    assert(h2->result.outcome == HK_OUTCOME_PREPARED);
+
+    hk_plan_release(p2);
+    hk_runtime_release(rt2);
+    hk_image_catalog_destroy(cat);
+    free(img);
+    printf("  caller-image-scope-is-enforced: PASS\n");
+}
+
+// An absent symbol and a wrong image are different diagnoses now, not one
+// undifferentiated prepare failure.
+static void test_rebind_refusals_are_distinguishable(void) {
+    uint8_t *img = aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for(img);  // no catalog: scope skipped
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t absent = symbol_spec("h.absent", "not_imported", (void *)0x1);
+    hk_hook_t *ha = NULL;
+    assert(hk_plan_add_hook(plan, &absent, &ha) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(ha->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(ha->result.error_code == (int64_t)HK_REBIND_NOT_FOUND);
+    assert(ha->result.error_message.data &&
+           strcmp(ha->result.error_message.data, "the image imports no such symbol") == 0);
+    assert(ha->result.error_domain.data &&
+           strcmp(ha->result.error_domain.data, "rebind") == 0);
+    // Distinct from the image-scope band, which is what the offset guarantees.
+    assert(ha->result.error_code < HK_REBIND_DIAG_IMAGE_SCOPE_BASE);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    free(img);
+    printf("  rebind-refusals-are-distinguishable: PASS\n");
+}
+
 int main(void) {
     test_full_lifecycle_rebinds_and_reports();
     test_absent_symbol_fails_at_prepare();
     test_no_environment_fails_cleanly();
+    test_caller_image_scope_is_enforced();
+    test_rebind_refusals_are_distinguishable();
     printf("all rebind wired tests passed\n");
     return 0;
 }
