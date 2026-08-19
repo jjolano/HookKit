@@ -2570,7 +2570,12 @@ Both adapters' test ctx helpers were `memset` **before** the field was added,
 applying the lesson from the inline adapter rather than rediscovering it.
 
 ## Milestone 8 — Native relocating inline
-**State: not started — surveyed, and the seam boundary is settled.**
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | this commit — see below |
+| Runtime adapter | not started — same shape as the other four, on the context-carrying vtable entry points | |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2633,6 +2638,52 @@ fallback after a `PARTIAL`/`UNKNOWN` mutation, and a sealed-but-unreferenced
 trampoline is a leaked executable page, not a mutated target — so it may be
 `NONE` with an artifact rather than `PARTIAL`; that needs deciding, not
 guessing).
+
+**Engine built**, following the survey's design without change. The survey's
+central claim held: `hk_arm64_relocate` needed no adaptation at all, and the
+whole engine is buffer arithmetic around two narrow seams.
+
+The two open questions the survey flagged are now **answered**, and both
+answers are recorded here because neither was obvious:
+
+- **The trampoline-body bound is right as inherited.** `HK_RELOC_MAX_DISPLACED`
+  is 4 because the longest entry patch is 16 bytes, so at most 4 instructions
+  are ever displaced — the bound follows from the patch size rather than being
+  a guess, and the engine asserts the relationship rather than assuming it.
+- **A failed entry write is `HK_MUTATION_NONE`, not `PARTIAL`.** The trampoline
+  is already sealed and now unreferenced, which is a *leaked executable page*,
+  not a mutated target. Reporting `PARTIAL` would forbid a fallback route under
+  invariant #4 for a mutation that never happened. The page is still recorded
+  as an artifact on that path — an unreported leak would be worse than the
+  leak.
+
+The two artifacts carry **different reversibility**, which is the clearest
+demonstration yet of why that flag is per-artifact rather than per-install:
+the entry bytes are held and can be put back, so the text patch is reversible;
+the executable page cannot be safely reclaimed while a thread may still be
+inside it, so the trampoline is not.
+
+Seven teeth-proofs, all caught by their intended assertions — including the
+terminal engine's own window bound, which is *too permissive* here (terminal
+inline may allow a terminator in the window's last slot because it re-executes
+nothing; this engine re-executes the displaced instructions, so a terminator
+anywhere among them would leave the body via a `RET` instead of the jump back).
+
+**Two invalid proofs found before they could be believed, both by checking
+*how* a variant was caught.** The first run had four variants "caught" at the
+same assertion, which was the tell. The cause was the test, not the engine:
+it asserted that the entry branches *at the trampoline*, but which branch form
+the entry gets depends on where the allocator put the page — under plain malloc
+it lands near and the thunk is used, under ASan it lands far and the engine
+correctly branches straight at the replacement. The test was asserting an
+accident of the allocator. It now asserts the invariant instead (the atomic
+flag means exactly "one 4-byte store", and control reaches the replacement by
+whichever route was emitted), and a baseline ASan run of the *real* code is
+checked before any variant, so a placement-sensitive test cannot masquerade as
+a proof again.
+
+`make test` (263 assertions, exit 0), the suite under ASan+UBSan (clean), and
+`./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**
