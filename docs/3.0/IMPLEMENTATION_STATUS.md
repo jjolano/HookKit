@@ -2451,42 +2451,72 @@ omitted `HKSymbolTable.c`. Caught by reading how the variant died rather than
 just that it did — the same check that turned up a real use-after-free one
 commit earlier.
 
-`make test` (243 assertions, exit 0), the Mach-O suite under ASan+UBSan
-(clean), and `./build.sh all` (all 4 lanes) verified green.
+`make test` (253 assertions, exit 0), the Mach-O / image-scope /
+inline-wired suites under ASan+UBSan (clean), and `./build.sh all` (all 4
+lanes) verified green.
 
-**What still stands between this and the `expected_image` check itself**, so
-the next step starts from a decision rather than re-deriving one. The check
-wants to walk an entry's load commands, and every loaded-image helper here
-takes an explicit `header_region_size` bound. A catalog entry
-(`hk_image_entry_t`) records `header` and `slide` but not how many bytes are
-readable from that header, so the bound has to come from somewhere.
+### `expected_image` / `expected_uuid` — gap closed
 
-Two options were considered and one is clearly better:
+Built exactly as the previous commit's design said, with no re-litigation.
 
-- Add a `header_region_size` field to `hk_image_entry_t`. Rejected: it is new
-  data that only the dyld populator could authoritatively fill, and that
-  populator is device-only and unbuilt — so the field would be a value host
-  tests invent and device code cannot yet supply.
-- Derive it. For a *loaded* image the mach header is always mapped, so
-  `sizeof(mach_header_64) + sizeofcmds` is readable straight off the header
-  and is exactly the right bound. The only thing missing is a way to read
-  those fields *without* first asserting the load-command region fits —
-  `hk_macho_read_header` validates that region against `size`, which is the
-  wrong order of operations here. A small `hk_macho_peek_header` (fixed fields
-  only, no load-command validation) closes it, needs no new data, and needs
-  nothing from the populator.
+`hk_macho_peek_header` (`Sources/Resolvers/HKMachO.{h,c}`) reads the fixed
+header fields and, unlike `hk_macho_read_header`, does **not** require the
+load-command region to lie within `size`. That difference is the entire point:
+a loaded image's honest read bound is `HK_MACHO_HEADER_64_SIZE + sizeofcmds`,
+readable only from the header, while `read_header` validates that region
+against the size the caller is still trying to compute — the wrong order of
+operations. `read_header` is now `peek_header` plus that one check, so the two
+cannot drift. The tests target the exact case `read_header` rejects, assert the
+derived bound is *tight* (one byte less is refused), and check every magic
+discriminator against `read_header` directly so "narrower, not laxer" is
+enforced rather than claimed.
 
-So the remaining work is: `hk_macho_peek_header`, then a scope check over
-catalog + selector + uuid + span, then wiring it into the inline adapter.
-**Policy decision already made, and it matters:** when no catalog is supplied
-the check must be SKIPPED, not failed. The populator is unbuilt, so on device
-the catalog is empty; failing closed would make every inline hook fail, which
-is a fabricated safety rather than a real one. Skipping keeps the gap open on
-device — honestly, and visibly — and the check goes live the moment the
-populator lands. The rebind and memory adapters have the same shape of gap
-(`hk_symbol_target_t`'s defining-image selector and
-`hk_memory_target_t.base_image`) and are the obvious next consumers once the
-check exists.
+`hk_image_scope_check` (**new** `Sources/Core/HKImageScope.{h,c}`) answers
+"does this address lie in the image the request named, and is that image the
+build it expected". It is assembled from pieces that already existed —
+`hk_image_catalog_match`, `hk_macho_peek_header`,
+`hk_macho_image_span_for_loaded_image` — so the only new thing is the policy
+combining them. Statuses distinguish how far the check got: `NO_MATCH` (image
+not loaded) → `UUID_MISMATCH` (loaded, wrong build) → `ADDRESS_OUTSIDE` (right
+build, wrong address, i.e. the slide-change case) → and `UNREADABLE_IMAGE`,
+kept separate because "cannot tell" is not "no".
+
+A selector names a *scope*, not one image: the same path can be loaded more
+than once, so any matching image accepting the address satisfies the check.
+An entry with no UUID recorded cannot satisfy a UUID requirement — "unknown"
+is not the build that was asked for.
+
+**The policy holds as decided: a NULL or empty catalog is a SKIP, not a
+failure.** The dyld populator is unbuilt, so this is the live device path;
+failing closed would make every image-scoped hook fail, which protects nothing
+and breaks everything. The gap stays open on device but *visibly* — the status
+says so — and the check goes live when the populator lands with no other code
+changing. The wired test asserts both halves: with a catalog the wrong image is
+refused, without one the identical request prepares.
+
+Wired into `HKInlineVtable`, checked **before** the target's prologue is read
+(if the address is not in the expected image, reading it is already reading the
+wrong memory). Image-scope refusals carry codes offset by
+`HK_INLINE_DIAG_IMAGE_SCOPE_BASE` so a caller can tell them from
+inline-engine refusals without a second field.
+
+Six teeth-proofs on the scope check, all caught: ignoring the slide, failing
+closed with no catalog, stopping at the first entry, waving through a missing
+UUID, an inclusive end bound, and reporting unreadable as outside. One of them
+initially reported `PATCH DID NOT APPLY` — a bad anchor, not a passing variant;
+re-run with a correct anchor it was caught.
+
+**Adding a field to the engine context segfaulted the existing tests, and that
+is worth recording.** `hk_inline_engine_ctx_t` gained a `catalog` member, and
+the test helper built the struct field-by-field, so the new member held stack
+garbage that the adapter then dereferenced. The helper now `memset`s first, so
+a future field defaults to "not supplied" rather than to whatever was on the
+stack. Nothing about this was subtle once seen — but nothing warned about it
+either, and a field-by-field initializer in a test is exactly where it hides.
+
+The rebind and memory adapters have the same shape of gap
+(`hk_symbol_target_t`'s defining-image selector, `hk_memory_target_t.base_image`)
+and are the obvious next consumers now that the check exists.
 
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists

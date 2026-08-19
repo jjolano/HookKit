@@ -12,38 +12,46 @@
 // memory. On device that is the VM-protection-changing, instruction-cache-
 // invalidating store; on the host it is a plain buffer write.
 //
-// TWO THINGS THIS ADAPTER DOES NOT DO, stated rather than silently skipped:
+// `expected_image` / `expected_uuid` ARE now checked, via
+// HKImageScope.h, when the context supplies an image catalog. A NULL or empty
+// catalog means the check is SKIPPED rather than failed -- the dyld populator
+// is unbuilt, so failing closed would make every inline hook fail on device,
+// which is fabricated safety. See HKImageScope.h for that policy in full.
 //
-//   - `hk_address_target_t.may_strip_pac_or_thumb_state` is not acted on. On
-//     arm64e a function pointer may carry a signature in its high bits, and
-//     stripping it needs ptrauth intrinsics that exist only on device. The
-//     address is used as given. A caller passing a signed pointer with this
-//     flag set on device will need the strip performed before it reaches
-//     here, and that belongs with the other device-only seams, not in a
-//     host-testable adapter pretending to do it.
-//
-//   - `expected_image` / `expected_uuid` are not checked. Confirming that an
-//     address lies inside a particular image with a particular UUID is the
-//     image catalog's job (the dyld populator, still unbuilt). Ignoring them
-//     silently would let a hook land in the wrong image after a slide change,
-//     so this is a real gap, not a design choice -- it is recorded in the
-//     ledger as such.
+// ONE THING THIS ADAPTER STILL DOES NOT DO, stated rather than silently
+// skipped: `hk_address_target_t.may_strip_pac_or_thumb_state` is not acted on.
+// On arm64e a function pointer may carry a signature in its high bits, and
+// stripping it needs ptrauth intrinsics that exist only on device. The address
+// is used as given. A caller passing a signed pointer with this flag set on
+// device will need the strip performed before it reaches here, and that
+// belongs with the other device-only seams, not in a host-testable adapter
+// pretending to do it.
 
 #ifndef HK_ENGINES_INLINE_VTABLE_H
 #define HK_ENGINES_INLINE_VTABLE_H
 
 #include "../Core/HKEngineInternal.h"
+#include "../Core/HKImageScope.h"
 #include "HKInlineEngine.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+// Image-scope refusals are reported with codes offset past the engine's own
+// hk_inline_status_t values, so a caller reading error_code can tell an
+// image-scope refusal from an inline-engine one without a second field.
+#define HK_INLINE_DIAG_IMAGE_SCOPE_BASE 100
+
 // Registered as the engine context. Caller-owned and not copied: it must
 // outlive the runtime it is registered with.
 typedef struct {
     hk_inline_write_fn write;
     void *write_ctx;
+    // Optional. When present, a target's expected_image/expected_uuid are
+    // enforced before anything is prepared; when NULL the check is skipped and
+    // says so. Not owned.
+    const hk_image_catalog_t *catalog;
 } hk_inline_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

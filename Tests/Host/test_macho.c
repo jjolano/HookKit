@@ -658,6 +658,67 @@ static void test_null_tolerance(void) {
     printf("  null-tolerance: PASS\n");
 }
 
+// ---- peek header --------------------------------------------------------
+
+// peek_header exists to break a cycle: a loaded image's safe read bound is
+// HK_MACHO_HEADER_64_SIZE + sizeofcmds, which is only readable from the header,
+// but read_header validates that region against the size you are still trying
+// to compute. So the case that matters is exactly the one read_header rejects.
+static void test_peek_header_without_the_command_region(void) {
+    uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+
+    // Only the fixed header is readable. read_header refuses...
+    hk_macho_header_t h;
+    assert(hk_macho_read_header(img, HK_MACHO_HEADER_64_SIZE, &h) == HK_MACHO_MALFORMED);
+    // ...peek_header answers, and its answer is what makes the real bound
+    // computable.
+    memset(&h, 0, sizeof(h));
+    assert(hk_macho_peek_header(img, HK_MACHO_HEADER_64_SIZE, &h) == HK_MACHO_OK);
+    assert(h.magic == HK_MH_MAGIC_64);
+    assert(h.ncmds == 3);
+    assert(h.sizeofcmds == SEG_SIZEOFCMDS);
+
+    const size_t bound = HK_MACHO_HEADER_64_SIZE + h.sizeofcmds;
+    // The derived bound is exactly what read_header now accepts, and one byte
+    // less is not -- so the derivation is tight, not merely sufficient.
+    assert(hk_macho_read_header(img, bound, &h) == HK_MACHO_OK);
+    assert(hk_macho_read_header(img, bound - 1, &h) == HK_MACHO_MALFORMED);
+    // And it is enough for a real load-command walk.
+    uintptr_t start = 0, end = 0;
+    assert(hk_macho_image_span_for_loaded_image(img, bound, 0, &start, &end) == HK_MACHO_OK);
+    printf("  peek-header-without-the-command-region: PASS\n");
+}
+
+// A narrower check, not a laxer one: everything read_header rejects on the
+// magic or the fixed-header size, peek_header rejects identically.
+static void test_peek_header_is_not_laxer(void) {
+    uint8_t img[SEG_IMG_SIZE];
+    build_segment_image(img, 0x100000000ull);
+    hk_macho_header_t h;
+
+    assert(hk_macho_peek_header(NULL, SEG_IMG_SIZE, &h) == HK_MACHO_NOT_MACHO);
+    assert(hk_macho_peek_header(img, SEG_IMG_SIZE, NULL) == HK_MACHO_NOT_MACHO);
+    // Too small for even the magic, then too small for the fixed header.
+    assert(hk_macho_peek_header(img, 2, &h) == HK_MACHO_TOO_SMALL);
+    assert(hk_macho_peek_header(img, HK_MACHO_HEADER_64_SIZE - 1, &h) == HK_MACHO_TOO_SMALL);
+
+    // Every magic read_header discriminates, peek_header discriminates the
+    // same way -- checked against read_header directly so the two cannot drift.
+    const uint32_t magics[] = {HK_MH_CIGAM_64, HK_MH_MAGIC, HK_MH_CIGAM,
+                               HK_FAT_MAGIC, HK_FAT_CIGAM, 0xDEADBEEFu};
+    for (size_t i = 0; i < sizeof(magics) / sizeof(magics[0]); i++) {
+        uint8_t bad[SEG_IMG_SIZE];
+        build_segment_image(bad, 0x100000000ull);
+        put_u32(bad, 0, magics[i]);
+        hk_macho_status_t peeked = hk_macho_peek_header(bad, SEG_IMG_SIZE, &h);
+        hk_macho_status_t read = hk_macho_read_header(bad, SEG_IMG_SIZE, &h);
+        assert(peeked != HK_MACHO_OK);
+        assert(peeked == read);
+    }
+    printf("  peek-header-is-not-laxer: PASS\n");
+}
+
 // ---- image span ---------------------------------------------------------
 
 // The span is what answers "does this address belong to this image", so both
@@ -770,6 +831,8 @@ int main(void) {
     test_loaded_image_symtab_translation();
     test_loaded_image_validates_against_linkedit();
     test_iterate_segments();
+    test_peek_header_without_the_command_region();
+    test_peek_header_is_not_laxer();
     test_image_span();
     test_image_span_excludes_pagezero();
     test_image_span_tracks_both_ends();

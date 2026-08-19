@@ -22,7 +22,7 @@ static uint64_t read_u64(const uint8_t *p) {
     return v;
 }
 
-hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
+hk_macho_status_t hk_macho_peek_header(const void *image, size_t size,
                                        hk_macho_header_t *out_header) {
     if (!image || !out_header) {
         return HK_MACHO_NOT_MACHO;
@@ -60,7 +60,18 @@ hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
     out_header->sizeofcmds = read_u32(base + 20);
     out_header->flags      = read_u32(base + 24);
     // base + 28 is `reserved`, deliberately not surfaced.
+    return HK_MACHO_OK;
+}
 
+hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
+                                       hk_macho_header_t *out_header) {
+    // Everything read_header does EXCEPT the region check below is exactly
+    // peek_header, so it is one call rather than a second copy that could
+    // drift from it.
+    hk_macho_status_t status = hk_macho_peek_header(image, size, out_header);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
     // The whole load-command region must lie inside the buffer. Written as a
     // subtraction so no addition can overflow.
     if (out_header->sizeofcmds > size - HK_MACHO_HEADER_64_SIZE) {

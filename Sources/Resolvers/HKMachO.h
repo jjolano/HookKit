@@ -105,6 +105,24 @@ typedef struct {
 hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
                                        hk_macho_header_t *out_header);
 
+// The fixed header fields only. Identical to hk_macho_read_header except that
+// it does NOT require the load-command region to lie within `size`.
+//
+// That difference is the entire point, and it exists for one situation: a
+// LOADED image, where the header is mapped but the caller does not yet know
+// how far it may safely read. Every loaded-image helper here takes an explicit
+// `header_region_size` bound, and the honest bound is
+// HK_MACHO_HEADER_64_SIZE + sizeofcmds -- which is readable only from the
+// header itself. hk_macho_read_header cannot supply it, because it validates
+// that region against a size the caller is still trying to compute; that is
+// the wrong order of operations. This is the one that breaks the cycle.
+//
+// `size` must still cover the fixed header (HK_MACHO_HEADER_64_SIZE), and the
+// magic is validated exactly as read_header does -- this is a narrower check,
+// not a laxer one.
+hk_macho_status_t hk_macho_peek_header(const void *image, size_t size,
+                                       hk_macho_header_t *out_header);
+
 // Visits each load command in order. `offset` is the command's offset from
 // the start of the image. Returning false stops iteration early (reported as
 // HK_MACHO_OK -- an early stop is a caller decision, not an error).

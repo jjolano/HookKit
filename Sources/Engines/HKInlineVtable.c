@@ -51,6 +51,20 @@ static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
     }
     const hk_address_target_t *addr = &spec->target.address;
 
+    // Image scope first, before anything is read from the target: if the
+    // address is not in the image the request named, reading its prologue is
+    // already reading the wrong memory. A NULL/empty catalog reports
+    // NO_CATALOG, which is a skip and not a refusal -- see HKImageScope.h.
+    hk_image_scope_status_t scope =
+        hk_image_scope_check(ctx->catalog, &addr->expected_image,
+                             addr->expected_uuid_present, addr->expected_uuid,
+                             (uintptr_t)addr->address);
+    if (scope != HK_IMAGE_SCOPE_OK && scope != HK_IMAGE_SCOPE_NO_CATALOG) {
+        out_diag->error_code = HK_INLINE_DIAG_IMAGE_SCOPE_BASE + (int64_t)scope;
+        out_diag->error_message = hk_image_scope_describe(scope);
+        return HK_PREPARE_FAILED;
+    }
+
     hk_inline_plan_t *plan = malloc(sizeof(*plan));
     if (!plan) {
         out_diag->error_message = "out of memory";

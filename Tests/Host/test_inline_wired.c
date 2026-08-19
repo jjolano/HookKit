@@ -56,8 +56,14 @@ static hk_hook_spec_t address_spec(const char *id, uintptr_t target, void *repla
     return spec;
 }
 
+// memset first, deliberately: this struct gained a `catalog` field, and a
+// field-by-field initializer silently left it holding stack garbage, which
+// segfaulted the moment the adapter started consulting it. Zeroing means a
+// future field defaults to "not supplied" instead of to whatever was on the
+// stack.
 static hk_inline_engine_ctx_t engine_ctx(void) {
     hk_inline_engine_ctx_t c;
+    memset(&c, 0, sizeof(c));
     c.write = buffer_write;
     c.write_ctx = NULL;
     return c;
@@ -275,12 +281,114 @@ static void test_refusals_carry_distinct_diagnostics(void) {
     printf("  refusals-carry-distinct-diagnostics: PASS\n");
 }
 
+// The recorded expected_image gap, closed and exercised through the whole
+// lifecycle. A catalog in the context makes the target's expected_image /
+// expected_uuid enforceable; without one the check is a documented skip.
+static void test_expected_image_is_enforced_when_a_catalog_is_supplied(void) {
+    // A synthetic image whose __TEXT covers the function we will hook, so the
+    // catalog's span genuinely contains the target address.
+    const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(body, 5);
+    uintptr_t target = (uintptr_t)fn;
+
+    uint8_t hdr[0x200];
+    memset(hdr, 0, sizeof(hdr));
+    // MH_MAGIC_64, ncmds 1, sizeofcmds 72, one LC_SEGMENT_64 __TEXT spanning
+    // a page around the function.
+    const uint64_t seg_base = (uint64_t)(target & ~(uintptr_t)0xFFF);
+    memcpy(hdr + 0, (uint32_t[]){0xFEEDFACFu}, 4);
+    memcpy(hdr + 16, (uint32_t[]){1u}, 4);
+    memcpy(hdr + 20, (uint32_t[]){72u}, 4);
+    memcpy(hdr + 32, (uint32_t[]){0x19u}, 4);
+    memcpy(hdr + 36, (uint32_t[]){72u}, 4);
+    memcpy(hdr + 40, "__TEXT", 6);
+    memcpy(hdr + 56, &seg_base, 8);
+    memcpy(hdr + 64, (uint64_t[]){0x2000ull}, 8);
+
+    const uint8_t uuid[16] = {0xAA, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    hk_image_catalog_t *cat = hk_image_catalog_create();
+    hk_image_entry_t e;
+    memset(&e, 0, sizeof(e));
+    e.path = "/usr/lib/libtarget.dylib";
+    e.header = hdr;
+    e.slide = 0;
+    e.uuid_present = true;
+    memcpy(e.uuid, uuid, 16);
+    assert(hk_image_catalog_add_entry(cat, &e));
+
+    hk_inline_engine_ctx_t ectx = engine_ctx();
+    ectx.catalog = cat;
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    // Names the right image: prepares and commits.
+    hk_hook_spec_t good = address_spec("h.right.image", target, (void *)(target + 0x1000),
+                                       HK_ORIGINAL_NONE, NULL, 0);
+    good.target.address.expected_image.struct_size = sizeof(good.target.address.expected_image);
+    good.target.address.expected_image.struct_version = HK_ABI_VERSION_3_0;
+    good.target.address.expected_image.kind = HK_IMAGE_EXACT_PATH;
+    good.target.address.expected_image.path = "/usr/lib/libtarget.dylib";
+    good.target.address.expected_uuid_present = true;
+    memcpy(good.target.address.expected_uuid, uuid, 16);
+
+    // Names an image that is not loaded: refused before anything is read.
+    hk_hook_spec_t wrong = good;
+    wrong.stable_hook_id = "h.wrong.image";
+    wrong.target.address.expected_image.path = "/usr/lib/libnotloaded.dylib";
+
+    hk_hook_t *hg = NULL, *hw = NULL;
+    assert(hk_plan_add_hook(plan, &good, &hg) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &wrong, &hw) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hg->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hw->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    // The refusal says it was the image scope, not an inline-engine refusal --
+    // that is what the diag-code offset is for.
+    assert(hw->result.error_code ==
+           HK_INLINE_DIAG_IMAGE_SCOPE_BASE + (int64_t)HK_IMAGE_SCOPE_NO_MATCH);
+    assert(hw->result.error_message.data &&
+           strcmp(hw->result.error_message.data,
+                  hk_image_scope_describe(HK_IMAGE_SCOPE_NO_MATCH)) == 0);
+    assert(fn[0] == A64_NOP);  // nothing written by either yet
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+
+    // Same wrong-image request, but with NO catalog: the check is SKIPPED, so
+    // it prepares. This is the device path today, and it is the reason the
+    // policy is a skip -- failing closed here would fail every inline hook.
+    hk_inline_engine_ctx_t noctx = engine_ctx();   // catalog stays NULL
+    hk_runtime_t *rt2 = NULL;
+    hk_plan_t *p2 = NULL;
+    assert(hk_runtime_create(NULL, &rt2) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt2, hk_inline_vtable(), &noctx));
+    assert(hk_plan_create(rt2, NULL, &p2) == HK_STATUS_OK);
+    hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook(p2, &wrong, &h2) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p2, NULL) == HK_STATUS_OK);
+    assert(h2->result.outcome == HK_OUTCOME_PREPARED);
+
+    hk_plan_release(p2);
+    hk_runtime_release(rt2);
+    hk_image_catalog_destroy(cat);
+    free(fn);
+    printf("  expected-image-is-enforced-when-a-catalog-is-supplied: PASS\n");
+}
+
 int main(void) {
     test_full_lifecycle_patches_and_reports();
     test_continuation_request_fails_at_prepare();
     test_pinned_prologue_mismatch_fails_at_prepare();
     test_no_context_fails_cleanly();
     test_refusals_carry_distinct_diagnostics();
+    test_expected_image_is_enforced_when_a_catalog_is_supplied();
     printf("all inline wired tests passed\n");
     return 0;
 }
