@@ -2239,7 +2239,7 @@ Note: HookKit 2.x already has working, host-and-device-tested implementations of
 | Task | State | Evidence |
 |---|---|---|
 | Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | in progress (host-verified) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; write behind a device seam | this commit — see below |
-| Runtime adapter | not started — same shape as the other three adapters, now on the context-carrying vtable entry points | |
+| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle; first engine to reach `HK_TARGET_FUNCTION_ADDRESS`, so it exercises the plan's address-target path end to end | this commit — see below |
 
 Note: the atomicity work committed at `3e6bbdb` (one-page-per-trampoline,
 atomic near-branch via inbound thunk) is a real head start on this milestone's
@@ -2315,8 +2315,46 @@ no overrun check at all, applying the literal-load check, no revalidation,
 serving a continuation request anyway, ignoring alignment, always using a
 4-byte branch, and skipping the trap check.
 
-`make test` (232 assertions, exit 0), the suite under ASan+UBSan (clean), and
-`./build.sh all` (all 4 lanes) verified green.
+**Runtime adapter**, same iteration (`Sources/Engines/HKInlineVtable.{h,c}`)
+— built on the vtable's context-carrying entry points from the start, so it
+never had a file-scoped environment to remove. Fourth engine registered and
+the **first to reach `HK_TARGET_FUNCTION_ADDRESS`**, so it exercises the
+plan's address-target path end to end for the first time.
+
+The adapter passes `spec->original_requirement` through rather than
+hardcoding `HK_ORIGINAL_NONE`, which is what keeps the engine's defining
+refusal honest end to end: a caller asking for a callable original gets
+`FAILED_SAFE` from the lifecycle, not a silently different mechanism.
+
+**Two real gaps in the adapter, recorded rather than papered over**, both
+because the machinery they need does not exist yet:
+
+- `hk_address_target_t.may_strip_pac_or_thumb_state` is **not acted on**. On
+  arm64e a function pointer may carry a signature in its high bits and
+  stripping needs ptrauth intrinsics that exist only on device. The address is
+  used as given.
+- `expected_image` / `expected_uuid` are **not checked**. Confirming an
+  address lies inside a particular image with a particular UUID is the image
+  catalog's job (dyld populator, unbuilt). This one is a genuine correctness
+  gap, not a design choice — without it a hook could land in the wrong image
+  after a slide change.
+
+**Teeth-proofs: two of three caught, and the third is reported honestly rather
+than counted as a pass.** An adapter that hardcodes `HK_ORIGINAL_NONE` and one
+that drops the pinned-prologue bytes are both caught. Removing the `!ctx` half
+of the commit guard was **not** caught — and unlike the equivalent case in the
+vtable-extension commit, this one is *genuinely unreachable* rather than an
+untested path: commit only runs after prepare returned true, prepare refuses a
+NULL context, and `matched_engine_ctx` is fixed at analyze so both phases see
+the same pointer. No test can reach it without a contrived engine that is not
+this one. The guard stays (ctx is dereferenced two lines later, so guarding
+makes that safe by construction rather than by an argument about a different
+function) and the source says it is unreachable. Distinguishing "no test
+covers this" from "nothing can reach this" is the point of running the proof
+at all.
+
+`make test` (236 assertions, exit 0), both new suites under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 8 — Native relocating inline
 **State: not started.** Note: `native/hk_arm64.c` relocator already exists
