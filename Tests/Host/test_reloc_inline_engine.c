@@ -34,6 +34,7 @@ typedef struct {
     bool refuse_alloc;
     bool refuse_seal;
     bool refuse_write;
+    unsigned free_calls;
     unsigned write_calls;
 } seam_t;
 
@@ -62,6 +63,14 @@ static bool seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t
     if (s->refuse_write) return false;
     memcpy((void *)address, data, size);
     return true;
+}
+// The engine's reclaim seam. Distinct from seam_free below, which is the
+// test's own teardown for a page the engine kept.
+static void seam_free_page(void *ctx, uintptr_t page, size_t size) {
+    seam_t *s = ctx; (void)size;
+    s->free_calls++;
+    free((void *)page);
+    if ((uintptr_t)s->page == page) s->page = NULL;
 }
 static void seam_free(seam_t *s) { free(s->page); s->page = NULL; }
 
@@ -99,7 +108,7 @@ static void test_prepare_builds_a_trampoline_and_commit_patches(void) {
     seam_t s; memset(&s, 0, sizeof(s));
     hk_reloc_plan_t plan;
     assert(hk_reloc_prepare(target, replacement, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_OK);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
     assert(plan.captured);
     assert(s.alloc_calls == 1 && s.seal_calls == 1 && s.sealed);
     // Which branch form the entry gets depends on where the allocator put the
@@ -127,7 +136,7 @@ static void test_prepare_builds_a_trampoline_and_commit_patches(void) {
 
     hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
     hk_artifact_sink_t sink; memset(&sink, 0, sizeof(sink)); sink.ledger = ledger;
-    assert(hk_reloc_commit(&plan, seam_write, &s, &sink) == HK_MUTATION_COMPLETE);
+    assert(hk_reloc_commit(&plan, seam_write, &s, seam_free_page, &s, &sink) == HK_MUTATION_COMPLETE);
 
     // Control reaches the replacement -- via the thunk when the page landed
     // near enough for a 4-byte B, directly otherwise. Both are correct; which
@@ -179,7 +188,7 @@ static void test_pc_relative_prologue_is_rewritten(void) {
     seam_t s; memset(&s, 0, sizeof(s));
     hk_reloc_plan_t plan;
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_OK);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
 
     // The relocated copy is NOT a verbatim ADRP -- it was rewritten, which is
     // exactly what a terminal engine never has to do and never does.
@@ -205,7 +214,7 @@ static void test_terminator_anywhere_is_fatal(void) {
     const uint32_t just_ret[] = {A64_RET, A64_NOP, A64_NOP, A64_NOP};
     uint32_t *fn = make_fn(just_ret, 4);
     assert(hk_reloc_prepare((uintptr_t)fn, (uintptr_t)fn + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan)
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan)
            == HK_RELOC_TARGET_TOO_SHORT);
     assert(!plan.captured);
     assert(fn[0] == A64_RET);          // untouched
@@ -224,7 +233,7 @@ static void test_trap_stub_alignment_and_precondition(void) {
     const uint32_t trap[] = {A64_BRK0, A64_NOP, A64_NOP, A64_NOP, A64_RET};
     uint32_t *tf = make_fn(trap, 5);
     assert(hk_reloc_prepare((uintptr_t)tf, (uintptr_t)tf + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_TRAP_STUB);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_TRAP_STUB);
     seam_free(&s);
     free(tf);
 
@@ -232,7 +241,7 @@ static void test_trap_stub_alignment_and_precondition(void) {
     memset(&s, 0, sizeof(s));
     for (uintptr_t off = 1; off < 4; off++) {
         assert(hk_reloc_prepare((uintptr_t)fn + off, (uintptr_t)fn + 0x1000, NULL, 0,
-                                seam_alloc, seam_seal, &s, &plan) == HK_RELOC_MISALIGNED);
+                                seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_MISALIGNED);
     }
     // Misalignment is caught before the page is even requested.
     assert(s.alloc_calls == 0);
@@ -241,7 +250,7 @@ static void test_trap_stub_alignment_and_precondition(void) {
     const uint32_t not_there = A64_RET;
     assert(hk_reloc_prepare((uintptr_t)fn, (uintptr_t)fn + 0x1000,
                             (const uint8_t *)&not_there, 4,
-                            seam_alloc, seam_seal, &s, &plan)
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan)
            == HK_RELOC_PRECONDITION_FAILED);
     seam_free(&s);
     free(fn);
@@ -258,33 +267,49 @@ static void test_seam_refusals(void) {
     seam_t s; memset(&s, 0, sizeof(s));
     s.refuse_alloc = true;
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
     assert(fn[0] == A64_NOP);
 
     // Built but never sealed: unusable, so preparation fails rather than
-    // handing back a writable "trampoline" a hook would branch into.
+    // handing back a writable "trampoline" a hook would branch into -- and the
+    // page is given back, not leaked.
     memset(&s, 0, sizeof(s));
     s.refuse_seal = true;
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
     assert(!plan.captured);
     assert(fn[0] == A64_NOP);
-    seam_free(&s);
+    assert(s.free_calls == 1);   // reclaimed on the failure path
 
-    // The entry write refuses. The page is already sealed and now unreferenced
-    // -- a leaked executable page, NOT a mutated target. So this is NONE with
-    // the page still reported, not PARTIAL (which would forbid a fallback
-    // route under invariant #4 for a mutation that never happened).
+    // The entry write refuses. The page is sealed but nothing branches to it,
+    // so nothing can be executing in it -- it is RECLAIMED rather than left
+    // behind. Still MUTATION_NONE and not PARTIAL: the target was never
+    // written, so there is no partial mutation for invariant #4 to forbid a
+    // fallback for.
     memset(&s, 0, sizeof(s));
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_OK);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
     s.refuse_write = true;
     hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
     hk_artifact_sink_t sink; memset(&sink, 0, sizeof(sink)); sink.ledger = ledger;
-    assert(hk_reloc_commit(&plan, seam_write, &s, &sink) == HK_MUTATION_NONE);
+    assert(hk_reloc_commit(&plan, seam_write, &s, seam_free_page, &s, &sink) == HK_MUTATION_NONE);
     assert(fn[0] == A64_NOP);
-    // The page is still accounted for -- a leak that went unreported would be
-    // worse than the leak.
+    assert(s.free_calls == 1);               // reclaimed, not leaked
+    // ...and NOTHING recorded, because nothing persists. An artifact claiming a
+    // trampoline exists when it has been given back would be a false record.
+    assert(hk_artifact_ledger_count(ledger) == 0);
+    hk_artifact_ledger_destroy(ledger);
+
+    // Without a reclaim seam the page cannot be given back, so it MUST be
+    // reported instead -- an unreported leak is worse than the leak.
+    memset(&s, 0, sizeof(s));
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
+    s.refuse_write = true;
+    ledger = hk_artifact_ledger_create();
+    memset(&sink, 0, sizeof(sink)); sink.ledger = ledger;
+    assert(hk_reloc_commit(&plan, seam_write, &s, NULL, NULL, &sink) == HK_MUTATION_NONE);
+    assert(s.free_calls == 0);
     assert(hk_artifact_ledger_count(ledger) == 1);
     hk_artifact_snapshot_t *snap = NULL;
     assert(hk_artifact_snapshot_from_ledger(ledger, &snap) == HK_STATUS_OK);
@@ -307,23 +332,23 @@ static void test_revalidation_and_argument_validation(void) {
     hk_reloc_plan_t plan;
 
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_OK);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
     fn[0] = A64_RET;   // someone else patched the entry in between
-    assert(hk_reloc_commit(&plan, seam_write, &s, NULL) == HK_MUTATION_NONE);
+    assert(hk_reloc_commit(&plan, seam_write, &s, seam_free_page, &s, NULL) == HK_MUTATION_NONE);
     assert(fn[0] == A64_RET);       // their patch survives
     assert(s.write_calls == 0);     // and nothing was attempted
     seam_free(&s);
 
     memset(&s, 0, sizeof(s));
-    assert(hk_reloc_prepare(0, target + 0x1000, NULL, 0, seam_alloc, seam_seal, &s, &plan)
+    assert(hk_reloc_prepare(0, target + 0x1000, NULL, 0, seam_alloc, seam_seal, seam_free_page, &s, &plan)
            == HK_RELOC_INVALID_ARGUMENT);
-    assert(hk_reloc_prepare(target, 0, NULL, 0, seam_alloc, seam_seal, &s, &plan)
+    assert(hk_reloc_prepare(target, 0, NULL, 0, seam_alloc, seam_seal, seam_free_page, &s, &plan)
            == HK_RELOC_INVALID_ARGUMENT);
-    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, NULL, seam_seal, &s, &plan)
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, NULL, seam_seal, seam_free_page, &s, &plan)
            == HK_RELOC_INVALID_ARGUMENT);
-    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, seam_alloc, NULL, &s, &plan)
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, seam_alloc, NULL, seam_free_page, &s, &plan)
            == HK_RELOC_INVALID_ARGUMENT);
-    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, seam_alloc, seam_seal, &s, NULL)
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0, seam_alloc, seam_seal, seam_free_page, &s, NULL)
            == HK_RELOC_INVALID_ARGUMENT);
     assert(s.alloc_calls == 0);     // none of those reached the seam
 
@@ -332,12 +357,12 @@ static void test_revalidation_and_argument_validation(void) {
     // would make the prepare below fail for an unrelated reason.
     fn[0] = A64_NOP;
 
-    assert(hk_reloc_commit(NULL, seam_write, &s, NULL) == HK_MUTATION_NONE);
+    assert(hk_reloc_commit(NULL, seam_write, &s, seam_free_page, &s, NULL) == HK_MUTATION_NONE);
     hk_reloc_plan_t uncaptured; memset(&uncaptured, 0, sizeof(uncaptured));
-    assert(hk_reloc_commit(&uncaptured, seam_write, &s, NULL) == HK_MUTATION_NONE);
+    assert(hk_reloc_commit(&uncaptured, seam_write, &s, seam_free_page, &s, NULL) == HK_MUTATION_NONE);
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
-                            seam_alloc, seam_seal, &s, &plan) == HK_RELOC_OK);
-    assert(hk_reloc_commit(&plan, NULL, &s, NULL) == HK_MUTATION_NONE);
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
+    assert(hk_reloc_commit(&plan, NULL, &s, seam_free_page, &s, NULL) == HK_MUTATION_NONE);
     seam_free(&s);
 
     free(fn);

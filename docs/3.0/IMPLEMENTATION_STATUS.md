@@ -2575,7 +2575,7 @@ applying the lesson from the inline adapter rather than rediscovering it.
 | Task | State | Evidence |
 |---|---|---|
 | Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | this commit — see below |
-| Runtime adapter | not started — the routing question that blocked it is now resolved (below), so this is next | |
+| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | in progress (host-verified) — wired in alongside the terminal engine, with the router picking between them on original requirement | this commit — see below |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2758,6 +2758,44 @@ unmodified code was checked first, as now standard.
 
 `make test` (265 assertions, exit 0) and `./build.sh all` (all 4 lanes)
 verified green.
+
+**Adapter built, and the two inline engines now coexist** — which was the point
+of the routing criterion. Registering both is the intended configuration:
+`HK_ORIGINAL_NONE` goes to the terminal engine (no page, no relocation, nothing
+to leak), and `DIRECT_PREDECESSOR`/`CALLABLE_CONTINUATION` skip it entirely and
+reach the relocating one. Registration order is a *cost* decision, not a
+correctness one — relocating-first serves `NONE` correctly too, just by
+allocating a page nobody needed — and there is a test asserting exactly that
+distinction rather than leaving it as advice.
+
+**LeakSanitizer found a real engine defect that `make test` could not.** The
+suite passed; the sanitized build reported a 128-byte leak — exactly
+`HK_RELOC_PAGE_BYTES`. `hk_reloc_prepare` allocates the trampoline *before* the
+precondition, trap-stub, terminator and relocatability checks, and had no way
+to give the page back when any of them failed. On device that is a permanently
+leaked executable page per failed preparation. This was not a test-harness
+slip: the seam set was genuinely incomplete.
+
+Fixed by adding a third seam, `hk_reloc_free_fn`, and routing every
+post-allocation failure through one release helper. It also improved commit:
+previously a failed entry write left the sealed page behind and recorded an
+artifact for it, documented as a leak. Now the page is **reclaimed** — nothing
+branches to it, so nothing can be executing in it — and nothing is recorded,
+because `MUTATION_NONE` with no artifacts is the honest report when nothing
+persists. When no reclaim seam is supplied the old behaviour stands and the
+artifact IS recorded, since an unreported leak is worse than the leak; both
+paths are tested.
+
+Five adapter teeth-proofs. Two were **not caught and are reported as what they
+each actually were**, rather than counted: removing
+`caps.original_requirements = HK_ORIGINAL_REQ_ALL` is *semantically
+equivalent* (zero already means "any"), so there was no bug to catch; but the
+scope-check and pinned-prologue variants exposed **real test gaps** — this
+suite exercised neither path. Both gaps are now closed with tests, and both
+variants are caught after.
+
+`make test` (271 assertions, exit 0), both relocating suites under
+ASan+UBSan+Leak (clean), and `./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 9 — Static continuation decision
 **State: not started.**

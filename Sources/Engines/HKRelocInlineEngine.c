@@ -5,11 +5,23 @@
 
 #include <string.h>
 
+// Every failure AFTER the page is allocated routes through here. Without it
+// each one leaked an executable page -- caught by LeakSanitizer, invisible to
+// a plain run, and on device a permanent leak per failed preparation.
+static hk_reloc_status_t reloc_release_and_fail(hk_reloc_free_fn free_page,
+                                                void *seam_ctx, uintptr_t page,
+                                                hk_reloc_status_t status) {
+    if (free_page && page) {
+        free_page(seam_ctx, page, HK_RELOC_PAGE_BYTES);
+    }
+    return status;
+}
+
 hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
                                    const uint8_t *expected_initial_bytes,
                                    size_t expected_size,
                                    hk_reloc_alloc_fn alloc, hk_reloc_seal_fn seal,
-                                   void *seam_ctx,
+                                   hk_reloc_free_fn free_page, void *seam_ctx,
                                    hk_reloc_plan_t *out_plan) {
     if (!out_plan || target == 0 || replacement == 0 || !alloc || !seal) {
         return HK_RELOC_INVALID_ARGUMENT;
@@ -28,7 +40,8 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
     // has to be the 16-byte form. Nothing about the target is touched here.
     const uintptr_t page = alloc(seam_ctx, HK_RELOC_PAGE_BYTES, target);
     if (page == 0 || (page & 3u) != 0) {
-        return HK_RELOC_NO_TRAMPOLINE;
+        // A misaligned page is still a page: give it back rather than drop it.
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_NO_TRAMPOLINE);
     }
     const uintptr_t thunk_addr = page;
     const uintptr_t body_addr = page + HK_RELOC_THUNK_BYTES;
@@ -49,11 +62,11 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
         out_plan->atomic_entry_patch = (patch_size == 4);
     }
     if (patch_size == 0 || patch_size > HK_RELOC_MAX_PATCH) {
-        return HK_RELOC_INVALID_ARGUMENT;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_INVALID_ARGUMENT);
     }
     const uint32_t displaced = (uint32_t)(patch_size / 4u);
     if (displaced == 0 || displaced > HK_RELOC_MAX_DISPLACED) {
-        return HK_RELOC_INVALID_ARGUMENT;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_INVALID_ARGUMENT);
     }
 
     // Read what the patch will replace -- the only read of the target, and
@@ -63,14 +76,14 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
     if (expected_initial_bytes) {
         const size_t n = expected_size < patch_size ? expected_size : patch_size;
         if (memcmp(out_plan->original, expected_initial_bytes, n) != 0) {
-            return HK_RELOC_PRECONDITION_FAILED;
+            return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_PRECONDITION_FAILED);
         }
     }
 
     uint32_t first;
     memcpy(&first, out_plan->original, sizeof(first));
     if (hk_arm64_insn_is_trap(first)) {
-        return HK_RELOC_TRAP_STUB;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_TRAP_STUB);
     }
 
     // FULL-window terminator scan, and this is exactly where the relocating
@@ -81,7 +94,7 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
     // among them would return or branch away from the middle of the body,
     // never reaching the jump back.
     if (hk_arm64_has_early_terminator(out_plan->original, patch_size)) {
-        return HK_RELOC_TARGET_TOO_SHORT;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_TARGET_TOO_SHORT);
     }
 
     // Build the body: the relocated prologue, then a jump back to the
@@ -96,7 +109,7 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
         // Unrelocatable form, or a branch whose target lands inside the bytes
         // being overwritten -- the relocator refuses both rather than
         // mis-relocating, so this engine does too.
-        return HK_RELOC_UNRELOCATABLE;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_UNRELOCATABLE);
     }
 
     const uintptr_t resume = target + patch_size;
@@ -104,7 +117,7 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
                                              (uint64_t)(body_addr + relocated),
                                              (uint64_t)resume);
     if (back == 0 || relocated + back > sizeof(body)) {
-        return HK_RELOC_UNRELOCATABLE;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_UNRELOCATABLE);
     }
 
     // The thunk: an absolute jump to the replacement, so a 4-byte B at the
@@ -115,7 +128,7 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
                                                   (uint64_t)thunk_addr,
                                                   (uint64_t)replacement);
     if (thunk_len == 0 || thunk_len > sizeof(thunk)) {
-        return HK_RELOC_UNRELOCATABLE;
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_UNRELOCATABLE);
     }
 
     // The page is still writable at this point; publishing it is the seam's
@@ -124,14 +137,16 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
     memcpy((void *)body_addr, body, relocated + back);
 
     if (!seal(seam_ctx, page, HK_RELOC_PAGE_BYTES)) {
-        return HK_RELOC_NO_TRAMPOLINE;  // built but never executable: unusable
+        // Built but never executable: unusable, and still ours to give back.
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_NO_TRAMPOLINE);
     }
 
     // The entry patch itself, encoded now and written at commit.
     const size_t written = hk_arm64_emit_branch((uint32_t *)out_plan->patch,
                                                 (uint64_t)target, (uint64_t)branch_dest);
     if (written != patch_size) {
-        return HK_RELOC_INVALID_ARGUMENT;  // sizer and emitter disagreed
+        // Sizer and emitter disagreed.
+        return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_INVALID_ARGUMENT);
     }
 
     out_plan->address = target;
@@ -148,6 +163,7 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
 
 hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
                                     hk_reloc_write_fn write, void *write_ctx,
+                                    hk_reloc_free_fn free_page, void *seam_ctx,
                                     hk_artifact_sink_t *sink) {
     if (!plan || !plan->captured || !write || plan->address == 0 ||
         plan->patch_size == 0 || plan->patch_size > HK_RELOC_MAX_PATCH) {
@@ -162,13 +178,19 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
     }
 
     if (!write(write_ctx, plan->address, plan->patch, plan->patch_size)) {
-        // Refused before touching the entry. The trampoline is already sealed
-        // and now unreferenced -- a leaked executable page, NOT a mutated
-        // target. Reported as NONE (nothing was written) with the page still
-        // recorded below, rather than PARTIAL, because PARTIAL would forbid a
-        // fallback route under invariant #4 and there is no partial mutation
-        // here to forbid one for.
-        if (sink && plan->trampoline) {
+        // Refused before touching the entry. Nothing branches to the
+        // trampoline, so nothing can be executing in it -- reclaim it rather
+        // than leave an executable page behind for a hook that never happened.
+        // Nothing is recorded either: MUTATION_NONE with no artifacts is the
+        // honest report when nothing persists.
+        //
+        // Still NONE and not PARTIAL. PARTIAL would forbid a fallback route
+        // under invariant #4, and there is no partial mutation here to forbid
+        // one for -- the target was never written.
+        if (free_page && plan->trampoline) {
+            free_page(seam_ctx, plan->trampoline, plan->trampoline_size);
+        } else if (sink && plan->trampoline) {
+            // No way to reclaim it: it stays, so it must stay ACCOUNTED FOR.
             hk_artifact_t t;
             memset(&t, 0, sizeof(t));
             t.struct_size = sizeof(t);

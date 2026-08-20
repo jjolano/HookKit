@@ -109,6 +109,11 @@ typedef enum {
 typedef uintptr_t (*hk_reloc_alloc_fn)(void *ctx, size_t size, uintptr_t near);
 // Transition the page from writable to executable. Returns false if refused.
 typedef bool (*hk_reloc_seal_fn)(void *ctx, uintptr_t page, size_t size);
+// Give a page back. Called ONLY for a page nothing can be executing: one whose
+// preparation failed after allocating, or whose entry patch never landed. A
+// page reached by a live entry patch is never passed here -- reclaiming that
+// would free code a thread may be inside. On device this is vm_deallocate.
+typedef void (*hk_reloc_free_fn)(void *ctx, uintptr_t page, size_t size);
 // Write the entry patch. Same shape as the terminal engine's seam.
 typedef bool (*hk_reloc_write_fn)(void *ctx, uintptr_t address,
                                   const uint8_t *data, size_t size);
@@ -132,18 +137,29 @@ typedef struct {
 
 // Phase 1. Allocates and seals the trampoline, relocates the prologue into it,
 // and works out the entry patch. Does NOT touch the target.
+// `free_page` may be NULL, but then a preparation that fails after the page is
+// allocated LEAKS it -- which is what ASan caught when this parameter did not
+// exist. Supply it.
 hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
                                    const uint8_t *expected_initial_bytes,
                                    size_t expected_size,
                                    hk_reloc_alloc_fn alloc, hk_reloc_seal_fn seal,
-                                   void *seam_ctx,
+                                   hk_reloc_free_fn free_page, void *seam_ctx,
                                    hk_reloc_plan_t *out_plan);
 
 // Phase 2. Revalidates the entry against what prepare read, then patches it.
 // Records HK_ARTIFACT_TARGET_TEXT_PATCH and, for the page,
 // HK_ARTIFACT_TRAMPOLINE. `sink` may be NULL.
+// If the patch does not land, the trampoline is RECLAIMED via `free_page`
+// rather than left behind: nothing branches to it, so nothing can be executing
+// in it, and keeping it would be a leaked executable page for a hook that
+// never happened. Nothing is recorded either -- MUTATION_NONE with no
+// artifacts is the honest report when nothing persists. `free_page` may be
+// NULL, in which case the page is kept and an artifact IS recorded, so it
+// stays accounted for even though it cannot be reclaimed.
 hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
                                     hk_reloc_write_fn write, void *write_ctx,
+                                    hk_reloc_free_fn free_page, void *seam_ctx,
                                     hk_artifact_sink_t *sink);
 
 #ifdef __cplusplus
