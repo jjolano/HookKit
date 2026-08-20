@@ -136,6 +136,39 @@ static void reloc_release_prepared(void *engine_ctx, void *prepared) {
     free(prepared);
 }
 
+// The static variant: same mechanism, different declaration. See the header
+// for why the seams -- not this function -- are what make it true.
+static hk_engine_capabilities_t static_describe(void) {
+    hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.engine_id = "inline-static";
+    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.original_requirements = HK_ORIGINAL_REQ_ALL;
+    // The entry patch, and NOTHING else. No HK_EFFECT_EXECUTABLE_ALLOCATION:
+    // the slot was executable before the process ran a line of hook code.
+    // HK_EFFECT_STATIC_CONTINUATION_USE says which kind of continuation this
+    // is, and is separately forbiddable -- a caller can refuse static
+    // continuations without refusing dynamic ones, and vice versa.
+    caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION |
+                          HK_EFFECT_STATIC_CONTINUATION_USE;
+    return caps;
+}
+
+static const hk_engine_vtable_t g_static_vtable = {
+    .describe = static_describe,
+    // Deliberately the SAME functions as the dynamic vtable below. If these
+    // ever diverge, the two have stopped being one mechanism and the header's
+    // claim that only the declaration differs has become false.
+    .prepare_one_ctx_status = reloc_prepare_one_ctx_status,
+    .commit_one_ctx = reloc_commit_one_ctx,
+    .release_prepared = reloc_release_prepared,
+};
+
+const hk_engine_vtable_t *hk_static_inline_vtable(void) {
+    return &g_static_vtable;
+}
+
 static const hk_engine_vtable_t g_reloc_vtable = {
     .describe = reloc_describe,
     .prepare_one_ctx_status = reloc_prepare_one_ctx_status,

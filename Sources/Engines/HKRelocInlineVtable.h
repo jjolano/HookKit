@@ -74,8 +74,33 @@ typedef struct {
 } hk_reloc_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing
-// an hk_reloc_engine_ctx_t.
+// an hk_reloc_engine_ctx_t. Declares HK_EFFECT_EXECUTABLE_ALLOCATION, so a
+// request forbidding that is routed away from it.
 const hk_engine_vtable_t *hk_reloc_inline_vtable(void);
+
+// The SAME engine, described differently -- Milestone 9's static continuation.
+//
+// Identical prepare/commit/release: the survey found the relocating engine
+// needs no change for this, because its seams already say "give me a writable
+// region / make it executable / give it back", which is what a fixed pool does
+// (see HKStaticPool.h). Only two things differ, and both are declarations
+// rather than behaviour:
+//
+//   - it does NOT declare HK_EFFECT_EXECUTABLE_ALLOCATION, because a pool slot
+//     was mapped executable at load and nothing new is created at hook time;
+//   - it is therefore eligible for a request carrying
+//     HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY or
+//     HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY, which the dynamic one is
+//     not.
+//
+// REGISTERING IT IS A PROMISE ABOUT THE SEAMS, and the vtable cannot check it.
+// Point its ctx at pool-backed alloc/seal/free (HKStaticPool.h) and nothing
+// else. Registering this vtable with a ctx whose alloc calls vm_allocate would
+// declare "no allocation" while allocating -- a lie the router would believe,
+// and exactly the kind of silent misreport the effects vocabulary exists to
+// prevent. The two vtables share an engine precisely so that this stays the
+// ONLY difference a caller has to get right.
+const hk_engine_vtable_t *hk_static_inline_vtable(void);
 
 #ifdef __cplusplus
 }

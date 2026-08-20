@@ -2863,7 +2863,7 @@ verified green.
 | Task | State | Evidence |
 |---|---|---|
 | Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare `commit_effects`; a request forbidding an effect is routed away from any engine that produces it | this commit — see below |
-| Static continuation mechanism (a callable original with no executable allocation) | not started — a request asking for one now honestly gets `NO_ROUTE` instead of silently getting a dynamic one | |
+| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | in progress (host-verified) — a fixed pool of load-time-executable slots; the request that used to get `NO_ROUTE` now routes and installs | this commit — see below |
 
 **The gap this closes was that `hk_constraints_t` was never read.** Not
 partially honoured — `grep` across `Sources/` found zero readers. A caller
@@ -2913,6 +2913,55 @@ and the continuation policy not translated.
 
 `make test` (276 assertions, exit 0), the wired suite under ASan+UBSan
 (clean), and `./build.sh all` (all 4 lanes) verified green.
+
+**The survey's result was that the engine needs no change at all**, and that
+turned out to be the whole design. A static continuation differs from a dynamic
+one only in where the executable memory came from — and the relocating engine's
+seams already say exactly what a pool does:
+
+| seam | fresh page | pool slot |
+|---|---|---|
+| `alloc` | `vm_allocate` (arrives R-W) | claim a slot, make it writable |
+| `seal` | `vm_protect` R-W → R-X | restore it to executable |
+| `free` | `vm_deallocate` | return it to the pool |
+
+One asymmetry worth naming rather than discovering later: a pool slot arrives
+**R-X** and must be made writable before the engine builds in it, where a fresh
+page arrives R-W. The seam contract covers both; only the device
+implementation differs.
+
+So Milestone 9 is `HKStaticPool.{h,c}` plus a **second vtable over the same
+engine**, sharing `prepare_one_ctx_status`/`commit_one_ctx`/`release_prepared`
+verbatim. It declares
+`HK_EFFECT_TARGET_TEXT_MUTATION | HK_EFFECT_STATIC_CONTINUATION_USE` and
+notably **not** `HK_EFFECT_EXECUTABLE_ALLOCATION`, which is precisely what
+makes it eligible for the request the dynamic one is now refused for. The
+previous commit made that request return `NO_ROUTE`; it now routes and
+installs.
+
+**Registering the static vtable is a promise about the seams that the vtable
+cannot check.** Point its context at pool-backed seams and nothing else —
+registering it with a `vm_allocate`-backed context would declare "no
+allocation" while allocating, a lie the router would believe. The two vtables
+share an engine specifically so that this stays the only thing a caller has to
+get right, and the shared function pointers are commented as load-bearing: if
+they ever diverge, the claim that only the declaration differs has become
+false.
+
+Six tests, four teeth-proofs. **Two proofs were not caught and both were real
+test gaps, not equivalences**:
+
+- the oversize-claim assertion ran against an *exhausted* pool, so it returned
+  0 for the wrong reason and proved nothing about the size check;
+- the stray-release assertion used an address close enough that its slot index
+  still fit inside the bitmap word, so removing the range guard was
+  unobservable. That guard is not cosmetic: an index ≥ 64 makes `1ull << index`
+  **undefined behaviour**, and the fixed test now uses an address far enough
+  out to trigger it. UBSan catches it (`shift exponent 200 is too large`),
+  which is the honest detector — it is UB, not a wrong answer.
+
+`make test` (282 assertions, exit 0), the suite under ASan+UBSan (clean), and
+`./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 10 — Provider adapters
 **State: not started.** Note: 2.x already vendors and integrates ElleKit,
