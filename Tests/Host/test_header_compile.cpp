@@ -5,6 +5,8 @@
 // mismatches (not exercised by linking here, since nothing is linked, but
 // the extern "C" block only compiles cleanly if paired correctly).
 
+#include <cassert>
+#include <cstring>
 #include <cstddef>
 #include <cstdint>
 
@@ -47,7 +49,35 @@ static hk_domain_spec_t make_sample_domain(void) {
     return domain;
 }
 
+// The Swift request types. Included in all four variants deliberately: unlike
+// HookKitObjC.h this header needs no ObjC runtime, and the C and C++ passes
+// are what prove that claim rather than assert it.
+static void exercise_swift_target(void) {
+    hk_swift_target_t t = hk_swift_target_init();
+    assert(t.struct_size == sizeof(hk_swift_target_t));
+    // The documented default is require_unique = TRUE, which is the opposite
+    // of what a zeroed struct gives -- so the initializer is load-bearing and
+    // not a convenience.
+    assert(t.require_unique);
+    assert(t.name_kind == HK_SWIFT_NAME_MANGLED_EXACT);
+    assert(t.availability == HK_AVAILABILITY_REQUIRED_NOW);
+
+    hk_swift_target_t zeroed;
+    memset(&zeroed, 0, sizeof(zeroed));
+    assert(!zeroed.require_unique);   // exactly the trap the initializer avoids
+
+    t.name_kind = HK_SWIFT_NAME_DEMANGLED_SUBSTRING;
+    t.method_name = "MyClass.doThing";
+    t.class_name = "MyModule.MyClass";
+    assert(t.method_name && t.class_name);
+
+    t.name_kind = HK_SWIFT_NAME_SLOT_INDEX;
+    t.slot_index = 3;
+    assert(t.slot_index == 3);
+}
+
 int main() {
+    exercise_swift_target();
     hk_domain_spec_t domain = make_sample_domain();
     hk_artifact_mapping_t mapping = make_sample_artifact_mapping();
     hk_runtime_config_t config;

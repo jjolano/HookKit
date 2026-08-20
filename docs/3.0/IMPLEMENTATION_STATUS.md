@@ -290,7 +290,7 @@ own description and the tool's code comment.
 | Header compile tests (C, ObjC, C++, ObjC++) | complete | `Tests/Host/test_header_compile.{c,m,cpp,mm}`, wired into `make test` |
 | `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
 | `HookKitObjC.h` | complete | commit `57b10df` — typed Class/SEL constructors; deliberately NOT in the umbrella (it needs `<objc/runtime.h>`), covered by the ObjC and ObjC++ header-compile variants |
-| `HookKitSwift.h` | not started | |
+| `HookKitSwift.h` | complete | commit `9d4911f` — request types only; the engine behind it stays deferred (Milestone 6). Plain C, so unlike `HookKitObjC.h` it IS in the umbrella, and all four header-compile variants cover it |
 | `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
 | ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet). Baseline EXTRACTION is complete: 5 tags, `v1.0.1` dropped by decision | `Tools/abi/extract_abi.py`; baselines `5037211`, `37ffe6b`, `18a91d5` |
 
@@ -2437,6 +2437,46 @@ commit earlier.
 
 `make test` (257 assertions, exit 0) and `./build.sh all` (all 4 lanes)
 verified green.
+
+### `HookKitSwift.h` — the separate API surface the targets header named
+
+`HookKitTargets.h` has always said Swift requests do not go through
+`hk_plan_add_hook` and its union — there is deliberately no `swift` member,
+because folding one in would give that header a dependency on this one. This
+is the entry point it was pointing at.
+
+Written against the spec's field list *and* cross-checked against
+`native/hk_swift.{h,c}`, so it describes a mechanism that exists rather than
+one that would be nice. All three naming forms are real there:
+`hk_swift_hook_method` takes either an exact mangled name (`$s` prefix) or a
+demangled substring, and `hk_swift_hook_vtable_slot` takes a declaration-order
+index. The spec's "required uniqueness" is real too — `hk_swift_find_slot`
+refuses an ambiguous substring and prints every candidate slot rather than
+taking the first.
+
+The scope limitations are recorded in the header rather than left to be
+discovered: arm64/arm64e only; vtable-dispatched class methods only (final,
+static, extension and protocol-witness methods have no slot to patch); and
+devirtualised call sites bypass the vtable regardless, which is a property of
+how the *caller* was compiled and not something a hook can fix.
+
+**One design trap, and the header says so where it bites.** `require_unique`
+documents `true` as its default, which is the opposite of what a zeroed struct
+gives. Silently hooking the first of several overloads is exactly the kind of
+wrong that surfaces far from the hook, so `hk_swift_target_init` sets it
+explicitly and the compile tests assert *both* — that the initializer gives
+`true` and that a `memset` gives `false`. The test pins the trap, not just the
+happy path.
+
+Unlike `HookKitObjC.h` this header is plain C, so it **is** included by the
+umbrella: a C caller loses nothing by getting it. That claim is proved rather
+than asserted — the exercise runs in all four header-compile variants, and the
+C and C++ passes are what would fail if it had acquired an ObjC dependency.
+
+Status is honest about what this is: request types, not a working hook. The
+engine remains deferred on the device-gated `hk_swift_slot_address` primitive
+(Milestone 6). Declaring the request shape is what lets the rest of the ABI
+stop saying "pending"; it is not a claim that a Swift hook will install.
 
 ### `HookKitObjC.h` — the typed wrapper the targets header named
 
