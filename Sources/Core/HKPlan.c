@@ -396,10 +396,14 @@ static hk_status_t hk_hook_copy_target(struct hk_hook *hook, const hk_hook_spec_
     }
 }
 
-hk_status_t hk_plan_add_hook(
+// The shared body. `allow_missing_memory_precondition` is the ONE thing the
+// legacy entry point relaxes -- see HookKitLegacy.h for why it is a separate
+// door rather than a looser rule for everyone.
+static hk_status_t hk_plan_add_hook_impl(
     hk_plan_t *plan,
     const hk_hook_spec_t *spec,
-    hk_hook_t **out_hook)
+    hk_hook_t **out_hook,
+    bool allow_missing_memory_precondition)
 {
     if (out_hook) {
         *out_hook = NULL;
@@ -416,6 +420,23 @@ hk_status_t hk_plan_add_hook(
     if (!spec->stable_hook_id) {
         return HK_STATUS_INVALID_ARGUMENT;
     }
+    // Spec 6.19: a memory patch must say what it expects to find. Without it
+    // the region cannot be revalidated, so committing means writing over
+    // whatever is there -- a different build, an already-patched region, or
+    // simply the wrong address. Rejected here rather than at prepare, because
+    // it is a malformed REQUEST and not a runtime condition.
+    //
+    // 2.x's hookMemory: has no parameter for it and never did, so the legacy
+    // entry point permits omission and the engine captures at preparation
+    // instead. That is weaker -- it catches a change during the invariant #3
+    // window but cannot catch a wrong address -- which is exactly why it is
+    // opt-in rather than the default.
+    if (spec->target_kind == HK_TARGET_MEMORY_PATCH &&
+        !allow_missing_memory_precondition &&
+        spec->target.memory.expected_bytes.data == NULL) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+
     if (spec->original_requirement == HK_ORIGINAL_CALLABLE_CONTINUATION
         && spec->continuation_policy == HK_CONTINUATION_FORBIDDEN) {
         // "Reject ... as contradictory before route analysis" -- spec
@@ -611,6 +632,22 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_
     out->diagnostic_engine_id.length = 0;
     hook->matched_engine = NULL;
     hook->matched_engine_ctx = NULL;
+}
+
+hk_status_t hk_plan_add_hook(
+    hk_plan_t *plan,
+    const hk_hook_spec_t *spec,
+    hk_hook_t **out_hook)
+{
+    return hk_plan_add_hook_impl(plan, spec, out_hook, false);
+}
+
+hk_status_t hk_plan_add_hook_legacy(
+    hk_plan_t *plan,
+    const hk_hook_spec_t *spec,
+    hk_hook_t **out_hook)
+{
+    return hk_plan_add_hook_impl(plan, spec, out_hook, true);
 }
 
 hk_status_t hk_plan_analyze(hk_plan_t *plan, hk_report_t **out_report) {

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Headers/HookKit/HookKitLegacy.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 
 static void make_plan(hk_runtime_t **rt, hk_plan_t **plan) {
@@ -152,6 +153,13 @@ static void test_memory_target_non_relative_base_image_zeroed(void) {
     spec.target.memory.base_image.kind = HK_IMAGE_EXACT_PATH;
     spec.target.memory.base_image.path = stray_path;  // caller mistake: set despite not being relative
     spec.target.memory.kind = HK_MEMORY_KIND_DATA;
+    // A memory patch must state its precondition (spec 6.19). This test is
+    // about base_image zeroing, so it supplies one to reach its actual
+    // subject -- it was previously silent about it only because nothing
+    // enforced the rule.
+    static const uint8_t norel_expected[] = {0xDE, 0xAD};
+    spec.target.memory.expected_bytes.data = norel_expected;
+    spec.target.memory.expected_bytes.size = sizeof(norel_expected);
 
     hk_hook_t *hook = NULL;
     assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
@@ -394,7 +402,64 @@ static void test_wrong_state_rejected(void) {
     printf("  wrong-state-rejected: PASS\n");
 }
 
+// Spec 6.19: a memory patch with no precondition cannot be revalidated, so
+// committing it means writing over whatever happens to be there. Rejected as a
+// malformed REQUEST, not deferred to prepare.
+static void test_memory_target_requires_a_precondition(void) {
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    make_plan(&rt, &plan);
+
+    hk_hook_spec_t spec = base_spec("hook.memory.blind", HK_TARGET_MEMORY_PATCH);
+    spec.target.memory.struct_size = sizeof(spec.target.memory);
+    spec.target.memory.struct_version = HK_ABI_VERSION_3_0;
+    spec.target.memory.address = 0x3000;
+    spec.target.memory.size = 4;
+    // expected_bytes deliberately absent.
+
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_INVALID_ARGUMENT);
+    assert(hook == NULL);
+
+    // The legacy door permits exactly this, because 2.x's hookMemory: has no
+    // parameter for it and never did.
+    assert(hk_plan_add_hook_legacy(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hook != NULL);
+
+    // ...and it relaxes ONLY that rule: everything else still applies, so a
+    // contradictory original/continuation pair is refused through both doors.
+    hk_hook_spec_t bad = spec;
+    bad.stable_hook_id = "hook.memory.contradictory";
+    bad.original_requirement = HK_ORIGINAL_CALLABLE_CONTINUATION;
+    bad.continuation_policy = HK_CONTINUATION_FORBIDDEN;
+    hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook_legacy(plan, &bad, &h2) == HK_STATUS_INVALID_ARGUMENT);
+    assert(hk_plan_add_hook(plan, &bad, &h2) == HK_STATUS_INVALID_ARGUMENT);
+
+    // And a target that DOES state its precondition needs no special door.
+    static const uint8_t expected[] = {0x11, 0x22, 0x33, 0x44};
+    hk_hook_spec_t ok = spec;
+    ok.stable_hook_id = "hook.memory.stated";
+    ok.target.memory.expected_bytes.data = expected;
+    ok.target.memory.expected_bytes.size = sizeof(expected);
+    hk_hook_t *h3 = NULL;
+    assert(hk_plan_add_hook(plan, &ok, &h3) == HK_STATUS_OK);
+
+    // The rule is memory-specific: other target kinds are untouched by it.
+    hk_hook_spec_t addr = base_spec("hook.addr", HK_TARGET_FUNCTION_ADDRESS);
+    addr.target.address.struct_size = sizeof(addr.target.address);
+    addr.target.address.struct_version = HK_ABI_VERSION_3_0;
+    addr.target.address.address = 0x4000;
+    hk_hook_t *h4 = NULL;
+    assert(hk_plan_add_hook(plan, &addr, &h4) == HK_STATUS_OK);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  memory-target-requires-a-precondition: PASS\n");
+}
+
 int main(void) {
+    test_memory_target_requires_a_precondition();
     test_symbol_target_deep_copied();
     test_objc_target_deep_copied();
     test_memory_target_bytes_deep_copied();

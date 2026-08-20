@@ -291,7 +291,7 @@ own description and the tool's code comment.
 | `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
 | `HookKitObjC.h` | complete | commit `57b10df` — typed Class/SEL constructors; deliberately NOT in the umbrella (it needs `<objc/runtime.h>`), covered by the ObjC and ObjC++ header-compile variants |
 | `HookKitSwift.h` | complete | commit `9d4911f` — request types only; the engine behind it stays deferred (Milestone 6). Plain C, so unlike `HookKitObjC.h` it IS in the umbrella, and all four header-compile variants cover it |
-| `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
+| `HookKitLegacy.h` | in progress | commit `39cba46` — one entry so far (`hk_plan_add_hook_legacy`), the one `HookKitTargets.h` explicitly defers to it |
 | ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet). Baseline EXTRACTION is complete: 5 tags, `v1.0.1` dropped by decision | `Tools/abi/extract_abi.py`; baselines `5037211`, `37ffe6b`, `18a91d5` |
 
 Deliberately safe by construction, not just by intent: the Makefile's
@@ -3016,8 +3016,54 @@ Substrate, Substitute, Dobby, Frida/gum, litehook, fishhook (`vendor/`,
 contract, not new integration work.
 
 ## Milestone 11 — Legacy facade
-**State: not started.** Two 2.x facade robustness fixes landed here ahead of
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| `HookKitLegacy.h` + the memory-precondition relaxation | complete (host-verified) | commit `39cba46` — see below |
+| Facade mapping 2.x's 21 `HKSubstitutor` methods onto 3.0 | not started — surveyed; 2 of the 5 hook-installing methods are blocked on the deferred Swift engine, and wiring the rest changes what ships (needs sign-off) | survey `39cba46` | Two 2.x facade robustness fixes landed here ahead of
 the milestone (device-reported from Shadow integration):
+
+**Memory patches with no precondition**, the first concrete piece.
+`HookKitTargets.h` has always said `expected_bytes` is "required for a new-API
+request (spec 6.19); a legacy-compat-only path may capture these at preparation
+instead — see HookKitLegacy.h (pending)". Nothing enforced either half: a
+caller could omit the precondition and get a blind patch.
+
+Enforced now in `hk_plan_add_hook`, and rejected there rather than at prepare
+because a patch that does not say what it expects is a malformed *request*, not
+a runtime condition. A patch without one cannot be revalidated, so committing
+it means writing over whatever happens to be there — a different build, an
+already-patched region, or simply the wrong address.
+
+2.x's `hookMemory:withData:size:` has no parameter for it and never did, so
+`hk_plan_add_hook_legacy` permits omission and the engine captures the region
+at preparation instead. That is **strictly weaker** and the header says so: it
+catches a change during the invariant #3 window but cannot catch a wrong
+address to begin with. The weakening is exactly why it is a separate named
+door rather than a looser rule for everyone, and a test asserts the door
+relaxes *only* that rule — a contradictory original/continuation pair is still
+refused through both.
+
+One existing test had to change, and it is worth saying which kind of change
+it was: `test_memory_target_non_relative_base_image_zeroed` built a memory
+target with no precondition. Its subject is `base_image` zeroing, and it was
+silent about the precondition only because nothing enforced the rule — not
+because it was testing the omission. It now supplies one to reach its actual
+subject.
+
+**The facade itself is surveyed, not started.** 2.x's `HKSubstitutor` exposes
+21 methods; the five that install hooks map onto 3.0 as
+`hookMessageInClass:` → `HK_TARGET_OBJC_METHOD`, `hookFunction:` →
+`HK_TARGET_FUNCTION_ADDRESS`, `hookMemory:` → `HK_TARGET_MEMORY_PATCH`, and
+the two `hookSwift*` methods → the Swift surface. **Two of those five are
+blocked on the deferred Swift engine**, so a complete facade is not buildable
+today. Beyond that, wiring the facade onto 3.0 engines changes what actually
+ships to existing consumers, which is a decision for the user rather than
+something to land autonomously.
+
+Two 2.x facade robustness fixes landed here ahead of the milestone
+(device-reported from Shadow integration):
 
 1. **Fail-soft on dyld-cache trap stubs.** The dyld shared cache stubs dyld's
    private APIs (`dyld_image_get_installname` and friends) with an entry
