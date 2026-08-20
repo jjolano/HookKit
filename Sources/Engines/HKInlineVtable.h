@@ -42,6 +42,9 @@ extern "C" {
 // hk_inline_status_t values, so a caller reading error_code can tell an
 // image-scope refusal from an inline-engine one without a second field.
 #define HK_INLINE_DIAG_IMAGE_SCOPE_BASE 100
+// Refusing a non-atomic entry patch. Distinct code so it is not confused with
+// an engine refusal or an image-scope one.
+#define HK_INLINE_DIAG_NON_ATOMIC_PATCH 200
 
 // Registered as the engine context. Caller-owned and not copied: it must
 // outlive the runtime it is registered with.
@@ -52,6 +55,29 @@ typedef struct {
     // enforced before anything is prepared; when NULL the check is skipped and
     // says so. Not owned.
     const hk_image_catalog_t *catalog;
+
+    // Allow an entry patch that is NOT a single aligned store.
+    //
+    // Default (false) refuses one, and that default is the safe one for a
+    // concrete, observed reason. Patching a live function's prologue with a
+    // multi-instruction sequence gives another thread a window in which it can
+    // enter the function part-patched. On a hot target this is not a rare
+    // race: a sibling session reproduced a deterministic
+    // EXC_BAD_ACCESS/KERN_PROTECTION_FAILURE 3/3 launches by inline-patching
+    // syscall()/csops() in a live multi-threaded app, with the faulting PC in
+    // the half-written page. That was HookKit 2.x's litehook path (a 20-byte
+    // non-atomic memcpy), but the hazard is the mechanism's, not that
+    // implementation's, and this engine has the same shape whenever the
+    // replacement is out of a B's reach.
+    //
+    // Setting this true says the caller knows the target is not concurrently
+    // executing -- a cold function, or a process whose other threads are
+    // suspended for the duration. It does NOT make the patch atomic.
+    //
+    // NOTE this does not address the other half of that report: on device the
+    // W^X protection toggle around the write is itself a window, and that
+    // lives in the write seam, not here. See the ledger.
+    bool allow_non_atomic_entry_patch;
 } hk_inline_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

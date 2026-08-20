@@ -2797,6 +2797,56 @@ variants are caught after.
 `make test` (271 assertions, exit 0), both relocating suites under
 ASan+UBSan+Leak (clean), and `./build.sh all` (all 4 lanes) verified green.
 
+### Torn entry patches — a live-code hazard reported from the 2.x side
+
+A sibling session chasing a Shadow crash reported a HookKit-level safety bug,
+precisely enough to act on. Recorded here because the finding is about the
+*mechanism*, and these engines share it.
+
+**What they observed.** Shadow hooks `syscall()`/`csops()` on the auto-cover
+rebind lane. Those are libsystem_kernel exports most callers reach by direct
+branches inside the shared cache rather than through a rebindable import stub,
+so the rebind found zero sites and auto-cover fell back to inline patching of
+the live function's prologue — `litehook_hook_memory`: unprotect, a 20-byte
+non-atomic `memcpy` (five instructions), reprotect, with no thread
+synchronisation. On a real multi-threaded app another thread entered
+`syscall()` inside that window and faulted `KERN_PROTECTION_FAILURE` with the
+PC in a still-non-executable page. **3/3 launches, same signature** — not a
+rare race. Their mitigation is Shadow-side (skip those two symbols), which is
+a coverage loss rather than a fix.
+
+**Why it applies here.** Both Milestone 7/8 engines patch a live entry. The
+relocating one already had the right structure for the peer's preferred fix —
+the inbound thunk exists precisely so the in-place write is a single 4-byte
+`B`, one aligned store — and it already recorded `atomic_entry_patch`. But
+**nothing enforced it**: the flag was written and never read, and the terminal
+engine has no thunk at all, so a far replacement gives it a 16-byte torn write
+with nothing objecting.
+
+**What changed.** Both adapters now refuse a non-atomic entry patch by
+default, with a distinct diagnostic code, and reclaim the trampoline on the way
+out so refusing cannot leak what preparing allocated. `allow_non_atomic_entry_patch`
+opts in, and means something specific: the caller is asserting the target is
+not concurrently executing (a cold function, or other threads suspended). It
+does not make the patch atomic and does not claim to. Three teeth-proofs —
+guard removed, guard always firing, opt-in ignored — all caught, the middle one
+mattering because "refuse non-atomic" must not quietly become "refuse
+everything".
+
+**What this does NOT fix, stated plainly.** The peer's report has two halves
+and this addresses one. The other is that on device the W^X protection toggle
+around the write is *itself* a window: even a single-instruction store needs
+the page made writable and restored, and a thread executing there during that
+transition faults regardless of how atomic the store is. That belongs in the
+device write seam, not in engine logic, and it is unaddressed. Their read is
+that thread suspension is probably required regardless, and nothing here
+contradicts that. Also unverified by this session: the crash itself, which was
+observed on their hardware and is attributed to them rather than reproduced
+here.
+
+`make test` (273 assertions, exit 0) and `./build.sh all` (all 4 lanes)
+verified green.
+
 ## Milestone 9 — Static continuation decision
 **State: not started.**
 

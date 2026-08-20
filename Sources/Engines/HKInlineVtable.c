@@ -92,6 +92,19 @@ static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
         free(plan);  // nothing was written on any non-OK status
         return result;
     }
+
+    // A 4-byte patch is one aligned store and therefore atomic against a
+    // thread entering the function mid-patch; anything longer is not. Refused
+    // unless the caller has said the target is not concurrently executing --
+    // see the header for the observed crash this default exists to prevent.
+    if (plan->size != 4 && !ctx->allow_non_atomic_entry_patch) {
+        out_diag->error_code = HK_INLINE_DIAG_NON_ATOMIC_PATCH;
+        out_diag->error_message =
+            "entry patch would not be a single aligned store; a thread could enter the function part-patched";
+        free(plan);
+        return HK_PREPARE_FAILED;
+    }
+
     *out_prepared = plan;
     return HK_PREPARE_OK;
 }

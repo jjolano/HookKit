@@ -384,6 +384,92 @@ static void test_expected_image_is_enforced_when_a_catalog_is_supplied(void) {
     printf("  expected-image-is-enforced-when-a-catalog-is-supplied: PASS\n");
 }
 
+// A non-atomic entry patch is refused by default. This is not a style rule:
+// a sibling session reproduced a deterministic EXC_BAD_ACCESS 3/3 launches by
+// inline-patching a hot libsystem function in a live multi-threaded app, with
+// the faulting PC inside the half-written page. A far replacement forces the
+// 16-byte form here, which is the same hazard.
+static void test_non_atomic_entry_patch_is_refused_by_default(void) {
+    const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(body, 6);
+    uintptr_t target = (uintptr_t)fn;
+    // Well past a B's +/-128MB reach, so the patch must be the 16-byte form.
+    void *far = (void *)(target + (1ull << 40));
+
+    hk_inline_engine_ctx_t ectx = engine_ctx();   // allow_non_atomic defaults false
+    hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = address_spec("h.far", target, far, HK_ORIGINAL_NONE, NULL, 0);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(hook->result.error_code == HK_INLINE_DIAG_NON_ATOMIC_PATCH);
+    assert(hook->result.error_message.data);
+    assert(fn[0] == A64_NOP);   // and nothing was written
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+
+    // Opting in is possible -- the caller is asserting the target is not
+    // concurrently executing -- and then the same request prepares and commits.
+    hk_inline_engine_ctx_t allow = engine_ctx();
+    allow.allow_non_atomic_entry_patch = true;
+    hk_runtime_t *rt2 = NULL; hk_plan_t *p2 = NULL;
+    assert(hk_runtime_create(NULL, &rt2) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt2, hk_inline_vtable(), &allow));
+    assert(hk_plan_create(rt2, NULL, &p2) == HK_STATUS_OK);
+    hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook(p2, &spec, &h2) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(p2, NULL) == HK_STATUS_OK);
+    assert(h2->result.outcome == HK_OUTCOME_PREPARED);
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(p2, &report) == HK_STATUS_OK);
+    assert(h2->result.outcome == HK_OUTCOME_ACTIVE);
+    // The 16-byte absolute form really was written -- so the opt-in opts into
+    // the thing it names, not into a quietly different mechanism.
+    uint64_t dest;
+    memcpy(&dest, &fn[2], sizeof(dest));
+    assert(dest == (uint64_t)(uintptr_t)far);
+
+    hk_report_release(report);
+    hk_plan_release(p2);
+    hk_runtime_release(rt2);
+    free(fn);
+    printf("  non-atomic-entry-patch-is-refused-by-default: PASS\n");
+}
+
+// A NEAR replacement is a 4-byte B -- one aligned store -- so the guard must
+// not fire. Otherwise "refuse non-atomic" would just mean "refuse everything".
+static void test_atomic_patch_is_unaffected_by_the_guard(void) {
+    const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(body, 5);
+    uintptr_t target = (uintptr_t)fn;
+
+    hk_inline_engine_ctx_t ectx = engine_ctx();
+    hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    hk_hook_spec_t spec = address_spec("h.near", target, (void *)(target + 0x1000),
+                                       HK_ORIGINAL_NONE, NULL, 0);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    free(fn);
+    printf("  atomic-patch-is-unaffected-by-the-guard: PASS\n");
+}
+
 int main(void) {
     test_full_lifecycle_patches_and_reports();
     test_continuation_request_fails_at_prepare();
@@ -391,6 +477,8 @@ int main(void) {
     test_no_context_fails_cleanly();
     test_refusals_carry_distinct_diagnostics();
     test_expected_image_is_enforced_when_a_catalog_is_supplied();
+    test_non_atomic_entry_patch_is_refused_by_default();
+    test_atomic_patch_is_unaffected_by_the_guard();
     printf("all inline wired tests passed\n");
     return 0;
 }

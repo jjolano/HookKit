@@ -37,6 +37,8 @@ extern "C" {
 // Image-scope refusals are reported with codes offset past hk_reloc_status_t
 // so a caller reading error_code can tell them apart without a second field.
 #define HK_RELOC_DIAG_IMAGE_SCOPE_BASE 100
+// Refusing a non-atomic entry patch -- see allow_non_atomic_entry_patch.
+#define HK_RELOC_DIAG_NON_ATOMIC_PATCH 200
 
 // Registered as the engine context. Caller-owned and not copied: it must
 // outlive the runtime it is registered with.
@@ -58,6 +60,17 @@ typedef struct {
     // enforced before a page is even requested. NULL means the check is
     // skipped and says so -- see HKImageScope.h. Not owned.
     const hk_image_catalog_t *catalog;
+
+    // Allow an entry patch that is NOT a single aligned store. Same meaning
+    // and same default (false, refuse) as the terminal adapter's -- see
+    // HKInlineVtable.h for the observed crash behind that default.
+    //
+    // This engine reaches the hazard less often: the inbound thunk exists so
+    // the entry patch can be a 4-byte B, and it is whenever the page lands
+    // within a B's reach of the target. The non-atomic form only appears when
+    // the allocator could not place it near, which is exactly the case worth
+    // refusing rather than papering over.
+    bool allow_non_atomic_entry_patch;
 } hk_reloc_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

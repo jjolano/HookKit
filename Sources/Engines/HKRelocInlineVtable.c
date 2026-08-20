@@ -87,6 +87,23 @@ static hk_prepare_result_t reloc_prepare_one_ctx_status(void *engine_ctx,
         free(plan);
         return result;
     }
+
+    // The thunk exists so this is normally a 4-byte B. When the page could not
+    // be placed within reach it is not, and a thread can enter the function
+    // part-patched -- refused unless the caller has said the target is not
+    // concurrently executing. The page is reclaimed on the way out: refusing
+    // must not leak what preparing allocated.
+    if (!plan->atomic_entry_patch && !ctx->allow_non_atomic_entry_patch) {
+        out_diag->error_code = HK_RELOC_DIAG_NON_ATOMIC_PATCH;
+        out_diag->error_message =
+            "entry patch would not be a single aligned store; a thread could enter the function part-patched";
+        if (ctx->free_page && plan->trampoline) {
+            ctx->free_page(ctx->seam_ctx, plan->trampoline, plan->trampoline_size);
+        }
+        free(plan);
+        return HK_PREPARE_FAILED;
+    }
+
     *out_prepared = plan;
     return HK_PREPARE_OK;
 }
