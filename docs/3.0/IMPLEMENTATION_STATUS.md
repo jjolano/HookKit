@@ -21,6 +21,12 @@ here because they are easy to forget mid-milestone:
 
 ---
 
+> **Evidence column convention.** Entries name the commit that introduced
+> them. Earlier rows said "this commit", which read correctly when written and
+> became ambiguous once this document spanned dozens of commits — they were
+> resolved by `git blame` and replaced with hashes. Write the hash, or write
+> "this commit" only if you will resolve it before the next entry lands.
+
 ## Milestone 0 — Baseline freeze
 
 **State: complete.**
@@ -59,9 +65,9 @@ the performance baseline until the release gates in §28.4.
 | `Schemas/hookkit-provider-evidence.schema.json` | complete | commit `53a209f` |
 | `Schemas/shadow-hook-manifest.schema.json` | complete | commit `53a209f` |
 | `Schemas/shadow-route-report.schema.json` | complete | commit `53a209f` |
-| `ENGINE_CONTRACT.md` (draft) | complete | this commit |
-| Legacy compatibility policy doc (`LEGACY_ABI.md`) | complete | this commit |
-| `V1_MODULE_COMPATIBILITY_AUDIT.md` | in progress (trending conclusion recorded; public-source search still open) | this commit |
+| `ENGINE_CONTRACT.md` (draft) | complete | commit `135cacb` |
+| Legacy compatibility policy doc (`LEGACY_ABI.md`) | complete | commit `135cacb` |
+| `V1_MODULE_COMPATIBILITY_AUDIT.md` | in progress (trending conclusion recorded; public-source search still open) | commit `135cacb` |
 
 Schema validation: all four `Schemas/*.json` files verified as both valid
 JSON and structurally valid JSON Schema (draft 2020-12) via Python's
@@ -91,16 +97,16 @@ milestone).
 
 | Task | State | Evidence |
 |---|---|---|
-| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit + `hookFunction:` pattern-scan + `shdw_libc_hooks[]` structured-table tiers) | commits `5970255`, `bd52025`, this commit |
+| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit + `hookFunction:` pattern-scan + `shdw_libc_hooks[]` structured-table tiers) | commits `5970255`, `bd52025`, commit `209e42d` |
 | `Tools/shadow-manifest-extract/validate.py` | complete | commit `5970255` |
 | `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, still empty — nothing's needed one yet) | commit `5970255` |
-| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | 8 tests total as of this commit |
-| `artifacts/shadow-current-manifest.json` | in progress — 186 targets: 22 install units + 164 children (91 pattern_scan + 73 structured_table), 13/22 units decomposed | this commit |
-| `shdw_libc_install_group` descriptor parse | **complete** | this commit — see below |
+| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | 8 tests total as of commit `209e42d` |
+| `artifacts/shadow-current-manifest.json` | in progress — 186 targets: 22 install units + 164 children (91 pattern_scan + 73 structured_table), 13/22 units decomposed | commit `209e42d` |
+| `shdw_libc_install_group` descriptor parse | **complete** | commit `209e42d` — see below |
 | `shdw_coord_*` composite units (symlookup, filesystem_objc, foundation_objc, hideapps) | not started | real finding this iteration: several units are coordinator-side composites calling 2+ named functions, not 1:1 with a single shadowhook_ body — see below, needs its own (bounded) resolution pass, not a full call-graph walker |
 | `logos_preprocess.py` | not started | needed for the 7+ files still using raw Logos `%hook` blocks |
 | `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on both pattern_scan and structured_table rows |
-| Initial route-feasibility report | **complete (modeled pass)** | this commit — `Tools/route-feasibility/hk_route_report.py`, `artifacts/shadow-route-feasibility.json`, `docs/3.0/SHADOW_ROUTE_FEASIBILITY.md` |
+| Initial route-feasibility report | **complete (modeled pass)** | commit `7dfb281` — `Tools/route-feasibility/hk_route_report.py`, `artifacts/shadow-route-feasibility.json`, `docs/3.0/SHADOW_ROUTE_FEASIBILITY.md` |
 
 **`shdw_libc_hooks[]` decomposition**, done this iteration: another real,
 clean `shdw_hook_desc_t` array (72 rows: symbol, replacement, original,
@@ -275,15 +281,15 @@ own description and the tool's code comment.
 
 | Task | State | Evidence |
 |---|---|---|
-| `Headers/HookKit/HookKitBase.h` | complete | this commit |
-| `Headers/HookKit/HookKitTargets.h` | complete | this commit |
-| `Headers/HookKit/HookKitResults.h` | complete | this commit |
-| `Headers/HookKit/HookKitRuntime.h` | complete | this commit |
-| `Headers/HookKit/HookKitPlan.h` | complete | this commit |
-| `Headers/HookKit/HookKit.h` (new umbrella) | complete | this commit |
+| `Headers/HookKit/HookKitBase.h` | complete | commit `9860130` |
+| `Headers/HookKit/HookKitTargets.h` | complete | commit `9860130` |
+| `Headers/HookKit/HookKitResults.h` | complete | commit `9860130` |
+| `Headers/HookKit/HookKitRuntime.h` | complete | commit `9860130` |
+| `Headers/HookKit/HookKitPlan.h` | complete | commit `9860130` |
+| `Headers/HookKit/HookKit.h` (new umbrella) | complete | commit `9860130` |
 | Header compile tests (C, ObjC, C++, ObjC++) | complete | `Tests/Host/test_header_compile.{c,m,cpp,mm}`, wired into `make test` |
-| `HookKitArtifacts.h` | complete | this commit — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
-| `HookKitObjC.h` | not started | typed Class/SEL convenience wrappers |
+| `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
+| `HookKitObjC.h` | complete | commit `57b10df` — typed Class/SEL constructors; deliberately NOT in the umbrella (it needs `<objc/runtime.h>`), covered by the ObjC and ObjC++ header-compile variants |
 | `HookKitSwift.h` | not started | |
 | `HookKitLegacy.h` / `Compat.h` | not started | Milestone 11 territory, but the empty declaration exists in the spec's repo layout |
 | ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet). Baseline EXTRACTION is complete: 5 tags, `v1.0.1` dropped by decision | `Tools/abi/extract_abi.py`; baselines `5037211`, `37ffe6b`, `18a91d5` |
@@ -486,17 +492,17 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 
 | Task | State | Evidence |
 |---|---|---|
-| IDs (`Sources/Core/HKIDs.{h,c}`) | complete | this commit |
-| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | this commit |
-| Plan lifecycle (`Sources/Core/HKPlan.c`) | **complete** — full `DRAFT → ANALYZED → PREPARING/PREPARED → COMMITTING/COMMITTED` path now real (`create`/`release`/`state`/`add_hook`/`analyze`/`prepare`/`commit`) | this commit — see below |
+| IDs (`Sources/Core/HKIDs.{h,c}`) | complete | commit `c2a185e` |
+| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | commit `c2a185e` |
+| Plan lifecycle (`Sources/Core/HKPlan.c`) | **complete** — full `DRAFT → ANALYZED → PREPARING/PREPARED → COMMITTING/COMMITTED` path now real (`create`/`release`/`state`/`add_hook`/`analyze`/`prepare`/`commit`) | commit `ecb8990` — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
-| Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | this commit — see below |
+| Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | commit `0bdb341` — see below |
 | Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
-| Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | this commit — see below |
+| Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | commit `6d30272` — see below |
 | Ownership ledger | not started — deferred deliberately (see note below); an exclusivity/refusal gate was tried and reverted | commit `2cc4c3e`, reverted |
-| Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | this commit — see below |
-| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | this commit — see below |
-| Fault injection | in progress — OOM sweep failing every allocation site (23) across the lifecycle exactly once (`Tests/Host/test_fault_injection.c`, linker `--wrap`); enforces OOM never advances plan state; ASan-clean | this commit — see below |
+| Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | commit `ae8aaf5` — see below |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | commit `6d30272` — see below |
+| Fault injection | in progress — OOM sweep failing every allocation site (23) across the lifecycle exactly once (`Tests/Host/test_fault_injection.c`, linker `--wrap`); enforces OOM never advances plan state; ASan-clean | commit `2e967e8` — see below |
 | Model-based tests | in progress — plan lifecycle state machine cross-checked against an independent reference model over random op sequences with full (state × op) coverage (`Tests/Host/test_plan_model.c`); success path only | commit `8a20209` |
 
 **Ownership ledger — deferred, and why (a reverted misstep worth
@@ -1114,17 +1120,17 @@ is Milestone 5 (image catalog and resolvers), which several deferred pieces
 
 | Task | State | Evidence |
 |---|---|---|
-| Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | this commit — see below |
+| Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | commit `e8b3eb4` — see below |
 | dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
 | Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | commit `5c3efe7` |
-| Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + this commit |
-| Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | this commit — see below |
-| Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | this commit — see below |
-| Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | this commit — see below |
-| Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | this commit — see below |
-| Chained fixups (`Sources/Resolvers/HKChainedFixups.{h,c}`) | complete (host-verified) — metadata *and* traversal: header, imports table, symbol pool, and chain walking to bind sites | commits `25347f0` + this commit |
-| Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | this commit — see below |
-| Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | this commit |
+| Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + commit `04aff50` |
+| Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | commit `04aff50` — see below |
+| Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | commit `04aff50` — see below |
+| Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | commit `f060c0e` — see below |
+| Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | commit `202e28f` — see below |
+| Chained fixups (`Sources/Resolvers/HKChainedFixups.{h,c}`) | complete (host-verified) — metadata *and* traversal: header, imports table, symbol pool, and chain walking to bind sites | commits `25347f0` + commit `d3f7a5c` |
+| Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | commit `520019b` — see below |
+| Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | commit `5c3efe7` |
 | Shared-cache resolver | not started | device-only (shared cache layout) |
 | ObjC / Swift resolvers | not started | |
 
@@ -1232,7 +1238,7 @@ resolved symbol: image → `LC_SYMTAB` → symbol table view → symbol search.
 listed "finding `LC_SYMTAB` in a real mapped image" as device-only. Parsing a
 Mach-O is pure arithmetic over bytes; only *obtaining* the bytes (mmap, dyld)
 is device-bound. So more of Milestone 5 is honestly host-testable than that
-entry projected, and this commit is the proof.
+entry projected, and the host-tested resolvers below are the proof.
 
 *Reuse survey first, again.* 2.x walks load commands **twice**: once bounded
 against a mmap'd file size (`bind_ondisk_symbols`) and once *unbounded* over a
@@ -1791,9 +1797,9 @@ device-verified.
 |---|---|---|
 | Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
 | Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts; converted to per-engine context + prepared-state handoff | commit `030ea2f`, converted `eb36f9d`+ |
-| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | this commit — see below |
+| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | commit `b03f832` — see below |
 | Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end; converted to per-engine context + prepared-state handoff | commit `e5fc3b2`, converted `eb36f9d`+ |
-| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | this commit — see below |
+| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | commit `3d7cad9` — see below |
 | ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | in progress (host-verified) — ObjC engine wired into the plan lifecycle; first engine to reach `HK_TARGET_OBJC_METHOD`, so it exercises the plan's ObjC-target path end to end; first adapter on per-engine context + prepared-state handoff | commit `87503a6`, converted `eb36f9d` |
 | Engine-vtable context + prepared-state handoff (`HKEngineInternal.h`, `HKPlan.c`) | complete (host-verified) — additive `prepare_one_ctx`/`commit_one_ctx`/`release_prepared` + `hk_runtime_register_engine_with_context`; retires the file-scoped-environment and stash ceiling in all three adapters | commit `eb36f9d` — see below |
 | Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey, commit `e5fc3b2` |
@@ -2217,8 +2223,8 @@ Note: HookKit 2.x already has working, host-and-device-tested implementations of
 
 | Task | State | Evidence |
 |---|---|---|
-| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | in progress (host-verified) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; write behind a device seam | this commit — see below |
-| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle; first engine to reach `HK_TARGET_FUNCTION_ADDRESS`, so it exercises the plan's address-target path end to end | this commit — see below |
+| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | in progress (host-verified) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; write behind a device seam | commit `4e82bbe` — see below |
+| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle; first engine to reach `HK_TARGET_FUNCTION_ADDRESS`, so it exercises the plan's address-target path end to end | commit `adb63bb` — see below |
 
 Note: the atomicity work committed at `3e6bbdb` (one-page-per-trampoline,
 atomic near-branch via inbound thunk) is a real head start on this milestone's
@@ -2574,8 +2580,8 @@ applying the lesson from the inline adapter rather than rediscovering it.
 
 | Task | State | Evidence |
 |---|---|---|
-| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | this commit — see below |
-| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | in progress (host-verified) — wired in alongside the terminal engine, with the router picking between them on original requirement | this commit — see below |
+| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | commit `1562b8a` — see below |
+| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | in progress (host-verified) — wired in alongside the terminal engine, with the router picking between them on original requirement | commit `df9f177` — see below |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2862,8 +2868,8 @@ verified green.
 
 | Task | State | Evidence |
 |---|---|---|
-| Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare `commit_effects`; a request forbidding an effect is routed away from any engine that produces it | this commit — see below |
-| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | in progress (host-verified) — a fixed pool of load-time-executable slots; the request that used to get `NO_ROUTE` now routes and installs | this commit — see below |
+| Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare `commit_effects`; a request forbidding an effect is routed away from any engine that produces it | commit `0c04328` — see below |
+| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | in progress (host-verified) — a fixed pool of load-time-executable slots; the request that used to get `NO_ROUTE` now routes and installs | commit `86639b9` — see below |
 
 **The gap this closes was that `hk_constraints_t` was never read.** Not
 partially honoured — `grep` across `Sources/` found zero readers. A caller
