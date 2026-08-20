@@ -2858,7 +2858,61 @@ here.
 verified green.
 
 ## Milestone 9 — Static continuation decision
-**State: not started.**
+**State: in progress.**
+
+| Task | State | Evidence |
+|---|---|---|
+| Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare `commit_effects`; a request forbidding an effect is routed away from any engine that produces it | this commit — see below |
+| Static continuation mechanism (a callable original with no executable allocation) | not started — a request asking for one now honestly gets `NO_ROUTE` instead of silently getting a dynamic one | |
+
+**The gap this closes was that `hk_constraints_t` was never read.** Not
+partially honoured — `grep` across `Sources/` found zero readers. A caller
+setting `HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY` got an executable page allocated
+anyway, and `hk_continuation_policy_t` was consulted in exactly one place
+(`hk_plan_add_hook` rejecting the contradictory
+`CALLABLE_CONTINUATION` + `FORBIDDEN` pair). Every other constraint the ABI
+lets a caller express was silently ignored.
+
+Fixed with the same additive routing pattern the previous two criteria used:
+`hk_engine_capabilities_t` gains `commit_effects` (what the engine may produce),
+eligibility rejects an engine whose declared effects include a forbidden one,
+and zero still means "declares nothing" so no fake engine needed editing. All
+five real adapters now declare: rebind `IMPORT_MUTATION`, memory
+`MEMORY_MUTATION`, ObjC `OBJC_METADATA_MUTATION`, terminal inline
+`TARGET_TEXT_MUTATION`, relocating inline
+`TARGET_TEXT_MUTATION | EXECUTABLE_ALLOCATION`.
+
+**The bit layouts diverge, and checking that before writing the code is what
+kept this from being a silent bug.** `hk_effects_t` and the `HK_FORBID_*` mask
+agree on bits 0–3 and then part ways: effect bit 4 is
+`HK_EFFECT_MEMORY_MUTATION`, forbid bit 4 is
+`HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY`. A mask-and-compare — the obvious
+implementation — would reject the memory engine for a caller who forbade
+executable allocation, and let a genuinely allocating engine through for a
+caller who forbade memory patching. So the mapping is written out explicitly in
+`hk_effect_forbid_bit`, and a test pins exactly that colliding pair. The naive
+mask is one of the teeth-proofs, and it is caught.
+
+Four effects have **no forbid bit at all** (`MEMORY_MUTATION`, `IMAGE_LOAD`,
+`FILE_MAPPING`, `MEMORY_PROTECTION_CHANGE`) and therefore can never be
+forbidden. That is a gap in the spec's constraint vocabulary rather than a
+shortcut here — there is no way for a caller to say "do not patch memory", so
+this cannot honour one. Stated in the mapping function itself, where someone
+adding a forbid bit will see it.
+
+`HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY` is translated into the same
+forbid bit, because a caller who set only the policy meant it just as much as
+one who set the constraint. The visible consequence is the honest one: a
+request for a callable original under that policy now gets `NO_ROUTE`, since
+no engine can provide one without allocating. **That is precisely the static
+continuation mechanism this milestone is named for, and it does not exist
+yet** — the routing now says so instead of quietly handing back a dynamic one.
+
+Three teeth-proofs, all caught: constraints ignored entirely, the naive mask,
+and the continuation policy not translated.
+
+`make test` (276 assertions, exit 0), the wired suite under ASan+UBSan
+(clean), and `./build.sh all` (all 4 lanes) verified green.
 
 ## Milestone 10 — Provider adapters
 **State: not started.** Note: 2.x already vendors and integrates ElleKit,

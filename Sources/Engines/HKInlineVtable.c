@@ -17,6 +17,9 @@ static hk_engine_capabilities_t inline_describe(void) {
     // is what lets the router pick the relocating engine for a request this
     // one would only refuse at prepare.
     caps.original_requirements = HK_ORIGINAL_REQ_BIT(HK_ORIGINAL_NONE);
+    // The entry patch, and nothing else -- refusing to allocate is what this
+    // engine IS, so a caller forbidding executable allocation can still use it.
+    caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION;
     return caps;
 }
 

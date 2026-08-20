@@ -27,6 +27,8 @@ static hk_engine_capabilities_t rebind_describe(void) {
     caps.engine_id = "rebind";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.achievable_reach = HK_REACH_EXISTING_IMPORTS;
+    // One import slot rewritten per site; nothing allocated.
+    caps.commit_effects = HK_EFFECT_IMPORT_MUTATION;
     return caps;
 }
 

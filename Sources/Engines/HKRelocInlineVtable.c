@@ -16,6 +16,10 @@ static hk_engine_capabilities_t reloc_describe(void) {
     // terminal one: it preserves the displaced prologue in a trampoline, so
     // the original stays reachable in every form a request can ask for.
     caps.original_requirements = HK_ORIGINAL_REQ_ALL;
+    // The entry patch AND an executable page. Declaring the allocation is what
+    // lets a caller who forbids it be routed to the terminal engine instead of
+    // silently getting a page anyway.
+    caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION | HK_EFFECT_EXECUTABLE_ALLOCATION;
     return caps;
 }
 

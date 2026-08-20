@@ -16,6 +16,8 @@ static hk_engine_capabilities_t objc_describe(void) {
     caps.engine_id = "objc";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
     caps.achievable_reach = HK_REACH_OBJC_DISPATCH;
+    // A method implementation swapped; no code written, no memory allocated.
+    caps.commit_effects = HK_EFFECT_OBJC_METADATA_MUTATION;
     return caps;
 }
 

@@ -65,7 +65,64 @@ typedef struct {
     // entry-point reach), so without this the first registered wins and the
     // other's capability is unreachable.
     hk_original_requirement_mask_t original_requirements;
+
+    // What this engine may produce when it commits (hk_effects_t bits). Zero
+    // means "declares nothing", read as "declares no forbidden effect" -- the
+    // same safe default as original_requirements, so an engine written before
+    // this field existed stays eligible exactly as it was.
+    //
+    // Checked against the request's hk_constraints_t. Without this, a caller
+    // saying HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY got an executable page
+    // allocated anyway: nothing in Sources/ read `constraints` at all.
+    hk_effects_t commit_effects;
 } hk_engine_capabilities_t;
+
+// Which HK_FORBID_* bit bans a given effect.
+//
+// This CANNOT be a mask-and-compare, and that is the whole reason it is a
+// function. The two enums agree on bits 0-3 and then diverge: effect bit 4 is
+// HK_EFFECT_MEMORY_MUTATION while forbid bit 4 is
+// HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY. ANDing them would silently cross-wire
+// those two -- a memory-patch engine rejected by a caller who forbade
+// executable allocation, and vice versa. The mapping is written out instead.
+//
+// Effects with NO corresponding forbid bit -- MEMORY_MUTATION, IMAGE_LOAD,
+// FILE_MAPPING, MEMORY_PROTECTION_CHANGE -- return 0 and are therefore never
+// forbidden. That is a gap in the spec's constraint vocabulary, not an
+// oversight here: there is no way for a caller to express "do not patch
+// memory", so this cannot honour one.
+static inline hk_constraints_t hk_effect_forbid_bit(hk_effects_t effect) {
+    switch (effect) {
+        case HK_EFFECT_TARGET_TEXT_MUTATION:    return HK_FORBID_TARGET_TEXT_PATCH;
+        case HK_EFFECT_IMPORT_MUTATION:         return HK_FORBID_IMPORT_SLOT_PATCH;
+        case HK_EFFECT_OBJC_METADATA_MUTATION:  return HK_FORBID_OBJC_METADATA_CHANGE;
+        case HK_EFFECT_SWIFT_VTABLE_MUTATION:   return HK_FORBID_SWIFT_VTABLE_CHANGE;
+        case HK_EFFECT_EXECUTABLE_ALLOCATION:   return HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY;
+        case HK_EFFECT_STATIC_CONTINUATION_USE: return HK_FORBID_STATIC_CONTINUATION;
+        case HK_EFFECT_PRIVATE_SYMBOL_SCAN:     return HK_FORBID_PRIVATE_SYMBOL_SCAN;
+        case HK_EFFECT_PROVIDER_ACTIVATION:     return HK_FORBID_PROVIDER_ACTIVATION;
+        case HK_EFFECT_PROVIDER_IMAGE_LOAD:     return HK_FORBID_PROVIDER_IMAGE_LOAD;
+        case HK_EFFECT_CALLBACK_REGISTRATION:   return HK_FORBID_CALLBACK_REGISTRATION;
+        case HK_EFFECT_THREAD_CREATION:         return HK_FORBID_THREAD_CREATION;
+        case HK_EFFECT_UNKNOWN_PROCESS_MUTATION:return HK_FORBID_UNKNOWN_COMMIT_EFFECTS;
+        default:                                return 0;
+    }
+}
+
+// The effects a request forbids, from its explicit constraints AND from its
+// continuation policy. The policy is not redundant with the constraints:
+// HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY says the same thing as
+// HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY, and a caller who set only the policy
+// meant it just as much.
+static inline hk_constraints_t hk_effective_constraints(
+    hk_constraints_t constraints,
+    hk_continuation_policy_t continuation_policy)
+{
+    if (continuation_policy == HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY) {
+        constraints |= HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY;
+    }
+    return constraints;
+}
 
 // What a preparation attempt actually concluded. See prepare_one_ctx_status.
 typedef enum {
@@ -214,7 +271,8 @@ static inline bool hk_engine_eligible_minimal_full(
     const hk_engine_capabilities_t *caps,
     hk_target_kind_t target_kind,
     hk_reachability_t required_reach,
-    hk_original_requirement_t original_requirement)
+    hk_original_requirement_t original_requirement,
+    hk_constraints_t effective_constraints)
 {
     if (!(caps->target_kinds & HK_TARGET_KIND_BIT(target_kind))) {
         return false;
@@ -232,6 +290,21 @@ static inline bool hk_engine_eligible_minimal_full(
         !(caps->original_requirements & HK_ORIGINAL_REQ_BIT(original_requirement))) {
         return false;
     }
+    // An engine that would produce a forbidden effect is not eligible. Checked
+    // bit by bit through the mapping above rather than by masking, since the
+    // two enums do not share a layout.
+    if (effective_constraints != 0 && caps->commit_effects != 0) {
+        for (unsigned bit = 0; bit < 64; bit++) {
+            hk_effects_t effect = 1ull << bit;
+            if (!(caps->commit_effects & effect)) {
+                continue;
+            }
+            hk_constraints_t forbid = hk_effect_forbid_bit(effect);
+            if (forbid != 0 && (effective_constraints & forbid) != 0) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -242,7 +315,7 @@ static inline bool hk_engine_eligible_minimal(
     hk_reachability_t required_reach)
 {
     return hk_engine_eligible_minimal_full(caps, target_kind, required_reach,
-                                           HK_ORIGINAL_NONE);
+                                           HK_ORIGINAL_NONE, 0);
 }
 
 // Defined in HKRuntime.c. `vtable` is not owned or copied -- the caller

@@ -576,7 +576,10 @@ static void hk_hook_analyze_one(const hk_plan_t *plan, struct hk_hook *hook, hk_
         hk_engine_capabilities_t caps = plan->runtime->engines[i]->describe();
         if (!hk_engine_eligible_minimal_full(&caps, hook->spec.target_kind,
                                              hook->spec.required_reach,
-                                             hook->spec.original_requirement)) {
+                                             hook->spec.original_requirement,
+                                             hk_effective_constraints(
+                                                 hook->spec.constraints,
+                                                 hook->spec.continuation_policy))) {
             continue;
         }
         out->outcome = HK_OUTCOME_ANALYZED;

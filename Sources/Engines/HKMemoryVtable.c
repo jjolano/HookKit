@@ -33,6 +33,10 @@ static hk_engine_capabilities_t memory_describe(void) {
     caps.engine_id = "memory";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
     caps.achievable_reach = HK_REACH_EXACT_MEMORY;
+    // A controlled byte patch. NOTE: the spec has no HK_FORBID_* bit for a
+    // plain memory mutation, so a caller cannot forbid this one -- see
+    // hk_effect_forbid_bit.
+    caps.commit_effects = HK_EFFECT_MEMORY_MUTATION;
     return caps;
 }
 

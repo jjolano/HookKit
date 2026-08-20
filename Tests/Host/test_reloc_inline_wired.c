@@ -406,6 +406,128 @@ static void test_pinned_prologue_reaches_the_engine(void) {
     printf("  pinned-prologue-reaches-the-engine: PASS\n");
 }
 
+// A caller forbidding dynamic executable memory now gets routed AWAY from the
+// engine that would allocate it, instead of silently getting a page. Before
+// this, nothing in Sources/ read `constraints` at all.
+static void test_forbidding_executable_allocation_routes_to_terminal(void) {
+    const uint32_t a[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(a, 5);
+
+    seam_t s; memset(&s, 0, sizeof(s));
+    hk_reloc_engine_ctx_t rctx = reloc_ctx(&s);
+    hk_inline_engine_ctx_t tctx = terminal_ctx(&s);
+
+    // Relocating registered FIRST, so it would win on order alone -- which is
+    // what makes this a real test of the constraint rather than of ordering.
+    hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_reloc_inline_vtable(), &rctx));
+    assert(hk_runtime_register_engine_with_context(rt, hk_inline_vtable(), &tctx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = address_spec("h.noexec", (uintptr_t)fn,
+                                       (void *)((uintptr_t)fn + 0x1000),
+                                       HK_ORIGINAL_NONE);
+    spec.constraints = HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY;
+
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    // Skipped the allocating engine, reached the one that allocates nothing.
+    assert(hook->matched_engine == hk_inline_vtable());
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(s.alloc_calls == 0);   // and no page was ever requested
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    free(fn);
+    printf("  forbidding-executable-allocation-routes-to-terminal: PASS\n");
+}
+
+// The continuation POLICY says the same thing as the constraint bit, and a
+// caller who set only the policy meant it just as much.
+static void test_continuation_policy_forbids_allocation_too(void) {
+    const uint32_t a[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(a, 5);
+
+    seam_t s; memset(&s, 0, sizeof(s));
+    hk_reloc_engine_ctx_t rctx = reloc_ctx(&s);
+    hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    // ONLY the allocating engine is registered, so there is nowhere else to go.
+    assert(hk_runtime_register_engine_with_context(rt, hk_reloc_inline_vtable(), &rctx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = address_spec("h.policy", (uintptr_t)fn,
+                                       (void *)((uintptr_t)fn + 0x1000),
+                                       HK_ORIGINAL_CALLABLE_CONTINUATION);
+    spec.constraints = 0;   // nothing forbidden explicitly...
+    spec.continuation_policy = HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY;
+
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    // ...but the policy alone is enough. No engine can serve a callable
+    // continuation without allocating, so NO_ROUTE is the honest answer --
+    // that is exactly the static-continuation mechanism Milestone 9 is about,
+    // and it does not exist yet.
+    assert(hook->matched_engine == NULL);
+    assert(hook->result.outcome == HK_OUTCOME_NO_ROUTE);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(s.alloc_calls == 0);
+    assert(fn[0] == A64_NOP);
+
+    // Sanity: the identical request with HK_CONTINUATION_ANY does route, so
+    // the refusal is the policy's doing and not a broken spec.
+    hk_plan_t *p2 = NULL;
+    assert(hk_plan_create(rt, NULL, &p2) == HK_STATUS_OK);
+    hk_hook_spec_t ok = spec;
+    ok.stable_hook_id = "h.any";
+    ok.continuation_policy = HK_CONTINUATION_ANY;
+    hk_hook_t *h2 = NULL;
+    assert(hk_plan_add_hook(p2, &ok, &h2) == HK_STATUS_OK);
+    assert(hk_plan_analyze(p2, NULL) == HK_STATUS_OK);
+    assert(h2->matched_engine == hk_reloc_inline_vtable());
+
+    hk_plan_release(p2);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    free(fn);
+    printf("  continuation-policy-forbids-allocation-too: PASS\n");
+}
+
+// The two enums do not share a bit layout past bit 3, so a mask-and-compare
+// would cross-wire them. This pins the pair that would collide: an engine
+// declaring MEMORY_MUTATION (effect bit 4) must NOT be rejected by a caller
+// forbidding DYNAMIC_EXECUTABLE_MEMORY (forbid bit 4).
+static void test_effect_and_forbid_layouts_are_not_conflated(void) {
+    assert(hk_effect_forbid_bit(HK_EFFECT_EXECUTABLE_ALLOCATION) ==
+           HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY);
+    // Same bit index, different meanings -- and memory mutation has no forbid
+    // bit at all, so it maps to 0 rather than to the one sharing its index.
+    assert(hk_effect_forbid_bit(HK_EFFECT_MEMORY_MUTATION) == 0);
+    assert(hk_effect_forbid_bit(HK_EFFECT_PRIVATE_SYMBOL_SCAN) ==
+           HK_FORBID_PRIVATE_SYMBOL_SCAN);
+
+    // An engine declaring only MEMORY_MUTATION stays eligible under that
+    // constraint -- the cross-wiring a naive mask would produce.
+    hk_engine_capabilities_t caps;
+    memset(&caps, 0, sizeof(caps));
+    caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
+    caps.achievable_reach = HK_REACH_EXACT_MEMORY;
+    caps.commit_effects = HK_EFFECT_MEMORY_MUTATION;
+    assert(hk_engine_eligible_minimal_full(&caps, HK_TARGET_MEMORY_PATCH,
+                                           HK_REACH_EXACT_MEMORY, HK_ORIGINAL_NONE,
+                                           HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY));
+    // ...while one that really does allocate is not.
+    caps.commit_effects = HK_EFFECT_EXECUTABLE_ALLOCATION;
+    assert(!hk_engine_eligible_minimal_full(&caps, HK_TARGET_MEMORY_PATCH,
+                                            HK_REACH_EXACT_MEMORY, HK_ORIGINAL_NONE,
+                                            HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY));
+    printf("  effect-and-forbid-layouts-are-not-conflated: PASS\n");
+}
+
 int main(void) {
     test_full_lifecycle_installs_and_reports();
     test_both_inline_engines_coexist();
@@ -413,6 +535,9 @@ int main(void) {
     test_refusals_are_distinguishable();
     test_image_scope_is_checked_before_allocating();
     test_pinned_prologue_reaches_the_engine();
+    test_forbidding_executable_allocation_routes_to_terminal();
+    test_continuation_policy_forbids_allocation_too();
+    test_effect_and_forbid_layouts_are_not_conflated();
     printf("all relocating inline wired tests passed\n");
     return 0;
 }
