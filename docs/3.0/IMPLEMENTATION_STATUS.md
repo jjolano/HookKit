@@ -3085,7 +3085,49 @@ Two 2.x facade robustness fixes landed here ahead of the milestone
    only falls through to the backend walk for symbols no loaded image carries.
 
 ## Milestone 12 — Deferred lifecycle
-**State: not started.**
+**State: not started — surveyed, and the design is settled enough to execute
+from.**
+
+Three facts about where this starts, each verified rather than assumed:
+
+- **`HK_OUTCOME_PENDING` is currently unreachable.** `grep` across `Sources/`
+  and `Tests/` finds it produced nowhere and asserted nowhere. The enum value
+  exists for exactly this milestone and nothing has ever set it.
+- **`HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE` is consulted in one place**, the
+  ObjC engine, which *refuses* it (`HK_OBJC_UNSUPPORTED_POLICY`, "needs an
+  image-load callback, which is unbuilt"). Every other engine ignores it.
+- **`hk_runtime_drain_pending` already exists** and is a stub returning
+  `HK_STATUS_OK` with a NULL report. So the retry entry point needs no new
+  API — on device the dyld image-load callback calls it, on host a test does,
+  and only the queue behind it is missing.
+
+**The trap, and it is why this cannot be sliced the obvious way.** The tempting
+first commit is "mark a deferred hook `PENDING` instead of failing" — small,
+self-contained, and *wrong on its own*. A `PENDING` outcome with a
+`drain_pending` that does nothing is a hook that never installs and never
+reports a failure: a silent no-op dressed as a success, which is strictly worse
+than the honest refusal the ObjC engine gives today. **The queue and the retry
+have to land together**, or not at all. Recording this because the slice looks
+attractive right up until you notice what it produces.
+
+**The ownership problem, and the design that answers it.** A deferred hook must
+outlive the plan that created it — the target may not appear until long after
+the caller released the plan. The spec deep-copy machinery in `HKPlan.c` writes
+directly into `hk_hook_t`'s `owned_*` fields, so it cannot copy a spec into
+some other container without a refactor.
+
+The clean answer is not to re-copy but to **transfer the `hk_hook_t` from the
+plan to the runtime** at plan release. That reuses the copy machinery
+untouched, and it has a second benefit worth naming: `hk_hook_t *` is handed to
+callers by `hk_plan_add_hook` and they may legitimately still hold one, so
+keeping it alive is more correct than freeing it. This mirrors what
+`hk_installed_hook_t` already does — a process-lifetime record that outlives
+the plan — so the pattern is established rather than invented.
+
+Sequenced for whoever picks it up: the ObjC engine's refusal becomes wrong the
+moment the plan can defer, so it changes in the same commit as the queue. It is
+not a separate cleanup.
+
 
 ## Milestone 13 — Packaging beta
 **State: not started.**
