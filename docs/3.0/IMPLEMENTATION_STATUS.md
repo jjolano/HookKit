@@ -2809,11 +2809,21 @@ branches inside the shared cache rather than through a rebindable import stub,
 so the rebind found zero sites and auto-cover fell back to inline patching of
 the live function's prologue — `litehook_hook_memory`: unprotect, a 20-byte
 non-atomic `memcpy` (five instructions), reprotect, with no thread
-synchronisation. On a real multi-threaded app another thread entered
-`syscall()` inside that window and faulted `KERN_PROTECTION_FAILURE` with the
-PC in a still-non-executable page. **3/3 launches, same signature** — not a
-rare race. Their mitigation is Shadow-side (skip those two symbols), which is
-a coverage loss rather than a fix.
+synchronisation. The observed fault was `KERN_PROTECTION_FAILURE` with the PC
+in a still-non-executable page, on a real multi-threaded app, 3/3 launches.
+
+**Corrected by the reporter after the fact, and the correction matters for how
+much that evidence proves.** The crash had TWO independent causes producing
+the same signature: this one, and a Shadow-side routine doing the identical
+unprotect/memcpy/reprotect over every loaded image's entire `__TEXT`, re-armed
+on a 3-second timer. Disabling the litehook side alone did *not* stop the
+crash. So the 3/3 reproduction is not clean evidence for the inline-patch path
+by itself — it is evidence that at least one of two same-shaped hazards was
+firing. The mechanism concern stands on its own terms regardless (a
+multi-instruction write into live code is unsafe by construction, not by
+observation), and that is the basis the guard below rests on — not the crash
+count. Recorded this way rather than quietly leaving the stronger claim
+standing.
 
 **Why it applies here.** Both Milestone 7/8 engines patch a live entry. The
 relocating one already had the right structure for the peer's preferred fix —
