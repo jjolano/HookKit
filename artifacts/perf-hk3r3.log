@@ -1,0 +1,50 @@
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=36873 rss=3014656 regions=61
+hkperf single PASS wall_us=2154
+hkperf batch_c PASS count=32 enqueue_us=30 commit_us=23529 per_hook_us=736.2
+hkperf batch_objc PASS count=16 enqueue_us=29 commit_us=10806 per_hook_us=677.2 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=103182 rss=2981888 regions=61
+hkperf single PASS wall_us=1819
+hkperf batch_c PASS count=32 enqueue_us=29 commit_us=23209 per_hook_us=726.2
+hkperf batch_objc PASS count=16 enqueue_us=21 commit_us=10484 per_hook_us=656.6 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=77128 rss=2965504 regions=60
+hkperf single PASS wall_us=1688
+hkperf batch_c PASS count=32 enqueue_us=28 commit_us=22108 per_hook_us=691.8
+hkperf batch_objc PASS count=16 enqueue_us=18 commit_us=10076 per_hook_us=630.9 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=112255 rss=2981888 regions=61
+hkperf single PASS wall_us=1752
+hkperf batch_c PASS count=32 enqueue_us=30 commit_us=23863 per_hook_us=746.7
+hkperf batch_objc PASS count=16 enqueue_us=20 commit_us=10970 per_hook_us=686.9 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=82556 rss=2998272 regions=61
+hkperf single PASS wall_us=1635
+hkperf batch_c PASS count=32 enqueue_us=27 commit_us=21234 per_hook_us=664.4
+hkperf batch_objc PASS count=16 enqueue_us=18 commit_us=9643 per_hook_us=603.8 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.34
+hkperf startup PASS cpu_us=67521 rss=2998272 regions=61
+hkperf single PASS wall_us=1597
+hkperf batch_c PASS count=32 enqueue_us=27 commit_us=23897 per_hook_us=747.7
+hkperf batch_objc PASS count=16 enqueue_us=20 commit_us=11588 per_hook_us=725.6 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.31
+hkperf startup PASS cpu_us=89967 rss=2965504 regions=60
+hkperf single PASS wall_us=1576
+hkperf batch_c PASS count=32 enqueue_us=26 commit_us=22369 per_hook_us=699.8
+hkperf batch_objc PASS count=16 enqueue_us=20 commit_us=9676 per_hook_us=606.0 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.31
+hkperf startup PASS cpu_us=92715 rss=2998272 regions=61
+hkperf single PASS wall_us=1927
+hkperf batch_c PASS count=32 enqueue_us=30 commit_us=23122 per_hook_us=723.5
+hkperf batch_objc PASS count=16 enqueue_us=20 commit_us=9783 per_hook_us=612.8 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.31
+hkperf startup PASS cpu_us=72537 rss=2981888 regions=61
+hkperf single PASS wall_us=1707
+hkperf batch_c PASS count=32 enqueue_us=28 commit_us=23657 per_hook_us=740.2
+hkperf batch_objc PASS count=16 enqueue_us=20 commit_us=10746 per_hook_us=672.9 enqueue_status=0 commit_status=0
+hkperf meta version=3.0.0 loadavg1=1.31
+hkperf startup PASS cpu_us=93140 rss=2998272 regions=61
+hkperf single PASS wall_us=1622
+hkperf batch_c PASS count=32 enqueue_us=29 commit_us=22297 per_hook_us=697.7
+hkperf batch_objc PASS count=16 enqueue_us=19 commit_us=9370 per_hook_us=586.9 enqueue_status=0 commit_status=0

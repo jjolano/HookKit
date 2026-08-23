@@ -3256,7 +3256,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 | Shadow source/package migration | complete (source-verified) | modern rootless controls, canonical dependency, ABI guard, and compatibility-header boundary in the signed-off Shadow checkout |
 | Shadow rootless build | complete (host-verified) | rebuilt `me.jjolano.shadow` 4.0.0 package plus ShadowHarness; Mach-O/package checks pass |
 | Current-device smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3 installed canonical HookKit 3.0.0-1 + rebuilt Shadow 4.0.0, launched ShadowHarness without a new ShadowHarness crash, then restored exact prior HookKit 2.5.1-1 / Shadow 4.0.0 state |
-| Shadow performance baseline | complete (device-verified 2026-08-23) | the retained v2.5-API harness (`tests/device_performance.m`, `make device-smoke-performance`) was rebuilt against the canonical framework and run on iPhone9,3 iOS 15.8.3 with canonical `3.0.0-1` installed: 10 steady samples after one cold discard, all PASS. startup RSS 2,916,352–2,998,272 B (2.5: 2,703,360–2,752,512; +~210–250 KB for the larger canonical framework), startup VM regions 59–61 (2.5: 61–62), hook install wall 942–1,648 µs (2.5: 107–138 µs — the plan/prepare/commit lifecycle cost, accepted architecture). startup CPU 24,298–62,841 µs is bimodal under background load (loadavg ~1.0–1.4 at run time, unlike the quiet-condition 2.5 baseline); its floor matches the 2.5 baseline minimum exactly and the comparison is indicative only. Harness removed afterwards; device package state unchanged. |
+| Shadow performance baseline | complete (device-verified 2026-08-23, interleaved A/B) | instrumented harness (`tests/device_performance.m`) + `scripts/device-perf-ab.sh`; 3 interleaved 2.5.1↔3.0.0-1 package-swap rounds on iPhone9,3 iOS 15.8.3, n=30 per arm, all phases PASS both arms. Medians: single C hook 126 µs (2.5) vs 1,688 µs (HK3); batched C installs 151 vs 713 µs/hook; batched ObjC method installs 2.2 vs 674 µs/hook — the plan/prepare/commit lifecycle cost, largest for the ObjC path Shadow's ~316-method disposition exercises (~213 ms one-time at Shadow startup under HK3). Startup RSS, VM regions, and startup CPU are statistically indistinguishable between arms under matched load (loadavg recorded per sample); an earlier non-interleaved +230 KB RSS reading was environmental and is superseded. Device restored to canonical 3.0.0-1. |
 
 ## Milestone 15 — Canonical release candidate
 **State: complete (accepted release scope).**
@@ -3276,11 +3276,11 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 ## Open deviations from the spec (running list)
 
 1. ~~Shadow performance baseline is deferred by accepted decision~~ **Closed
-   2026-08-23**: the baseline was collected on the current arm64 device (see
-   Milestone 14). The measured hook-install cost of the plan lifecycle
-   (~0.9–1.6 ms vs 2.5's ~0.11–0.14 ms) and the framework's RSS growth are
-   recorded there; no performance regression gate is claimed beyond that
-   observation.
+   2026-08-23**: collected as an interleaved A/B against HookKit 2.5.1 on the
+   current arm64 device (see Milestone 14). The plan lifecycle's per-hook cost
+   is real and concentrated in the ObjC path (~0.67 ms/hook vs ~2 µs under
+   2.5 batching); startup footprint and CPU are unchanged. No performance
+   regression gate is claimed beyond that observation.
 2. The v1 audit found an archived public binary dependency on Modulous but no
    public v1 module-class API use. HookKit 3.0 deliberately keeps the
    installable 2.5 package and retained `HKSubstitutor` facade; the full v1
