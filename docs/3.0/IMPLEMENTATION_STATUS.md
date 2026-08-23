@@ -3323,3 +3323,25 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
    accepted from prior PAC-aware implementation evidence, matching modern ABI
    markers, exports, and source-level provider declarations; arm64e evidence
    records remain conservative rather than being fabricated as device runs.
+
+---
+
+## Milestone 16 — Analyze route-resolution optimization
+
+**State: not started** (scheduled 2026-08-23).
+
+Baseline being optimized against (iPhone9,3 iOS 15.8.3, direct-C-ABI probe,
+see Post-release corrections #3): `hk_plan_analyze` costs ~420–470 µs per
+hook across target kinds; prepare and commit are microseconds. Batched
+16-hook ObjC installs pay ~7.5 ms in analyze alone; Shadow's ~316-method
+disposition pays ~145 ms one-time at first launch.
+
+| Task | State | Evidence |
+|---|---|---|
+| Profile inside `hk_plan_analyze` | not started | attribute per-hook cost to catalog interaction vs route matching vs capability consultation; host repro first, device confirmation second |
+| Design + implement caching/precomputation | not started | same routes chosen for identical inputs; no semantic change to routing decisions (M3/M9 invariants hold) |
+| Full validation loop | not started | host suite, 4 packaging lanes, export/compat checks, v2.x ABI baselines, legacy-ABI + canonical-facade + provider-lifecycle device smokes |
+| Re-measure against baseline | not started | same probe + perf harness A/B; target: ≥5× reduction in per-hook analyze cost with byte-identical routing outcomes |
+
+Ground rule carried over from M0: nothing claims improved performance
+without an actual measured run recorded here.
