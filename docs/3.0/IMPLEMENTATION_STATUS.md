@@ -3256,7 +3256,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 | Shadow source/package migration | complete (source-verified) | modern rootless controls, canonical dependency, ABI guard, and compatibility-header boundary in the signed-off Shadow checkout |
 | Shadow rootless build | complete (host-verified) | rebuilt `me.jjolano.shadow` 4.0.0 package plus ShadowHarness; Mach-O/package checks pass |
 | Current-device smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3 installed canonical HookKit 3.0.0-1 + rebuilt Shadow 4.0.0, launched ShadowHarness without a new ShadowHarness crash, then restored exact prior HookKit 2.5.1-1 / Shadow 4.0.0 state |
-| Shadow performance baseline | complete (device-verified 2026-08-23, interleaved A/B) | instrumented harness (`tests/device_performance.m`) + `scripts/device-perf-ab.sh`; 3 interleaved 2.5.1↔3.0.0-1 package-swap rounds on iPhone9,3 iOS 15.8.3, n=30 per arm, all phases PASS both arms. Medians: single C hook 126 µs (2.5) vs 1,688 µs (HK3); batched C installs 151 vs 713 µs/hook; batched ObjC method installs 2.2 vs 674 µs/hook — the plan/prepare/commit lifecycle cost, largest for the ObjC path Shadow's ~316-method disposition exercises (~213 ms one-time at Shadow startup under HK3). Startup RSS, VM regions, and startup CPU are statistically indistinguishable between arms under matched load (loadavg recorded per sample); an earlier non-interleaved +230 KB RSS reading was environmental and is superseded. Device restored to canonical 3.0.0-1. |
+| Shadow performance baseline | complete (device-verified 2026-08-23, interleaved A/B, re-measured after the batching + chaining fixes) | instrumented harness (`tests/device_performance.m`) + `scripts/device-perf-ab.sh`; 3 interleaved 2.5.1↔3.0.0-1 package-swap rounds on iPhone9,3 iOS 15.8.3, n=30 per arm, all phases PASS both arms; post-fix HK3 arm n=15. Medians (2.5 vs HK3 pre-batching vs HK3 post-batching): single C hook 126 µs / 1,688 µs / 1,394 µs; batched ObjC installs 2.2 / 674 / **467 µs per hook**; batched C installs 151 / 713 / **513 µs per hook**; startup RSS 3.00 MB / 3.00 MB / **2.82 MB** (shared-plan batching removed the per-hook runtime/plan churn). The remaining ~470 µs/hook is per-hook engine work inside prepare/commit, not plan overhead — further reduction would trade against the per-hook artifact/audit trail and is not pursued for this release. Device restored to canonical 3.0.0-1. |
 
 ## Milestone 15 — Canonical release candidate
 **State: complete (accepted release scope).**
@@ -3273,14 +3273,38 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 
 ---
 
+## Post-release corrections (2026-08-23)
+
+1. **Memory-engine chaining capability restored.** `5d2086c` (legacy provider
+   migration) rewrote every engine's `describe()` and omitted
+   `chainable_target_kinds` for the memory engine, so any second patch of an
+   already-owned memory target in a process was rejected with "existing target
+   ownership is not chainable by this engine". This broke the certified
+   legacy-ABI and canonical-facade batching smokes (both re-patch a memory
+   target) — a latent master regression, because device smokes were not re-run
+   after that commit. Fix: declare `HK_TARGET_MEMORY_PATCH` chainable in
+   `memory_describe()` (the engine's own expected-bytes precondition enforces
+   chain soundness). Both smokes PASS again on iPhone9,3 iOS 15.8.3.
+2. **Facade batching now uses one shared plan lifecycle.** The legacy facade's
+   `executeHooks` previously created a full runtime+plan lifecycle per queued
+   operation; it now applies all queued ObjC/function specs through one shared
+   runtime/plan (`hk3_legacy_apply_specs`), with unique per-op stable ids,
+   unchanged original-publication semantics, unchanged per-op status mapping,
+   and memory ops still executed individually (expected-byte capture must
+   happen at execute time). Measured effect in the table above; single-call
+   paths are refactored onto the same spec builders with no behavior change.
+
+---
+
 ## Open deviations from the spec (running list)
 
 1. ~~Shadow performance baseline is deferred by accepted decision~~ **Closed
    2026-08-23**: collected as an interleaved A/B against HookKit 2.5.1 on the
    current arm64 device (see Milestone 14). The plan lifecycle's per-hook cost
    is real and concentrated in the ObjC path (~0.67 ms/hook vs ~2 µs under
-   2.5 batching); startup footprint and CPU are unchanged. No performance
-   regression gate is claimed beyond that observation.
+   2.5 batching; ~0.47 ms/hook after the shared-plan batching fix); startup
+   footprint and CPU are unchanged. No performance regression gate is claimed
+   beyond that observation.
 2. The v1 audit found an archived public binary dependency on Modulous but no
    public v1 module-class API use. HookKit 3.0 deliberately keeps the
    installable 2.5 package and retained `HKSubstitutor` facade; the full v1

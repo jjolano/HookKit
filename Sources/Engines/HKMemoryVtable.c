@@ -40,6 +40,11 @@ static hk_engine_capabilities_t memory_describe(void) {
     caps.achievable_reach = HK_REACH_EXACT_MEMORY |
                             HK_REACH_EXACT_IMAGE_SCOPE;
     caps.exact_image_scope_targets = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
+    // Legacy callers re-patch the same target across separate lifecycles
+    // (the M15 legacy-memory ownership compatibility contract); the record's
+    // head must equal the new request's expected bytes, which the engine's
+    // own precondition check enforces.
+    caps.chainable_target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
     // A controlled byte patch. NOTE: the spec has no HK_FORBID_* bit for a
     // plain memory mutation, so a caller cannot forbid this one -- see
     // hk_effect_forbid_bit.

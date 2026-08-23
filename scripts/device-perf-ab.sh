@@ -17,7 +17,7 @@ set -eu
 LABEL="${1:?usage: device-perf-ab.sh <label> [samples] [host] [binary]}"
 SAMPLES="${2:-15}"
 HOST="${3:-10.0.1.160}"
-BINARY="${4:-.theos/obj/debug/device_smoke_performance}"
+BINARY="${4:-.theos/obj/device_smoke_performance}"
 
 SSH="sshpass -p alpine ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no"
 # Unique remote name per invocation: the device can cache a bad exec verdict
