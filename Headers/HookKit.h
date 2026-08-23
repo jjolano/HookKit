@@ -45,8 +45,8 @@ typedef const struct HKImage* HKImageRef;
  *                      in backend descriptors/type info, so callers can tell
  *                      which backends serve hookMemory:.
  *
- * Flags are powers of two and may be OR'd for getAvailableCategories (which
- * always includes HK_CAT_MESSAGE and never HK_CAT_MEMORY).
+ * Values are retained for ABI compatibility. The canonical 3.0 facade returns
+ * HK_CAT_NONE from getAvailableCategories.
  */
 typedef enum {
     HK_CAT_NONE             = 0,
@@ -73,6 +73,16 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
     HKStrategyInline,        // prologue inline trampoline (denyFishHook-immune)
     HKStrategyPrivateSymbol  // resolver mode: private/DSC lookup, hook via rebinding
 };
+
+/*
+ * HookKit 3.0 compatibility behavior (authoritative): this header preserves
+ * the 2.x ABI, but HKSubstitutor now translates calls into HookKit 3 plans.
+ * Provider/category inputs are accepted and ignored; discovery reports none,
+ * activeType is HK_LIB_NONE, activeStrategy is HKStrategyDefault, and
+ * getLibErrno: reports a normalized HookKit status with HK_LIB_NONE. The
+ * historical backend-selection narrative below is retained only to document
+ * old source spellings; it does not describe canonical execution.
+ */
 
 /*
  * Symbol name convention: names passed to findSymbolInImage:/
@@ -214,30 +224,19 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 @property (assign, nonatomic) BOOL batching;
 
 // The pinned backend used by explicit instances and by image/symbol APIs on
-// automatic instances (HK_LIB_NONE if none is available). Automatic function
-// and memory hooks may select another backend per operation. Message-category
-// instances report HK_LIB_NONE because message hooking is facade-native.
+// Always HK_LIB_NONE in the canonical 3.0 compatibility facade.
 @property (readonly, nonatomic) hookkit_lib_t activeType;
 
-// The pinned backend's strategy (HKStrategyDefault when resolution did not
-// name one). Automatic per-operation winners are not reported here.
+// Always HKStrategyDefault in the canonical 3.0 compatibility facade.
 @property (readonly, nonatomic) HKStrategy activeStrategy;
 
-// Resolves the backend from the types property. One-shot: the first call that
-// finds a backend wins and later calls are no-ops, so set types before calling.
-// The substitutorWith... constructors already do this for you.
+// Compatibility no-op. HK3 runtime creation happens only for an operation.
 - (void)initLibraries;
 
-// Returns an integer representing the substitutor types DISCOVERABLE on the
-// system — side-effect-free probes only (dlopen_preflight for the dlopen-based
-// providers, never an engine load), so the result means the provider is
-// present, not that it is verified activatable: engines are activated only
-// when a backend is actually selected and used. Use getSubstitutorTypeInfo to
-// receive an array for more details.
+// Always HK_LIB_NONE; legacy provider discovery is retired.
 + (hookkit_lib_t)getAvailableSubstitutorTypes;
 
-// Returns HK_CAT_MESSAGE plus every backend-selected category for which at
-// least one backend is discoverable. Discovery never activates an engine.
+// Always HK_CAT_NONE; legacy category routing is retired.
 + (hookkit_cat_t)getAvailableCategories;
 
 // Returns an array of dictionaries containing information on given substitutor types, as supported by the running version of HookKit.

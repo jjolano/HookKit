@@ -28,17 +28,6 @@
 // What it does NOT verify is real libobjc behavior; that is device-only and
 // is not claimed here.
 //
-// Reuse survey: HookKit 2.x does this in hk_apply_message_hook
-// (HKSubstitutor.m), which is the reference for the mechanism and already
-// gets the two subtle parts right -- it publishes the original before the
-// replace, and it knows class_replaceMethod's return value is authoritative
-// only when the method was local. It is not reusable as-is: it is a single
-// fused function with the runtime calls inlined, it has no prepare/commit
-// split, and it predates the mutation-state and artifact contracts. The
-// per-backend adapters (Backends/HKMSBackends.m and friends) are further from
-// what is wanted -- message hooks in 2.x deliberately bypass them entirely
-// and go straight to the runtime, so there is no backend logic worth lifting.
-
 #ifndef HK_ENGINES_OBJC_H
 #define HK_ENGINES_OBJC_H
 
@@ -67,9 +56,11 @@ typedef enum {
     // The target is absent and the request said HK_AVAILABILITY_OPTIONAL_IF_PRESENT.
     // Distinct from NOT_FOUND because it is a satisfied request, not a failure.
     HK_OBJC_NOT_APPLICABLE,
-    // HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE needs an image-load callback to
-    // retry on, which this codebase has not built. Reported rather than
-    // silently downgraded to "required now".
+    // Retained for ABI stability and no longer produced: deferral used to be
+    // refused here for want of a retry mechanism, which Milestone 12 built.
+    // An absent deferred target now reports HK_OBJC_NOT_APPLICABLE like any
+    // other conditional one, and the plan decides whether that means "skip"
+    // or "wait".
     HK_OBJC_UNSUPPORTED_POLICY,
 } hk_objc_status_t;
 

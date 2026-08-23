@@ -45,6 +45,30 @@ static void test_create_starts_draft(void) {
     printf("  create-starts-draft: PASS\n");
 }
 
+static void test_plan_debug_label_deep_copied(void) {
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+
+    char mutable_label[] = "startup-plan";
+    hk_plan_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.struct_size = sizeof(config);
+    config.struct_version = HK_ABI_VERSION_3_0;
+    config.debug_label = mutable_label;
+
+    assert(hk_plan_create(rt, &config, &plan) == HK_STATUS_OK);
+    memset(mutable_label, 'X', strlen(mutable_label));
+
+    assert(strcmp(plan->owned_debug_label, "startup-plan") == 0);
+    assert(strcmp(plan->config.debug_label, "startup-plan") == 0);
+    assert(plan->config.debug_label != mutable_label);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  plan-debug-label-deep-copied: PASS\n");
+}
+
 static void test_domain_id_deep_copied(void) {
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
@@ -171,6 +195,7 @@ static void test_plan_state_of_null_is_discarded(void) {
 int main(void) {
     test_create_requires_runtime();
     test_create_starts_draft();
+    test_plan_debug_label_deep_copied();
     test_domain_id_deep_copied();
     test_duplicate_domain_id_rejected();
     test_domain_pointers_stable_across_growth();

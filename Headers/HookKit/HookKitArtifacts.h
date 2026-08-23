@@ -176,11 +176,8 @@ typedef struct hk_artifact_snapshot hk_artifact_snapshot_t;
 
 // Deep-copied, immutable snapshots (spec section 7.5) -- never shared
 // mutable storage with the report/runtime/process state they were copied
-// from. Not implemented yet (Milestone 4's artifact ledger, which
-// produces the hk_artifact_t records these functions would snapshot,
-// doesn't exist as an internal concept yet either) -- declared here so
-// the public shape is fixed before that internal work starts, the same
-// order Milestone 3's other headers were done in.
+// from. Report, runtime, and process snapshots are populated by committed
+// artifacts; analyze/prepare snapshots are empty.
 
 hk_status_t hk_report_copy_artifacts(
     const hk_report_t *report,

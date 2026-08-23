@@ -236,6 +236,19 @@ static void test_null_tolerance(void) {
     printf("  null-tolerance: PASS\n");
 }
 
+static void test_dyld_population_host_seam(void) {
+    hk_image_catalog_t *cat = hk_image_catalog_create();
+    assert(cat != NULL);
+#if defined(__APPLE__)
+    (void)hk_image_catalog_populate_from_dyld(cat);
+#else
+    assert(!hk_image_catalog_populate_from_dyld(cat));
+    assert(hk_image_catalog_count(cat) == 0);
+#endif
+    hk_image_catalog_destroy(cat);
+    printf("  dyld-population-host-seam: PASS\n");
+}
+
 int main(void) {
     test_any_loaded_matches_all_in_order();
     test_main_executable();
@@ -247,6 +260,7 @@ int main(void) {
     test_generation_bumps_on_add();
     test_path_is_deep_copied();
     test_null_tolerance();
+    test_dyld_population_host_seam();
     printf("all image catalog tests passed\n");
     return 0;
 }

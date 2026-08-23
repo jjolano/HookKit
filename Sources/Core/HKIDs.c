@@ -1,21 +1,15 @@
-// clock_gettime/CLOCK_REALTIME are POSIX, not plain C11 -- glibc (the host
-// test toolchain) hides them under strict -std=c11 without this feature
-// test macro. Darwin's libc doesn't gate on it the same way, so this is a
-// host-portability fix, not a target-platform requirement.
-#define _POSIX_C_SOURCE 199309L
-
 #include "HKIDs.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
-#include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 static uint64_t hk_compute_process_nonce(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    uint64_t stack_entropy = (uint64_t)(uintptr_t)&ts;  // ASLR
-    return ((uint64_t)ts.tv_sec << 32) ^ (uint64_t)ts.tv_nsec
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t stack_entropy = (uint64_t)(uintptr_t)&tv;  // ASLR
+    return ((uint64_t)tv.tv_sec << 32) ^ (uint64_t)tv.tv_usec
          ^ (uint64_t)getpid() ^ stack_entropy;
 }
 

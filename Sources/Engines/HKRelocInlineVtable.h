@@ -71,6 +71,11 @@ typedef struct {
     // the allocator could not place it near, which is exactly the case worth
     // refusing rather than papering over.
     bool allow_non_atomic_entry_patch;
+
+    // Set when alloc/seal/free are backed by a pre-existing executable pool
+    // rather than dynamic pages. This caller promise pairs with the static
+    // vtable declaration and lets preparation report the matching effect.
+    bool static_continuation;
 } hk_reloc_engine_ctx_t;
 
 // The engine to register with hk_runtime_register_engine_with_context, passing

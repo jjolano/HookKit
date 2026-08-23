@@ -2,9 +2,10 @@
 archs:                 [ arm64, arm64e, armv7, armv7s ]
 platform:              ios
 install-name:          '@rpath/HookKit.framework/HookKit'
-current-version:       2.5.1
+current-version:       3.0.0
 compatibility-version: 2.5.1
 exports:
   - archs:                [ arm64, arm64e, armv7, armv7s ]
     objc-classes:         [ HKSubstitutor ]
+    symbols:              [ _hk_runtime_create, _hk_runtime_shutdown, _hk_runtime_release, _hk_runtime_owner_id, _hk_runtime_drain_pending, _hk_runtime_find_symbol, _hk_report_release, _hk_plan_create, _hk_plan_release, _hk_plan_define_domain, _hk_plan_add_hook, _hk_plan_analyze, _hk_plan_prepare, _hk_plan_commit, _hk_plan_state, _hk_hook_copy_result, _hk_hook_original_slot, _hk_original_slot_load, _hk_hook_installed_handle, _hk_installed_hook_copy_result, _hk_report_copy_artifacts, _hk_runtime_copy_artifacts, _hk_copy_process_artifacts, _hk_artifact_snapshot_count, _hk_artifact_snapshot_copy_at, _hk_artifact_snapshot_release, _hk_swift_prepare, _hk_swift_commit, _hk_swift_plan_release, _hk_swift_hook, _hk_swift_last_error_code ]
 ...

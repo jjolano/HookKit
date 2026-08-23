@@ -27,13 +27,6 @@
 // Host tests supply a seam that writes into a buffer, which exercises every
 // decision this engine makes except the store itself.
 //
-// Reuse survey: HookKit 2.x rebinds imports via vendor/fishhook (see
-// Backends/HKFishhookBackend.m). That code is the reference for the mechanism
-// and is not reusable: it is fused with the device-only parts named above, it
-// carries its own rebinding registry rather than reporting artifacts, and it
-// predates the mutation-state and original-publication contracts this engine
-// exists to satisfy.
-
 #ifndef HK_ENGINES_REBIND_H
 #define HK_ENGINES_REBIND_H
 
@@ -90,6 +83,9 @@ typedef struct {
     bool originals_agree;
     uint64_t original;   // meaningful when count > 0 && originals_agree
 } hk_rebind_plan_t;
+
+// Read-only slot witness shared by commit and post-commit verification.
+uint64_t hk_rebind_read_slot(uintptr_t address);
 
 // Phase 1. Enumerates slots and reads their current values. Mutates nothing.
 hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,

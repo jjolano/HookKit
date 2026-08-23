@@ -27,6 +27,14 @@ struct hk_domain {
     hk_domain_spec_t spec;          // .stable_domain_id repointed at stable_domain_id_owned
 };
 
+typedef struct hk_owned_image_selector {
+    hk_image_selector_t value;
+    char *path;
+    struct hk_owned_image_selector **children;
+    const hk_image_selector_t **child_views;
+    size_t child_count;
+} hk_owned_image_selector_t;
+
 // Same individually-heap-allocated reasoning as hk_domain above:
 // hk_hook_t* is returned from hk_plan_add_hook and reused later (e.g. as
 // an element of another hook's commit_after array), so it must survive
@@ -45,16 +53,16 @@ struct hk_hook {
     hk_hook_spec_t spec;  // deep-copied; target's string/bytes pointers repointed at the owned_* fields below
 
     char *owned_symbol_name;
-    char *owned_symbol_defining_image_path;
-    char *owned_symbol_caller_image_scope_path;
+    hk_owned_image_selector_t *owned_symbol_defining_image;
+    hk_owned_image_selector_t *owned_symbol_caller_image_scope;
 
-    char *owned_address_expected_image_path;
+    hk_owned_image_selector_t *owned_address_expected_image;
     uint8_t *owned_address_expected_initial_bytes;
 
     char *owned_objc_class_name;
     char *owned_objc_selector_name;
 
-    char *owned_memory_base_image_path;
+    hk_owned_image_selector_t *owned_memory_base_image;
     uint8_t *owned_memory_replacement_bytes;
     uint8_t *owned_memory_expected_bytes;
     uint8_t *owned_memory_expected_mask;
@@ -86,6 +94,13 @@ struct hk_hook {
     // the context-free prepare_one/commit_one pair, which stashes its own.
     void *prepared_state;
 
+    // Optional continuation inspection runs after preparation and before
+    // commit. Keeping the value on the hook lets both the single-hook and
+    // grouped commit paths seed their artifact sinks without asking an engine
+    // to resolve a prepared target a second time.
+    bool has_prepared_continuation;
+    hk_continuation_info_t prepared_continuation;
+
     // Set by hk_plan_commit when this hook goes ACTIVE and its engine
     // published an original. NOT owned: points into the process-global
     // installed registry (HKInstalled.h), which outlives this hook -- that
@@ -100,6 +115,7 @@ struct hk_plan {
     hk_id_t plan_id;
     hk_runtime_t *runtime;   // not owned; caller keeps the runtime alive
     hk_plan_config_t config;
+    char *owned_debug_label;
     hk_plan_state_t state;
 
     struct hk_domain **domains;

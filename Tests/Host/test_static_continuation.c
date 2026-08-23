@@ -75,6 +75,7 @@ static hk_reloc_engine_ctx_t static_ctx(pool_seam_t *p) {
     c.alloc = pool_alloc; c.seal = pool_seal; c.free_page = pool_free;
     c.seam_ctx = p;
     c.write = pool_write; c.write_ctx = p;
+    c.static_continuation = true;
     return c;
 }
 
@@ -188,6 +189,8 @@ static void test_static_continuation_allocates_nothing(void) {
     assert(hook->matched_engine == hk_static_inline_vtable());   // eligible now
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hook->result.declared_prepare_effects == HK_EFFECT_STATIC_CONTINUATION_USE);
+    assert(hook->result.observed_prepare_effects == HK_EFFECT_STATIC_CONTINUATION_USE);
     // A slot was taken from the fixed budget -- not a page from the system.
     assert(p.claims == 1 && p.seals == 1);
     assert(hk_static_pool_free_count(&p.pool) == SLOTS - 1);
@@ -195,6 +198,8 @@ static void test_static_continuation_allocates_nothing(void) {
     hk_report_t *report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_STATIC);
+    assert(!hook->result.continuation.executable_memory_allocated);
     assert(fn[0] != A64_NOP);
 
     // The artifacts say the same thing the capabilities did: a text patch, and
@@ -223,6 +228,7 @@ static void test_static_is_eligible_where_dynamic_is_not(void) {
     hk_reloc_engine_ctx_t sctx = static_ctx(&p);
     hk_reloc_engine_ctx_t dctx = static_ctx(&p);   // same seams; only the
                                                    // DECLARATION differs
+    dctx.static_continuation = false;
 
     hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);

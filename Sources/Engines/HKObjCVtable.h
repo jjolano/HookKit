@@ -7,10 +7,8 @@
 // It is also the first adapter on the vtable's context-carrying entry points
 // (prepare_one_ctx/commit_one_ctx/release_prepared, see HKEngineInternal.h),
 // which is why it looks different from HKRebindVtable and HKMemoryVtable.
-// Those two still use the context-free pair and pay for it twice: a
-// file-scoped environment, so only one can be configured per process, and a
-// fixed side stash keyed by stable_hook_id, so prepare has somewhere to leave
-// state for commit. This adapter has neither. The environment is an ordinary
+// Those adapters now use the same context-carrying pair too. This adapter has
+// neither file-scoped state nor a side stash. The environment is an ordinary
 // caller-owned struct registered as the engine context, and prepared state is
 // handed back by the core, so several runtimes can drive this engine with
 // different ObjC runtimes concurrently and there is no stash to overflow.
@@ -21,13 +19,9 @@
 // comes from hk_hook_spec_t.replacement and the target from
 // hk_hook_spec_t.target.objc.
 //
-// Note on original publication: hk_objc_commit can hand the original back
-// through an out-parameter, but no vtable commit entry point has anywhere to
-// put it, so the adapter passes NULL and the original travels in the
-// artifact's original_pointer -- which is how the rebind adapter reports its
-// originals too. The engine still writes the cell before the replace when a
-// direct caller supplies one; that ordering guarantee is not weakened here,
-// only unused.
+// Note on original publication: the adapter forwards hk_objc_commit's
+// out-parameter into the artifact sink, so the plan can retain the same live
+// original pointer that the artifact records.
 
 #ifndef HK_ENGINES_OBJC_VTABLE_H
 #define HK_ENGINES_OBJC_VTABLE_H

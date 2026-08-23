@@ -54,7 +54,9 @@ modern_make() {
     if [ "$(uname -s)" = Darwin ]; then
         make "${MAKE_ARGS[@]}" "$@"
     else
-        make "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" "$@"
+        # Theos's Linux default predates this modern wrapper and otherwise
+        # selects libroot_oldabi.a even when clang emits the new ABI.
+        make "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" IS_NEW_ABI=1 "$@"
     fi
 }
 
@@ -107,8 +109,8 @@ write_control() {
             floor=9.0
             arch=iphoneos-arm
             ceiling=', firmware (<< 14.0)'
-            conflicts=', me.jjolano.fmwk.hookkit'
-            replaces=', me.jjolano.fmwk.hookkit'
+            conflicts=', me.jjolano.fmwk.hookkit, me.jjolano.fmwk.hookkit3'
+            replaces=', me.jjolano.fmwk.hookkit, me.jjolano.fmwk.hookkit3'
             provides=', me.jjolano.fmwk.hookkit'
             ;;
         rootful-modern)
@@ -116,8 +118,8 @@ write_control() {
             name='HookKit Framework (Modern Rootful)'
             floor=14.0
             arch=iphoneos-arm
-            conflicts=', me.jjolano.fmwk.hookkit.legacy'
-            replaces=', me.jjolano.fmwk.hookkit.legacy'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
             provides=
             ;;
         rootless)
@@ -125,8 +127,8 @@ write_control() {
             name='HookKit Framework (Rootless)'
             floor=15.0
             arch=iphoneos-arm64
-            conflicts=', me.jjolano.fmwk.hookkit.legacy'
-            replaces=', me.jjolano.fmwk.hookkit.legacy'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
             provides=
             ;;
         roothide)
@@ -135,8 +137,8 @@ write_control() {
             floor=15.0
             arch=iphoneos-arm64e
             ceiling=', firmware (<< 18.0)'
-            conflicts=', me.jjolano.fmwk.hookkit.legacy'
-            replaces=', me.jjolano.fmwk.hookkit.legacy'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
             provides=
             ;;
         *) echo "error: no control profile for $profile" >&2; return 1 ;;
@@ -150,7 +152,37 @@ write_control() {
         -e "s/^(Conflicts:.*)/\\1$conflicts/" \
         -e "s/^(Replaces:.*)/\\1$replaces/" \
         -e "s/^(Provides:.*)/\\1$provides/" \
+        -e "s/^Version:.*/Version: 3.0.0-1/" \
         control > "build/control.$profile"
+
+    # The shared template carries the legacy provider fields. Empty profile
+    # values mean the field must be absent, not silently inherited.
+    if [ -z "$conflicts" ]; then
+        sed -i '/^Conflicts:/d' "build/control.$profile"
+    fi
+    if [ -z "$replaces" ]; then
+        sed -i '/^Replaces:/d' "build/control.$profile"
+    fi
+    if [ -z "$provides" ]; then
+        sed -i '/^Provides:/d' "build/control.$profile"
+    fi
+}
+
+check_legacy_abi() {
+    local expected_install_name=${1:-} binary
+    binary=$(find .theos/obj -path '*/HookKit.framework/HookKit' -type f \
+        ! -path '*/arm64/*' ! -path '*/arm64e/*' \
+        ! -path '*/armv7/*' ! -path '*/armv7s/*' | head -n 1)
+    [ -n "$binary" ] || {
+        echo "error: built HookKit framework binary not found" >&2
+        return 1
+    }
+    if [ -n "$expected_install_name" ]; then
+        bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
+            --expected-install-name "$expected_install_name"
+    else
+        bash scripts/check_legacy_abi.sh "$binary"
+    fi
 }
 
 build_rootful_legacy() {
@@ -162,7 +194,8 @@ build_rootful_legacy() {
     legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    legacy_make check-exports
+    legacy_make HOOKKIT_LANE="$lane" check-exports
+    check_legacy_abi
     cp -p "$artifact" build/hookkit-rootful-legacy.deb
     # Canonical name too: the release step must upload the theos-produced
     # <package>_<version>_<arch>.deb name, not the short lane alias above.
@@ -178,7 +211,8 @@ build_rootful_modern() {
     modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    run_make check-exports
+    modern_make HOOKKIT_LANE="$lane" check-exports
+    check_legacy_abi
     cp -p "$artifact" build/hookkit-rootful-modern.deb
     # Canonical name too: the release step must upload the theos-produced
     # <package>_<version>_<arch>.deb name, not the short lane alias above.
@@ -194,7 +228,8 @@ build_rootless() {
     modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    run_make check-exports
+    modern_make HOOKKIT_LANE="$lane" check-exports
+    check_legacy_abi
     cp -p "$artifact" build/hookkit-rootless.deb
     # Canonical name too: the release step must upload the theos-produced
     # <package>_<version>_<arch>.deb name, not the short lane alias above.
@@ -203,16 +238,17 @@ build_rootless() {
 
 # Existing roothide profile; it shares the modern/rootless compatibility floor.
 build_roothide() {
-    local artifact
+    local lane=roothide artifact
     require_modern_toolchain roothide
     test -d "${THEOS:?}/vendor/mod/roothide"
-    write_control roothide
-    modern_make clean
-    modern_make test
-    modern_make THEOS_PACKAGE_SCHEME=roothide ARCHS="arm64 arm64e" TARGET=iphone:clang:latest:15.0 package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH=build/control.roothide
+    write_control "$lane"
+    modern_make HOOKKIT_LANE="$lane" clean
+    modern_make HOOKKIT_LANE="$lane" test
+    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
-    run_make check-compat COMPAT_PROFILE=roothide COMPAT_ARTIFACT="$artifact"
-    run_make check-exports
+    run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
+    modern_make HOOKKIT_LANE="$lane" check-exports
+    check_legacy_abi '@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
     cp -p "$artifact" build/hookkit-roothide.deb
     # Canonical name too: the release step must upload the theos-produced
     # <package>_<version>_<arch>.deb name, not the short lane alias above.

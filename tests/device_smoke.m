@@ -1,5 +1,5 @@
 #import <Foundation/Foundation.h>
-#import <HookKit/HookKit.h>
+#import <HookKit.h>
 
 #include <mach/mach_time.h>
 #include <stdio.h>

@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "../../Sources/Engines/HKInlineVtable.h"
@@ -93,6 +94,11 @@ static void test_full_lifecycle_patches_and_reports(void) {
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
     assert(fn[0] == A64_NOP);  // prepare mutated nothing
 
+    hk_artifact_snapshot_t *process_before = NULL;
+    assert(hk_copy_process_artifacts(&process_before) == HK_STATUS_OK);
+    size_t process_count_before = hk_artifact_snapshot_count(process_before);
+    hk_artifact_snapshot_release(process_before);
+
     hk_report_t *report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
     assert(hk_plan_state(plan) == HK_PLAN_COMMITTED);
@@ -111,6 +117,20 @@ static void test_full_lifecycle_patches_and_reports(void) {
     assert(memcmp(a.original_bytes.inline_bytes.data, body, 4) == 0);
     assert(a.mechanically_reversible);
     assert(a.request_id.high == hook->hook_id.high && a.request_id.low == hook->hook_id.low);
+
+    hk_artifact_snapshot_t *runtime_snap = NULL;
+    assert(hk_runtime_copy_artifacts(rt, &runtime_snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(runtime_snap) == 1);
+    hk_artifact_t runtime_artifact;
+    assert(hk_artifact_snapshot_copy_at(runtime_snap, 0, &runtime_artifact) == HK_STATUS_OK);
+    assert(runtime_artifact.artifact_id.high == a.artifact_id.high);
+    assert(runtime_artifact.artifact_id.low == a.artifact_id.low);
+    hk_artifact_snapshot_release(runtime_snap);
+
+    hk_artifact_snapshot_t *process_after = NULL;
+    assert(hk_copy_process_artifacts(&process_after) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(process_after) == process_count_before + 1);
+    hk_artifact_snapshot_release(process_after);
 
     hk_artifact_snapshot_release(snap);
     hk_report_release(report);
@@ -471,14 +491,17 @@ static void test_atomic_patch_is_unaffected_by_the_guard(void) {
 }
 
 int main(void) {
-    test_full_lifecycle_patches_and_reports();
-    test_continuation_request_fails_at_prepare();
-    test_pinned_prologue_mismatch_fails_at_prepare();
-    test_no_context_fails_cleanly();
-    test_refusals_carry_distinct_diagnostics();
-    test_expected_image_is_enforced_when_a_catalog_is_supplied();
-    test_non_atomic_entry_patch_is_refused_by_default();
-    test_atomic_patch_is_unaffected_by_the_guard();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_full_lifecycle_patches_and_reports);
+    RUN_TEST(test_continuation_request_fails_at_prepare);
+    RUN_TEST(test_pinned_prologue_mismatch_fails_at_prepare);
+    RUN_TEST(test_no_context_fails_cleanly);
+    RUN_TEST(test_refusals_carry_distinct_diagnostics);
+    RUN_TEST(test_expected_image_is_enforced_when_a_catalog_is_supplied);
+    RUN_TEST(test_non_atomic_entry_patch_is_refused_by_default);
+    RUN_TEST(test_atomic_patch_is_unaffected_by_the_guard);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all inline wired tests passed\n");
     return 0;
 }

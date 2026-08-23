@@ -34,6 +34,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Internal to the framework: HookKit's only exported symbol is _HKSubstitutor
 // (see HookKit.tbd), and these must not join the dynamic export table.
@@ -93,6 +94,13 @@ HK_INTERNAL bool hk_native_patch_memory(void *target, const void *data, size_t s
 // the remap, and fails on a misaligned slot.
 HK_INTERNAL bool hk_native_patch_pointer(void *slot, void *value);
 
+// Seams for the 3.0 relocating-inline adapter. The allocator owns one page
+// per trampoline and prefers a page near `near`; seal makes it executable and
+// free reclaims only an unpublished page.
+HK_INTERNAL uintptr_t hk_native_reloc_alloc(size_t size, uintptr_t near);
+HK_INTERNAL bool hk_native_reloc_seal(uintptr_t page, size_t size);
+HK_INTERNAL void hk_native_reloc_free(uintptr_t page, size_t size);
+
 // Symbol lookup. Images must already be loaded -- an unloaded image has no
 // runtime addresses to report.
 typedef struct hk_image hk_image;
@@ -108,6 +116,14 @@ HK_INTERNAL void *hk_native_find_symbol(hk_image *image, const char *name);
 // dlsym first — this covers only the private/non-exported ones). The table
 // is mapped once for the process lifetime, so the scan is safe concurrently.
 HK_INTERNAL void *hk_native_find_cache_symbol(const char *name);
+
+// Exact-image private lookup for a loaded dyld shared-cache image. Returns
+// the signed runtime address and, when requested, the unslid n_value from the
+// cache's local-symbol table.
+HK_INTERNAL void *hk_native_find_loaded_cache_symbol(const void *header,
+                                                     intptr_t slide,
+                                                     const char *name,
+                                                     uint64_t *out_raw_value);
 
 // Scan-path variant of hk_native_open_image: same lookup minus the dlopen
 // fallback handle (dlsym already missed before a NULL-image scan runs, and

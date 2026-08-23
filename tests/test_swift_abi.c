@@ -221,7 +221,7 @@ static void test_constants(void) {
     _Static_assert(HK_SWIFT_METADATA_DATA_OFFSET == 0x20, "Data +0x20");
     _Static_assert(HK_SWIFT_METADATA_CLASS_ADDRESS_POINT_OFFSET == 0x3C, "ClassAddressPoint +0x3C");
     _Static_assert(HK_SWIFT_METADATA_DESCRIPTION_OFFSET == 0x40, "Description +0x40");
-    _Static_assert(HK_SWIFT_METADATA_IS_SWIFT_BIT == 1, "is-Swift bit 0");
+    _Static_assert(HK_SWIFT_METADATA_IS_SWIFT_BIT == 2, "is-Swift bit 1");
 
     // Descriptor offsets and flags.
     _Static_assert(HK_SWIFT_DESC_KIND_MASK == 0x1F, "kind bits 0-4");
@@ -267,9 +267,15 @@ static void test_validation(void) {
     CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, NULL, NULL));
     expect_error(HK_SWIFT_ERR_ARG);
 
-    // 2. Not a Swift class (Data bit 0 clear).
+    // 2. Not a Swift class (stable-ABI Data bit 1 clear).
     blob_setup();
     *(uintptr_t *)(g_metadata + 0x20) = 0;
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    expect_error(HK_SWIFT_ERR_NOT_SWIFT);
+
+    // The pre-stable marker alone is not a current Swift class tag.
+    blob_setup();
+    *(uintptr_t *)(g_metadata + 0x20) = 1;
     CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
     expect_error(HK_SWIFT_ERR_NOT_SWIFT);
 

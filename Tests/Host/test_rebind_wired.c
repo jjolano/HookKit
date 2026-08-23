@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "../../Sources/Engines/HKRebindVtable.h"
@@ -115,6 +116,14 @@ static hk_rebind_engine_ctx_t engine_ctx_for(uint8_t *img) {
     c.slide = (uintptr_t)img - (uintptr_t)V_BASE;
     c.write = buffer_write;
     c.write_ctx = NULL;
+    return c;
+}
+
+static hk_rebind_engine_ctx_t engine_ctx_for_catalog(const hk_image_catalog_t *catalog) {
+    hk_rebind_engine_ctx_t c;
+    memset(&c, 0, sizeof(c));
+    c.write = buffer_write;
+    c.catalog = catalog;
     return c;
 }
 
@@ -342,12 +351,109 @@ static void test_rebind_refusals_are_distinguishable(void) {
     printf("  rebind-refusals-are-distinguishable: PASS\n");
 }
 
+static void test_catalog_context_rebinds_every_matching_image(void) {
+    uint8_t *first = aligned_alloc(64, IMG_SIZE);
+    uint8_t *second = aligned_alloc(64, IMG_SIZE);
+    assert(first && second);
+    build_image(first);
+    build_image(second);
+
+    hk_image_catalog_t *catalog = hk_image_catalog_create();
+    assert(catalog);
+    hk_image_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.header = first;
+    entry.slide = (uintptr_t)first - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(catalog, &entry));
+    entry.header = second;
+    entry.slide = (uintptr_t)second - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(catalog, &entry));
+
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for_catalog(catalog);
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = symbol_spec("hook.all-importers", "malloc",
+                                      (void *)(uintptr_t)REPLACEMENT);
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_commit(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(slot(first, GOT_OFF) == REPLACEMENT);
+    assert(slot(first, GOT_OFF + 8) == REPLACEMENT);
+    assert(slot(second, GOT_OFF) == REPLACEMENT);
+    assert(slot(second, GOT_OFF + 8) == REPLACEMENT);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    hk_image_catalog_destroy(catalog);
+    free(first);
+    free(second);
+    printf("  catalog-context-rebinds-every-matching-image: PASS\n");
+}
+
+static void test_required_original_rejects_ambiguous_catalog(void) {
+    uint8_t *first = aligned_alloc(64, IMG_SIZE);
+    uint8_t *second = aligned_alloc(64, IMG_SIZE);
+    assert(first && second);
+    build_image(first);
+    build_image(second);
+    put_u64(second, GOT_OFF, ORIGINAL + 1);
+    put_u64(second, GOT_OFF + 8, ORIGINAL + 1);
+
+    hk_image_catalog_t *catalog = hk_image_catalog_create();
+    assert(catalog);
+    hk_image_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.header = first;
+    entry.slide = (uintptr_t)first - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(catalog, &entry));
+    entry.header = second;
+    entry.slide = (uintptr_t)second - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(catalog, &entry));
+
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for_catalog(catalog);
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = symbol_spec("hook.ambiguous-original", "malloc",
+                                      (void *)(uintptr_t)REPLACEMENT);
+    spec.original_requirement = HK_ORIGINAL_DIRECT_PREDECESSOR;
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(slot(first, GOT_OFF) == ORIGINAL);
+    assert(slot(second, GOT_OFF) == ORIGINAL + 1);
+
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    hk_image_catalog_destroy(catalog);
+    free(first);
+    free(second);
+    printf("  required-original-rejects-ambiguous-catalog: PASS\n");
+}
+
 int main(void) {
-    test_full_lifecycle_rebinds_and_reports();
-    test_absent_symbol_fails_at_prepare();
-    test_no_environment_fails_cleanly();
-    test_caller_image_scope_is_enforced();
-    test_rebind_refusals_are_distinguishable();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_full_lifecycle_rebinds_and_reports);
+    RUN_TEST(test_absent_symbol_fails_at_prepare);
+    RUN_TEST(test_no_environment_fails_cleanly);
+    RUN_TEST(test_caller_image_scope_is_enforced);
+    RUN_TEST(test_rebind_refusals_are_distinguishable);
+    RUN_TEST(test_catalog_context_rebinds_every_matching_image);
+    RUN_TEST(test_required_original_rejects_ambiguous_catalog);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all rebind wired tests passed\n");
     return 0;
 }

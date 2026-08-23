@@ -1,18 +1,11 @@
-// Internal engine contract -- Milestone 4's "fake engines" work, and a
-// deliberately minimal subset of spec section 8's full hk_engine_vtable_t.
+// Internal engine contract -- Milestone 4's fake-engine seam plus the
+// versioned discovery/analysis/continuation extensions from spec section 8.
 //
-// What's here: enough for hk_plan_analyze to ask "does any registered
-// engine claim it can serve this hook" (describe()) and enough for
-// hk_plan_prepare to actually attempt preparation (prepare_one()). What's
-// NOT here, on purpose: prepare_GROUP/commit_group/revalidate_group/
-// verify_group/compensate_group/inspect_continuation (section 8.1) use
-// *grouped* operations for batching (one image walk covering many hooks at
-// once) -- real engines will need that (Milestone 6+), but no fake engine
-// in this codebase's tests has anything to batch, so prepare_one takes one
-// hook at a time. This header grows into the real contract incrementally,
-// the same way HookKitResults.h grew from "just enough for hk_plan_analyze"
-// to the full result struct across several commits -- not redesigned from
-// scratch each time.
+// What's here: a versioned descriptor, optional side-effect-free discovery and
+// request analysis, and enough for hk_plan_prepare/commit to drive one hook or
+// a native grouped wave through preparation, revalidation, mutation,
+// verification, continuation inspection, and certified compensation. The
+// legacy zero-header form remains valid for the in-tree fake engines.
 //
 // Not public API: no engine outside this codebase registers against this
 // contract. The production engines (Milestone 6+) are a fixed, compiled-in
@@ -22,6 +15,7 @@
 #ifndef HK_CORE_ENGINE_INTERNAL_H
 #define HK_CORE_ENGINE_INTERNAL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "../../Headers/HookKit/HookKitPlan.h"
@@ -42,9 +36,48 @@ typedef uint32_t hk_original_requirement_mask_t;
 typedef uint32_t hk_target_kind_mask_t;
 #define HK_TARGET_KIND_BIT(kind) (1u << (uint32_t)(kind))
 
+// One bit per hk_install_context_t value. Zero means the engine did not
+// declare a context restriction and remains eligible for every runtime
+// context, preserving the additive behavior of older descriptors.
+typedef uint32_t hk_install_context_mask_t;
+#define HK_INSTALL_CONTEXT_BIT(context) (1u << (uint32_t)(context))
+#define HK_INSTALL_CONTEXT_ALL (HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_EARLY_PROCESS) | \
+                                HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_MAIN_THREAD_SERIALIZED) | \
+                                HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_RUNTIME_SERIALIZED) | \
+                                HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_ARBITRARY_RUNTIME))
+
+// Production routing is architecture-specific: compiling an arm64e slice is
+// not evidence that its PAC path is certified. Zero remains reserved for the
+// private host/test seam, whose synthetic runtime has no iOS architecture.
+typedef uint32_t hk_engine_architecture_mask_t;
+#define HK_ENGINE_ARCHITECTURE_ARM64  (1u << 0)
+#define HK_ENGINE_ARCHITECTURE_ARM64E (1u << 1)
+#define HK_ENGINE_ARCHITECTURE_ARMV7  (1u << 2)
+#define HK_ENGINE_ARCHITECTURE_ARMV7S (1u << 3)
+
+// Matches Apple's __IPHONE_OS_VERSION_* integer encoding (15.0.0 == 150000).
+#define HK_ENGINE_IOS_VERSION(major, minor, patch) \
+    ((uint32_t)(major) * 10000u + (uint32_t)(minor) * 100u + (uint32_t)(patch))
+
 typedef struct {
     const char *engine_id;
     hk_target_kind_mask_t target_kinds;
+    // Target kinds for which the engine can enforce the request's image
+    // selector when a populated catalog is available. This is narrower than
+    // target_kinds because a symbol rebind, for example, can scope importer
+    // slots without proving the defining image. Zero means no target-kind
+    // claim, not "all".
+    hk_target_kind_mask_t exact_image_scope_targets;
+    hk_install_context_mask_t install_contexts;
+    // Architectures this engine was built to handle, and the subset accepted
+    // for production routing. This release accepts the source/ABI-reviewed
+    // arm64e lane without requiring a second physical device; the private
+    // test registration can still bypass both masks.
+    hk_engine_architecture_mask_t architectures;
+    hk_engine_architecture_mask_t certified_architectures;
+    // Minimum iOS version for this engine mode. A zero value is reserved for
+    // host-only fakes; production descriptors state their package floor.
+    uint32_t minimum_ios_version;
     // Upper bound of what this engine can ever achieve -- not a per-hook
     // fact, a fixed property of the engine (spec section 8.2's
     // "achieved reachability vector" as a static capability, not a result
@@ -66,6 +99,12 @@ typedef struct {
     // other's capability is unreachable.
     hk_original_requirement_mask_t original_requirements;
 
+    // What this engine may produce during preparation (hk_effects_t bits).
+    // Zero means "declares nothing", read as "declares no forbidden effect"
+    // -- the same safe default as original_requirements, so an engine written
+    // before this field existed stays eligible exactly as it was.
+    hk_effects_t prepare_effects;
+
     // What this engine may produce when it commits (hk_effects_t bits). Zero
     // means "declares nothing", read as "declares no forbidden effect" -- the
     // same safe default as original_requirements, so an engine written before
@@ -75,6 +114,17 @@ typedef struct {
     // saying HK_FORBID_DYNAMIC_EXECUTABLE_MEMORY got an executable page
     // allocated anyway: nothing in Sources/ read `constraints` at all.
     hk_effects_t commit_effects;
+
+    // The engine can consume several same-engine operations in one phase.
+    // This is a capability declaration, not a promise that every call will
+    // batch: the vtable callback may still be absent for a legacy adapter.
+    bool native_grouping;
+    bool supports_compensation;
+
+    // Target kinds for which an existing replacement can be installed on
+    // top of the current head when the engine validates the predecessor
+    // witness in hk_artifact_sink_t. Zero means no chaining claim.
+    hk_target_kind_mask_t chainable_target_kinds;
 } hk_engine_capabilities_t;
 
 // Which HK_FORBID_* bit bans a given effect.
@@ -141,10 +191,96 @@ typedef enum {
 typedef struct {
     int64_t error_code;         // engine-defined; 0 when none
     const char *error_message;  // NULL when none
+    hk_effects_t observed_effects; // effects actually produced while preparing
 } hk_prepare_diag_t;
 
+// Verification is deliberately separate from mutation state: COMPLETE says
+// the engine performed its write, while VERIFIED requires a post-write read
+// through the engine's own mechanism. An omitted callback is an honest
+// unverified result; a failed callback upgrades COMPLETE to UNKNOWN in the
+// plan lifecycle because the installed state can no longer be trusted.
+typedef enum {
+    HK_VERIFY_UNAVAILABLE = 0,
+    HK_VERIFY_OK,
+    HK_VERIFY_FAILED,
+} hk_verify_result_t;
+
+typedef struct {
+    int64_t error_code;         // engine-defined; 0 when none
+    const char *error_message;  // NULL when none
+} hk_verify_diag_t;
+
+// One operation in an optional grouped engine call. The core owns the
+// operation array and every `prepared` value after a successful preparation;
+// engines fill only the phase result fields. A callback returning false means
+// it could not produce trustworthy per-operation results, so the core keeps
+// the conservative defaults (FAILED for prepare, UNKNOWN for commit, and
+// FAILED for verification).
+typedef struct {
+    const hk_hook_spec_t *spec;
+    void *prepared;
+
+    hk_prepare_result_t prepare_result;
+    hk_prepare_diag_t prepare_diag;
+
+    hk_artifact_sink_t *sink;
+    hk_mutation_state_t mutation;
+
+    hk_verify_result_t verify_result;
+    hk_verify_diag_t verify_diag;
+
+    bool revalidated;
+    bool compensated;
+} hk_engine_operation_t;
+
+// Optional versioned discovery/analysis results. The fixed compiled-in
+// engines can use the descriptor-only path, while a provider-backed engine
+// may add a side-effect-free availability probe and a request-specific route
+// refinement without changing the core callback ABI.
+typedef struct {
+    bool available;
+    int64_t error_code;
+    const char *error_message; // static lifetime, like engine diagnostics
+} hk_engine_discovery_t;
+
+typedef struct {
+    bool eligible;
+    hk_reachability_t achieved_reach;
+    hk_effects_t required_prepare_effects;
+    hk_effects_t required_commit_effects;
+    hk_continuation_kind_t continuation_kind;
+    hk_install_context_t install_context;
+    uint32_t route_rank;
+} hk_engine_analysis_t;
+
+typedef struct {
+    hk_prepare_result_t prepare_result;
+    hk_mutation_state_t mutation;
+    hk_verify_result_t verify_result;
+    bool compensated;
+    hk_prepare_diag_t prepare_diag;
+    hk_verify_diag_t verify_diag;
+} hk_engine_attempt_t;
+
+// The vtable is internal, but it still crosses the core/engine seam. Keep a
+// small version header so a newer core can reject an explicitly versioned
+// engine it cannot understand while retaining the zero-header form used by
+// the original test seam.
+#define HK_ENGINE_VTABLE_ABI_VERSION_1 1u
+
 typedef struct hk_engine_vtable {
+    uint32_t abi_version; // 0: legacy in-tree shape; otherwise a known version
+    uint32_t struct_size; // 0: legacy in-tree shape; otherwise sizeof this vtable
+
     hk_engine_capabilities_t (*describe)(void);
+
+    // Optional versioned discovery and request analysis. Returning false (or
+    // `available`/`eligible` false) removes the candidate without touching a
+    // target; the descriptor remains the conservative upper bound.
+    bool (*discover)(void *engine_ctx, hk_engine_discovery_t *out);
+    bool (*analyze_operation)(void *engine_ctx,
+                              const hk_hook_spec_t *request,
+                              hk_engine_analysis_t *out);
 
     // Attempts preparation for one hook (spec section 4.2: request-
     // permitted non-target effects only, never a target mutation -- a
@@ -174,6 +310,11 @@ typedef struct hk_engine_vtable {
     // called. An engine that refuses (returns NONE) records nothing.
     hk_mutation_state_t (*commit_one)(const hk_hook_spec_t *spec,
                                       hk_artifact_sink_t *sink);
+
+    // Optional post-commit readback for context-free engines. Returning
+    // HK_VERIFY_UNAVAILABLE is equivalent to leaving this callback NULL.
+    hk_verify_result_t (*verify_one)(const hk_hook_spec_t *spec,
+                                     hk_verify_diag_t *out_diag);
 
     // ---- context-carrying variants (optional, additive) ----------------
     //
@@ -217,6 +358,14 @@ typedef struct hk_engine_vtable {
     // that hands back a small integer cast to void*, say).
     void (*release_prepared)(void *engine_ctx, void *prepared);
 
+    // Optional post-commit readback. `prepared` is still owned by the core
+    // when verification runs, so engines may use the captured address/plan
+    // rather than resolving the target a second time.
+    hk_verify_result_t (*verify_one_ctx)(void *engine_ctx,
+                                         const hk_hook_spec_t *spec,
+                                         void *prepared,
+                                         hk_verify_diag_t *out_diag);
+
     // ---- richer preparation result (optional, additive) ----------------
     //
     // Both preparation entry points above return bool, which conflates two
@@ -254,19 +403,66 @@ typedef struct hk_engine_vtable {
                                                   const hk_hook_spec_t *spec,
                                                   void **out_prepared,
                                                   hk_prepare_diag_t *out_diag);
+
+    // Optional grouped variants. The core uses these only for a contiguous
+    // same-engine wave of hooks without a domain gate; all other operations
+    // retain the one-hook fallback above. Each callback must fill the
+    // per-operation fields in `operations`. Grouping is additive so existing
+    // engines remain source-compatible when these members are NULL.
+    bool (*prepare_group_ctx)(void *engine_ctx,
+                              hk_engine_operation_t *operations,
+                              size_t operation_count);
+    bool (*revalidate_group_ctx)(void *engine_ctx,
+                                 hk_engine_operation_t *operations,
+                                 size_t operation_count);
+    bool (*commit_group_ctx)(void *engine_ctx,
+                             hk_engine_operation_t *operations,
+                             size_t operation_count);
+    bool (*verify_group_ctx)(void *engine_ctx,
+                             hk_engine_operation_t *operations,
+                             size_t operation_count);
+    // Called only after a group commit/verification leaves a potentially
+    // mutated member. The engine sets operation->compensated only when it
+    // restored that member mechanically; a false return keeps every member
+    // conservative (not compensated).
+    bool (*compensate_group_ctx)(void *engine_ctx,
+                                 hk_engine_operation_t *operations,
+                                 size_t operation_count);
+
+    // Optional continuation inspection after preparation. This is separate
+    // from commit: callers may inspect the exact continuation that a prepared
+    // operation will publish before any requested target is mutated.
+    hk_verify_result_t (*inspect_continuation)(
+        void *engine_ctx,
+        const hk_hook_spec_t *spec,
+        void *prepared,
+        hk_continuation_info_t *out_info,
+        hk_verify_diag_t *out_diag);
 } hk_engine_vtable_t;
 
+// A zero struct_size is the legacy in-tree form. Explicitly versioned
+// vtables must contain the requested member before the core reads it.
+static inline bool hk_engine_vtable_has_field(const hk_engine_vtable_t *vtable,
+                                              size_t offset,
+                                              size_t field_size) {
+    return vtable &&
+        (vtable->struct_size == 0 ||
+         (vtable->struct_size >= offset &&
+          vtable->struct_size - offset >= field_size));
+}
+
 // Eligibility per spec section 9, minimal subset: target kind supported,
-// and every required_reach bit is within the engine's achievable_reach.
-// Explicitly NOT checked yet, and stated rather than silently assumed
-// passing: image scope exactness, original requirement / continuation
-// policy compatibility, forbidden preparation/commit effects, install
-// context, architecture/OS, ownership conflicts, engine certification.
-// Each of those needs a concept this rewrite hasn't built yet (the image
-// catalog is Milestone 5; ownership ledger and engine certification are
-// later Milestone 4/8/10 work) -- this function will grow more criteria
-// as those land, the same incremental way the header above says the
-// vtable will.
+// every required_reach bit is within the engine's achievable_reach, original
+// requirement compatibility, and declared preparation/commit effects do not
+// violate the request. Install-context compatibility is checked by the
+// router with hk_engine_supports_install_context. The router additionally
+// checks target-specific exact image scope against its live catalog and
+// refuses restricted symbol defining-image selectors unless an engine
+// advertises exact symbol scope. The router checks architecture, deployment
+// floor, and certification through hk_engine_supports_platform; ownership is
+// enforced at commit by HKOwnership.c because it
+// needs the process-lifetime target ledger and the engine's predecessor
+// witness, not just a static capability check.
 static inline bool hk_engine_eligible_minimal_full(
     const hk_engine_capabilities_t *caps,
     hk_target_kind_t target_kind,
@@ -292,20 +488,60 @@ static inline bool hk_engine_eligible_minimal_full(
     }
     // An engine that would produce a forbidden effect is not eligible. Checked
     // bit by bit through the mapping above rather than by masking, since the
-    // two enums do not share a layout.
-    if (effective_constraints != 0 && caps->commit_effects != 0) {
-        for (unsigned bit = 0; bit < 64; bit++) {
-            hk_effects_t effect = 1ull << bit;
-            if (!(caps->commit_effects & effect)) {
-                continue;
-            }
-            hk_constraints_t forbid = hk_effect_forbid_bit(effect);
-            if (forbid != 0 && (effective_constraints & forbid) != 0) {
-                return false;
+    // two enums do not share a layout. Both phases matter: continuation pages
+    // are normally allocated during prepare, before any target is changed.
+    if (effective_constraints != 0) {
+        const hk_effects_t phases[] = {caps->prepare_effects,
+                                       caps->commit_effects};
+        for (size_t phase = 0; phase < sizeof(phases) / sizeof(phases[0]); phase++) {
+            for (unsigned bit = 0; bit < 64; bit++) {
+                hk_effects_t effect = 1ull << bit;
+                if (!(phases[phase] & effect)) {
+                    continue;
+                }
+                hk_constraints_t forbid = hk_effect_forbid_bit(effect);
+                if (forbid != 0 && (effective_constraints & forbid) != 0) {
+                    return false;
+                }
             }
         }
     }
     return true;
+}
+
+static inline bool hk_engine_supports_install_context(
+    const hk_engine_capabilities_t *caps,
+    hk_install_context_t context) {
+    if (!caps || caps->install_contexts == 0) {
+        return true;
+    }
+    if ((unsigned)context > (unsigned)HK_INSTALL_CONTEXT_ARBITRARY_RUNTIME) {
+        return false;
+    }
+    return (caps->install_contexts & HK_INSTALL_CONTEXT_BIT(context)) != 0;
+}
+
+// The host runtime intentionally has architecture == 0, so existing fake
+// engines stay useful without pretending to make a production certification
+// claim. On device, only a descriptor that explicitly supports and certifies
+// the active architecture may be selected. A private test registration is the
+// documented escape hatch for testing an otherwise uncertified mode.
+static inline bool hk_engine_supports_platform(
+    const hk_engine_capabilities_t *caps,
+    hk_engine_architecture_mask_t architecture,
+    uint32_t ios_version,
+    bool testing_registration)
+{
+    if (testing_registration || architecture == 0) {
+        return true;
+    }
+    if (!caps || caps->architectures == 0 ||
+        !(caps->architectures & architecture) ||
+        !(caps->certified_architectures & architecture)) {
+        return false;
+    }
+    return caps->minimum_ios_version == 0 ||
+           (ios_version != 0 && ios_version >= caps->minimum_ios_version);
 }
 
 // Kept as the two-criterion form for callers that have no requirement in hand.

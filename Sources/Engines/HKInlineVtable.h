@@ -14,9 +14,9 @@
 //
 // `expected_image` / `expected_uuid` ARE now checked, via
 // HKImageScope.h, when the context supplies an image catalog. A NULL or empty
-// catalog means the check is SKIPPED rather than failed -- the dyld populator
-// is unbuilt, so failing closed would make every inline hook fail on device,
-// which is fabricated safety. See HKImageScope.h for that policy in full.
+// catalog means the check is SKIPPED rather than failed -- catalog population
+// is platform-specific and may not be available in a caller-supplied context.
+// See HKImageScope.h for that policy in full.
 //
 // ONE THING THIS ADAPTER STILL DOES NOT DO, stated rather than silently
 // skipped: `hk_address_target_t.may_strip_pac_or_thumb_state` is not acted on.

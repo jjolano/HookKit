@@ -4,13 +4,9 @@
 //
 // Deliberate host/device split (this is the whole reason the file is shaped
 // this way): the SELECTOR-MATCHING logic below is platform-agnostic and
-// host-tested against synthetic entries. The only device-only part is
-// POPULATING the catalog from the live process, which needs dyld
-// (_dyld_image_count / _dyld_get_image_header / ...) and a real Mach-O
-// runtime -- that seam is hk_image_catalog_populate_from_dyld, declared but
-// NOT implemented here, because it cannot be compiled or run on this Linux
-// host and this project does not ship code it can't verify. Tests populate
-// via hk_image_catalog_add_entry instead.
+// host-tested against synthetic entries. Populating from the live dyld image
+// list is compiled only for Darwin; Linux tests populate through
+// hk_image_catalog_add_entry instead.
 
 #ifndef HK_CORE_IMAGE_CATALOG_H
 #define HK_CORE_IMAGE_CATALOG_H
@@ -51,9 +47,9 @@ size_t hk_image_catalog_count(const hk_image_catalog_t *catalog);
 
 // Monotonic counter bumped whenever the image set changes (spec
 // ARCHITECTURE.md invariant #3: a resolution records the generation it was
-// made at, and commit revalidates against it). Nothing revalidates against
-// it yet -- that lands with late-image handling (Milestone 12) -- but the
-// counter is real so resolvers can start stamping it now.
+// made at, and plan commit/retry revalidates against it. No current engine
+// claims future-image reach, so automatic image delivery is intentionally not
+// registered; the generation guard itself is live.
 uint64_t hk_image_catalog_generation(const hk_image_catalog_t *catalog);
 
 // Visits each entry matching `selector`, in catalog (index) order, exactly
@@ -66,10 +62,10 @@ size_t hk_image_catalog_match(const hk_image_catalog_t *catalog,
                               const hk_image_selector_t *selector,
                               hk_image_visit_fn visit, void *ctx);
 
-// DEVICE-ONLY SEAM, intentionally not defined here (see file header):
-// populates the catalog from the live dyld image list. Milestone 5's device
-// work; requires SSH to a jailbroken device to build and verify.
-//   void hk_image_catalog_populate_from_dyld(hk_image_catalog_t *catalog);
+// Populates the catalog from the current dyld image list. Existing entries are
+// retained, so callers normally invoke this once on a fresh catalog. On Linux
+// the function returns false (the caller can still use synthetic entries).
+bool hk_image_catalog_populate_from_dyld(hk_image_catalog_t *catalog);
 
 #ifdef __cplusplus
 }

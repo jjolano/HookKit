@@ -175,7 +175,7 @@ const char *hk_image_scope_describe(hk_image_scope_status_t status) {
         case HK_IMAGE_SCOPE_OK:
             return "address is inside the expected image";
         case HK_IMAGE_SCOPE_NO_CATALOG:
-            return "image scope not checked: no image catalog (dyld populator unbuilt)";
+            return "image scope not checked: no image catalog is available";
         case HK_IMAGE_SCOPE_NO_MATCH:
             return "the image the request named is not loaded";
         case HK_IMAGE_SCOPE_UUID_MISMATCH:

@@ -84,6 +84,14 @@ which is exactly what keeps `describe()` callable during analysis without
 violating the side-effect-free rule in `ARCHITECTURE.md` §Non-negotiable
 invariants #1.
 
+Current implementation detail: `architectures` and
+`certified_architectures` are bitmasks. A production route requires both to
+contain the running slice; the private test registration is the only bypass.
+The current iOS check uses the binary's deployment-target lower bound, which
+is enough for the present iOS 15 package-floor claims and fails closed for a
+future engine claiming a higher floor. Add a runtime OS probe only when that
+future route is needed.
+
 ## Discovery
 
 `discover()` may use compile-time built-in availability, `dlopen_preflight`,

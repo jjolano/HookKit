@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKInstalled.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKPlanInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "fake_engines.h"
@@ -166,11 +167,14 @@ static void test_null_tolerance(void) {
 }
 
 int main(void) {
-    test_active_hook_gets_handle_and_slot();
-    test_original_slot_survives_plan_and_runtime_release();
-    test_engine_without_original_gives_no_slot();
-    test_non_active_hook_gives_no_slot();
-    test_null_tolerance();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_active_hook_gets_handle_and_slot);
+    RUN_TEST(test_original_slot_survives_plan_and_runtime_release);
+    RUN_TEST(test_engine_without_original_gives_no_slot);
+    RUN_TEST(test_non_active_hook_gives_no_slot);
+    RUN_TEST(test_null_tolerance);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all installed/original tests passed\n");
     return 0;
 }

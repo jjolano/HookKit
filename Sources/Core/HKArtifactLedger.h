@@ -1,7 +1,7 @@
 // Internal artifact ledger -- Milestone 4's "Artifact ledger" task.
 //
 // The ledger is the mutable, append-only internal collection an owner (a
-// report today; a runtime/process later) accumulates hk_artifact_t records
+// report, runtime, or process) accumulates hk_artifact_t records
 // into as engines commit mutations. The public read path never sees the
 // ledger directly: callers get an immutable hk_artifact_snapshot_t (spec
 // section 7.5 -- a deep, independent copy taken at a point in time, so the
@@ -14,18 +14,9 @@
 //
 // Not public API: no caller outside Sources/Core/*.c touches the ledger.
 //
-// Ownership honesty (matches the hk_report_t precedent in
-// HKReportInternal.h): both append and snapshot copy hk_artifact_t BY
-// VALUE. That is a full, correct copy of every inline/scalar field -- which
-// is the bulk of the struct -- but the struct's borrowed-pointer fields
-// (image.path, the engine_id/mechanism_id string views, and the *_bytes
-// inline_bytes views) are SHARED, not deep-copied. No engine populates the
-// ledger yet (Commit 2 of this feature wires that up, using static string
-// literals), so nothing with a non-static lifetime flows through here today.
-// The day a real engine (Milestone 6+) records an artifact carrying a
-// dynamically-allocated string or byte buffer, owned-copy machinery has to
-// land here -- that is the precise trigger, deferred until there is a
-// producer to need it rather than built speculatively now.
+// Append and snapshot copy hk_artifact_t values plus owned copies of every
+// pointer-bearing view (image.path, string views, and inline byte views).
+// Returned views remain valid until their snapshot is released.
 
 #ifndef HK_CORE_ARTIFACT_LEDGER_H
 #define HK_CORE_ARTIFACT_LEDGER_H
@@ -65,15 +56,42 @@ typedef struct {
     // channel: the artifact is the inspectable record, this is the live
     // pointer a replacement will actually load through.
     void *published_original;
+
+    // Optional continuation description produced by engines that preserve an
+    // executable predecessor. The core copies it into the per-hook result;
+    // engines that do not provide one leave has_continuation false.
+    bool has_continuation;
+    hk_continuation_info_t continuation;
+
+    // Chain coordination supplied by the core. A chain-capable engine must
+    // compare its prepared predecessor with this value before its first
+    // write, then publish that predecessor through `published_original`.
+    // Non-chainable engines leave the requirement false; the ownership ledger
+    // still records them so a later same-target request can report a real
+    // mechanism conflict instead of guessing.
+    bool require_predecessor_match;
+    void *required_predecessor;
+
+    // Adapter hint for the shared relocating engine's artifact kind/effect.
+    // It is only meaningful to that engine and is reset by the core per hook.
+    bool static_continuation;
+
+    // A real mutation whose artifact could not be recorded is not safely
+    // classifiable as complete; the core upgrades that commit to UNKNOWN.
+    bool record_failed;
+
+    // OR of effects observed while recording this hook's artifacts. This is
+    // reporting state only; a failed record still marks record_failed, while
+    // the effect remains observed so the result cannot under-report a write.
+    hk_effects_t observed_effects;
 } hk_artifact_sink_t;
 
 // Stamps the contextual IDs onto a copy of *artifact (overwriting any the
 // engine left set -- the sink is authoritative for those four fields) and
-// appends it to the sink's ledger. Returns false on a NULL argument or on
-// the ledger's OOM. A false return means "not recorded", never "the
-// mutation did not happen"; how a production engine reacts to losing a
-// record (its mutation is real but now untracked) is deferred until a real
-// engine exists -- fake engines here cannot OOM.
+// appends it to the sink's ledger. Returns false on a NULL argument or when
+// the ledger cannot own the record. A false return means "not recorded", never "the
+// mutation did not happen". The commit path observes sink->record_failed
+// and upgrades an otherwise-complete mutation to UNKNOWN.
 bool hk_artifact_sink_record(hk_artifact_sink_t *sink, const hk_artifact_t *artifact);
 
 // Creates an empty ledger. NULL on OOM.
@@ -82,8 +100,8 @@ hk_artifact_ledger_t *hk_artifact_ledger_create(void);
 void hk_artifact_ledger_destroy(hk_artifact_ledger_t *ledger);
 
 // Appends one artifact (copied by value -- see the ownership note above).
-// Returns false on OOM ONLY; a false return means "the ledger could not
-// record this artifact", never "the artifact/mutation did not happen" --
+// Returns false when the ledger cannot own the record; a false return means
+// "the ledger could not record this artifact", never "the artifact/mutation did not happen" --
 // the caller (the commit path) must treat an untracked-but-real mutation as
 // exactly the kind of not-fully-known state HK_MUTATION_UNKNOWN describes,
 // not silently drop it.
@@ -91,6 +109,29 @@ bool hk_artifact_ledger_append(hk_artifact_ledger_t *ledger,
                                const hk_artifact_t *artifact);
 
 size_t hk_artifact_ledger_count(const hk_artifact_ledger_t *ledger);
+
+// Appends a value-copy of every record in `source`.
+bool hk_artifact_ledger_append_ledger(hk_artifact_ledger_t *ledger,
+                                      const hk_artifact_ledger_t *source);
+
+// Marks the artifacts emitted by one verified commit. The range is bounded
+// by the caller's pre/post counts, so no artifact from another hook can be
+// promoted accidentally. No allocation occurs; false means invalid input.
+bool hk_artifact_ledger_mark_verified(hk_artifact_ledger_t *ledger,
+                                      size_t start,
+                                      size_t count);
+
+// Marks a committed range as compensated after the engine restored the
+// affected targets. Like verification, this is an in-place state transition
+// on the mutable commit ledger; snapshots retain the state captured at copy.
+bool hk_artifact_ledger_mark_compensated(hk_artifact_ledger_t *ledger,
+                                         size_t start,
+                                         size_t count);
+
+// Process-wide accumulation. The process ledger intentionally lives until
+// process exit; its public read side is an immutable snapshot.
+bool hk_artifact_process_append_ledger(const hk_artifact_ledger_t *source);
+hk_status_t hk_artifact_process_snapshot(hk_artifact_snapshot_t **out_snapshot);
 
 // Deep-copies the ledger's current contents into a fresh immutable
 // snapshot (spec section 7.5). The snapshot is independent of the ledger:

@@ -10,7 +10,14 @@ static hk_engine_capabilities_t inline_describe(void) {
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-terminal";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
-    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                         HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.certified_architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                                   HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.minimum_ios_version = HK_ENGINE_IOS_VERSION(15, 0, 0);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT |
+                            HK_REACH_EXACT_IMAGE_SCOPE;
+    caps.exact_image_scope_targets = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     // NONE only, and this is the engine's defining limit rather than a
     // conservative guess: it overwrites the prologue outright, so there is no
     // predecessor to hand back and no continuation to call. Declaring it here
@@ -132,15 +139,36 @@ static hk_mutation_state_t inline_commit_one_ctx(void *engine_ctx,
                             ctx->write, ctx->write_ctx, sink);
 }
 
+static hk_verify_result_t inline_verify_one_ctx(void *engine_ctx,
+                                                const hk_hook_spec_t *spec,
+                                                void *prepared,
+                                                hk_verify_diag_t *out_diag) {
+    (void)engine_ctx;
+    (void)spec;
+    if (!prepared) {
+        out_diag->error_message = "inline verification received no prepared plan";
+        return HK_VERIFY_FAILED;
+    }
+    const hk_inline_plan_t *plan = prepared;
+    if (memcmp((const void *)plan->address, plan->patch, plan->size) != 0) {
+        out_diag->error_message = "inline patch readback does not match the emitted branch";
+        return HK_VERIFY_FAILED;
+    }
+    return HK_VERIFY_OK;
+}
+
 static void inline_release_prepared(void *engine_ctx, void *prepared) {
     (void)engine_ctx;
     free(prepared);
 }
 
 static const hk_engine_vtable_t g_inline_vtable = {
+    .abi_version = HK_ENGINE_VTABLE_ABI_VERSION_1,
+    .struct_size = sizeof(hk_engine_vtable_t),
     .describe = inline_describe,
     .prepare_one_ctx_status = inline_prepare_one_ctx_status,
     .commit_one_ctx = inline_commit_one_ctx,
+    .verify_one_ctx = inline_verify_one_ctx,
     .release_prepared = inline_release_prepared,
 };
 

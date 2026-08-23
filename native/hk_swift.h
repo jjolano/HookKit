@@ -46,11 +46,11 @@ typedef struct objc_class *Class;
 #pragma mark - Offsets and flags (Swift 5 ABI, 64-bit, ObjC-interop classes)
 
 // TargetAnyClassMetadataObjCInterop: isa +0x00, superclass +0x08,
-// cacheData[2] +0x10, Data +0x20 -- Metadata.h:826-835
-// ("the compiler sets the low bit in order to indicate that this is a Swift
-//  metatype" -- the bit is SWIFT_CLASS_IS_SWIFT_MASK, = 1 on Swift 5 runtimes).
+// cacheData[2] +0x10, Data +0x20 -- Metadata.h. On Apple's stable Swift ABI,
+// SWIFT_CLASS_IS_SWIFT_MASK is bit 1 (0x2); bit 0 is the old pre-stable ABI
+// marker and must not classify a class as Swift.
 #define HK_SWIFT_METADATA_DATA_OFFSET          0x20
-#define HK_SWIFT_METADATA_IS_SWIFT_BIT         0x1
+#define HK_SWIFT_METADATA_IS_SWIFT_BIT         0x2
 
 // TargetClassMetadata: Flags +0x28 ... ClassSize +0x38,
 // ClassAddressPoint +0x3C (Metadata.h:912), Description +0x40
@@ -137,6 +137,7 @@ typedef struct objc_class *Class;
 #define HK_SWIFT_ERR_ARG                  (-10)   // null/invalid argument
 #define HK_SWIFT_ERR_WRITE                (-11)   // slot write failed (hk_native_patch_memory)
 #define HK_SWIFT_ERR_UNREADABLE           (-12)   // class/descriptor/vtable range not mapped readable
+#define HK_SWIFT_ERR_STALE                (-13)   // slot changed after preparation
 
 #pragma mark - swift_demangle (resolved by the framework layer)
 
@@ -147,8 +148,8 @@ typedef struct objc_class *Class;
 // free()s); NULL when the input is not a mangled name.
 typedef char *(*hk_swift_demangle_fn)(const char *, size_t, char *, size_t *, uint32_t);
 
-// Owned by HKSubstitutor.m (resolved once by swift_available); the engine
-// reads it for name-based lookup. NULL means only exact mangled names match.
+// Owned by HKSwiftEngine.c; the compatibility facade resolves it lazily for
+// name-based lookup. NULL means only exact mangled names match.
 HK_INTERNAL extern hk_swift_demangle_fn hk_swift_demangle;
 
 #pragma mark - API
@@ -180,7 +181,7 @@ HK_INTERNAL bool hk_swift_hook_vtable_slot(Class cls, uint32_t index, void *repl
 //
 // Validation, fail closed and in order, BEFORE any write:
 //   1. cls/replacement non-null                      -> ARG
-//   2. metadata Data bit0 set (Swift class)          -> NOT_SWIFT
+//   2. metadata Data bit1 set (Swift class)          -> NOT_SWIFT
 //   3. Description non-null (not artificial/KVO)     -> NOT_SWIFT
 //   4. strip Description (process_independent_data)  -> descriptor
 //   5. descriptor kind == Class                      -> NOT_CLASS_DESCRIPTOR
@@ -198,6 +199,21 @@ HK_INTERNAL bool hk_swift_hook_vtable_slot(Class cls, uint32_t index, void *repl
 // Not gated on hk_swift_supported(): the two entry points above check it, and
 // this core is hidden so nothing else can reach it on unsupported archs.
 HK_INTERNAL bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out_orig);
+
+// Two-phase slot primitive used by the 3.0 Swift request surface. Preparation
+// resolves and validates the slot without writing; commit revalidates the
+// captured value immediately before the atomic pointer store.
+typedef struct {
+    void **slot;
+    void *original;
+    uintptr_t discriminator;
+    bool prepared;
+} hk_swift_slot_plan_t;
+
+HK_INTERNAL bool hk_swift_prepare_slot(Class cls, uint32_t index,
+                                       hk_swift_slot_plan_t *out_plan);
+HK_INTERNAL bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
+                                      void *replacement, void **out_orig);
 
 // Name resolution used by hk_swift_hook_method, exposed for the host-side
 // test. Same matching rules and uniqueness requirement; on success

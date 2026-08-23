@@ -5,6 +5,10 @@
 
 #include <string.h>
 
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
+#include "../../native/hk_native.h"
+#endif
+
 typedef hk_symbol_candidates_t candidates_t;
 
 // At most two candidates: the name as given, then the underscore-prefixed
@@ -247,4 +251,42 @@ hk_resolve_status_t hk_symbol_sources_from_loaded_image(const void *header,
         return HK_RESOLVE_MALFORMED_IMAGE;
     }
     return HK_RESOLVE_OK;
+}
+
+hk_resolve_status_t hk_resolve_loaded_image_symbol(
+    const void *header, size_t header_region_size, uintptr_t slide,
+    const char *name, hk_symbol_name_convention_t convention,
+    hk_symbol_visibility_t visibility, hk_symbol_resolution_t *out_resolution) {
+    if(!header || !name || !out_resolution) {
+        return HK_RESOLVE_INVALID_ARGUMENT;
+    }
+
+    hk_symbol_sources_t sources;
+    hk_resolve_status_t status = hk_symbol_sources_from_loaded_image(
+        header, header_region_size, slide, &sources);
+    if(status != HK_RESOLVE_OK) {
+        return status;
+    }
+
+    status = hk_resolve_symbol(&sources, name, convention, visibility,
+                               out_resolution);
+    if(status != HK_RESOLVE_NOT_FOUND ||
+       visibility == HK_SYMBOL_VISIBILITY_EXPORTED_ONLY ||
+       convention == HK_SYMBOL_NAME_MACHO_EXACT) {
+        return status;
+    }
+
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
+    uint64_t raw_value = 0;
+    void *address = hk_native_find_loaded_cache_symbol(
+        header, (intptr_t)slide, name, &raw_value);
+    if(address) {
+        memset(out_resolution, 0, sizeof(*out_resolution));
+        out_resolution->address = (uintptr_t)address;
+        out_resolution->source = HK_RESOLVE_SOURCE_SYMBOL_TABLE;
+        out_resolution->raw_value = raw_value;
+        return HK_RESOLVE_OK;
+    }
+#endif
+    return status;
 }

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "../../Sources/Engines/HKMemoryVtable.h"
@@ -253,10 +254,13 @@ static void test_base_image_is_enforced_for_relative_targets(void) {
 }
 
 int main(void) {
-    test_absolute_patch_full_lifecycle();
-    test_image_relative_patch();
-    test_precondition_failure_surfaces_at_prepare();
-    test_base_image_is_enforced_for_relative_targets();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_absolute_patch_full_lifecycle);
+    RUN_TEST(test_image_relative_patch);
+    RUN_TEST(test_precondition_failure_surfaces_at_prepare);
+    RUN_TEST(test_base_image_is_enforced_for_relative_targets);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all memory wired tests passed\n");
     return 0;
 }

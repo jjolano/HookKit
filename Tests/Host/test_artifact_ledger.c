@@ -137,6 +137,45 @@ static void test_growth_many(void) {
     printf("  growth-many: PASS\n");
 }
 
+static void test_pointer_views_are_owned(void) {
+    char engine[] = "temporary-engine";
+    char mechanism[] = "temporary-mechanism";
+    char path[] = "/temporary/image";
+    uint8_t bytes[] = {1, 2, 3, 4};
+    hk_artifact_t a = make_marked_artifact(77);
+    a.engine_id.data = engine;
+    a.engine_id.length = strlen(engine);
+    a.mechanism_id.data = mechanism;
+    a.mechanism_id.length = strlen(mechanism);
+    a.image.path = path;
+    a.original_bytes.representation = HK_BYTE_STORAGE_INLINE;
+    a.original_bytes.inline_bytes.data = bytes;
+    a.original_bytes.inline_bytes.size = sizeof(bytes);
+    a.original_bytes.length = sizeof(bytes);
+
+    hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+    assert(ledger && hk_artifact_ledger_append(ledger, &a));
+    strcpy(engine, "changed");
+    strcpy(mechanism, "changed");
+    strcpy(path, "/changed");
+    memset(bytes, 9, sizeof(bytes));
+
+    hk_artifact_snapshot_t *snapshot = NULL;
+    assert(hk_artifact_snapshot_from_ledger(ledger, &snapshot) == HK_STATUS_OK);
+    hk_artifact_t out;
+    assert(hk_artifact_snapshot_copy_at(snapshot, 0, &out) == HK_STATUS_OK);
+    assert(out.engine_id.length == strlen("temporary-engine"));
+    assert(memcmp(out.engine_id.data, "temporary-engine", out.engine_id.length) == 0);
+    assert(memcmp(out.mechanism_id.data, "temporary-mechanism", out.mechanism_id.length) == 0);
+    assert(strcmp(out.image.path, "/temporary/image") == 0);
+    assert(out.original_bytes.inline_bytes.size == sizeof(bytes));
+    assert(memcmp(out.original_bytes.inline_bytes.data, (uint8_t[]){1, 2, 3, 4}, sizeof(bytes)) == 0);
+
+    hk_artifact_snapshot_release(snapshot);
+    hk_artifact_ledger_destroy(ledger);
+    printf("  pointer-views-are-owned: PASS\n");
+}
+
 static void test_copy_at_out_of_range_leaves_out_untouched(void) {
     hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
     assert(ledger != NULL);
@@ -217,6 +256,7 @@ int main(void) {
     test_append_and_snapshot();
     test_snapshot_independent_of_later_appends();
     test_growth_many();
+    test_pointer_views_are_owned();
     test_copy_at_out_of_range_leaves_out_untouched();
     test_null_tolerance();
     test_report_copy_artifacts_empty();

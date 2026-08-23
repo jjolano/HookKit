@@ -130,6 +130,14 @@ hk_resolve_status_t hk_symbol_sources_from_loaded_image(const void *header,
                                                         uintptr_t slide,
                                                         hk_symbol_sources_t *out_sources);
 
+// Resolves from a loaded image's normal Mach-O sources and, on Apple devices,
+// its exact dyld shared-cache local-symbol range. The latter is needed because
+// cache private symbols live outside the mapped image's LC_SYMTAB payload.
+hk_resolve_status_t hk_resolve_loaded_image_symbol(
+    const void *header, size_t header_region_size, uintptr_t slide,
+    const char *name, hk_symbol_name_convention_t convention,
+    hk_symbol_visibility_t visibility, hk_symbol_resolution_t *out_resolution);
+
 // Resolves `name` under `convention` and `visibility`, per the preference
 // rules documented at the top of this file. Returns HK_RESOLVE_UNSUPPORTED if
 // the match is a re-export (it names another dylib rather than carrying an

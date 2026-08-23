@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
-#include "../../Headers/HookKit/HookKitLegacy.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 
 static void make_plan(hk_runtime_t **rt, hk_plan_t **plan) {
@@ -187,24 +186,54 @@ static void test_swift_target_kind_rejected(void) {
     printf("  swift-target-kind-rejected: PASS\n");
 }
 
-static void test_explicit_set_image_selector_rejected(void) {
+static void test_explicit_set_image_selector_deep_copied(void) {
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     make_plan(&rt, &plan);
+
+    char first_path[] = "/usr/lib/first.dylib";
+    char second_path[] = "/usr/lib/second.dylib";
+    hk_image_selector_t first;
+    hk_image_selector_t second;
+    memset(&first, 0, sizeof(first));
+    memset(&second, 0, sizeof(second));
+    first.struct_size = sizeof(first);
+    first.struct_version = HK_ABI_VERSION_3_0;
+    first.kind = HK_IMAGE_EXACT_PATH;
+    first.path = first_path;
+    second.struct_size = sizeof(second);
+    second.struct_version = HK_ABI_VERSION_3_0;
+    second.kind = HK_IMAGE_EXACT_PATH;
+    second.path = second_path;
+    const hk_image_selector_t *children[] = {&first, &second};
 
     hk_hook_spec_t spec = base_spec("hook.explicitset", HK_TARGET_FUNCTION_SYMBOL);
     spec.target.symbol.struct_size = sizeof(spec.target.symbol);
     spec.target.symbol.struct_version = HK_ABI_VERSION_3_0;
     spec.target.symbol.name = "foo";
-    spec.target.symbol.defining_image.kind = HK_IMAGE_EXPLICIT_SET;  // not implemented
+    spec.target.symbol.defining_image.struct_size = sizeof(hk_image_selector_t);
+    spec.target.symbol.defining_image.struct_version = HK_ABI_VERSION_3_0;
+    spec.target.symbol.defining_image.kind = HK_IMAGE_EXPLICIT_SET;
+    spec.target.symbol.defining_image.explicit_set = children;
+    spec.target.symbol.defining_image.explicit_set_count = 2;
 
     hk_hook_t *hook = NULL;
-    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_UNAVAILABLE);
-    assert(hook == NULL);
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hook != NULL);
+
+    memset(first_path, 'X', strlen(first_path));
+    memset(second_path, 'Y', strlen(second_path));
+    const hk_image_selector_t *const *copied =
+        hook->spec.target.symbol.defining_image.explicit_set;
+    assert(hook->spec.target.symbol.defining_image.explicit_set_count == 2);
+    assert(copied != children);
+    assert(copied[0] != &first && copied[1] != &second);
+    assert(strcmp(copied[0]->path, "/usr/lib/first.dylib") == 0);
+    assert(strcmp(copied[1]->path, "/usr/lib/second.dylib") == 0);
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
-    printf("  explicit-set-image-selector-rejected: PASS\n");
+    printf("  explicit-set-image-selector-deep-copied: PASS\n");
 }
 
 static void test_duplicate_hook_id_rejected(void) {
@@ -421,37 +450,22 @@ static void test_memory_target_requires_a_precondition(void) {
     assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_INVALID_ARGUMENT);
     assert(hook == NULL);
 
-    // The legacy door permits exactly this, because 2.x's hookMemory: has no
-    // parameter for it and never did.
-    assert(hk_plan_add_hook_legacy(plan, &spec, &hook) == HK_STATUS_OK);
-    assert(hook != NULL);
-
-    // ...and it relaxes ONLY that rule: everything else still applies, so a
-    // contradictory original/continuation pair is refused through both doors.
-    hk_hook_spec_t bad = spec;
-    bad.stable_hook_id = "hook.memory.contradictory";
-    bad.original_requirement = HK_ORIGINAL_CALLABLE_CONTINUATION;
-    bad.continuation_policy = HK_CONTINUATION_FORBIDDEN;
-    hk_hook_t *h2 = NULL;
-    assert(hk_plan_add_hook_legacy(plan, &bad, &h2) == HK_STATUS_INVALID_ARGUMENT);
-    assert(hk_plan_add_hook(plan, &bad, &h2) == HK_STATUS_INVALID_ARGUMENT);
-
-    // And a target that DOES state its precondition needs no special door.
+    // A target that states its precondition is accepted.
     static const uint8_t expected[] = {0x11, 0x22, 0x33, 0x44};
     hk_hook_spec_t ok = spec;
     ok.stable_hook_id = "hook.memory.stated";
     ok.target.memory.expected_bytes.data = expected;
     ok.target.memory.expected_bytes.size = sizeof(expected);
-    hk_hook_t *h3 = NULL;
-    assert(hk_plan_add_hook(plan, &ok, &h3) == HK_STATUS_OK);
+    hk_hook_t *stated_hook = NULL;
+    assert(hk_plan_add_hook(plan, &ok, &stated_hook) == HK_STATUS_OK);
 
     // The rule is memory-specific: other target kinds are untouched by it.
     hk_hook_spec_t addr = base_spec("hook.addr", HK_TARGET_FUNCTION_ADDRESS);
     addr.target.address.struct_size = sizeof(addr.target.address);
     addr.target.address.struct_version = HK_ABI_VERSION_3_0;
     addr.target.address.address = 0x4000;
-    hk_hook_t *h4 = NULL;
-    assert(hk_plan_add_hook(plan, &addr, &h4) == HK_STATUS_OK);
+    hk_hook_t *address_hook = NULL;
+    assert(hk_plan_add_hook(plan, &addr, &address_hook) == HK_STATUS_OK);
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
@@ -465,7 +479,7 @@ int main(void) {
     test_memory_target_bytes_deep_copied();
     test_memory_target_non_relative_base_image_zeroed();
     test_swift_target_kind_rejected();
-    test_explicit_set_image_selector_rejected();
+    test_explicit_set_image_selector_deep_copied();
     test_duplicate_hook_id_rejected();
     test_contradictory_original_continuation_rejected();
     test_foreign_domain_rejected();

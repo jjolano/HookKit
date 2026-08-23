@@ -12,18 +12,14 @@
 #include "../../Headers/HookKit/HookKitResults.h"
 #include "HKArtifactLedger.h"
 
-// A flat snapshot of hk_hook_result_t values -- not pointers back into
-// live hk_hook_t objects. hk_hook_result_t itself owns no heap allocations
-// (its hk_string_view_t fields are views, not owned strings -- none of
-// them are populated yet; see HKPlan.c's analyze for the real gap this
-// leaves), so a plain array of value copies is sufficient today. The day
-// a result carries an owned diagnostic string, this struct is where that
-// ownership needs to move to.
+// A flat snapshot of hk_hook_result_t values -- not pointers back into live
+// hk_hook_t objects. hk_hook_result_t owns no heap allocations: its string
+// views point at static engine diagnostics, and continuation data is carried
+// by value. A plain array of value copies is therefore sufficient today.
 //
 // `artifacts` is the report's owned artifact ledger (spec section 7). It is
-// created empty with the report and stays empty until the commit path is
-// wired to populate it (Commit 2 of Milestone 4's artifact-ledger work) --
-// analyze/prepare reports legitimately carry an empty ledger forever, since
+// created empty with the report and is replaced by the populated commit
+// ledger. Analyze/prepare reports legitimately carry an empty ledger, since
 // those phases make no mutations to produce artifacts from.
 struct hk_report {
     hk_id_t report_id;

@@ -1,0 +1,43 @@
+{
+  "provider_family": "gum",
+  "version": "17.17.0+hookkit-hkgum-wrapper-2026-08-10",
+  "commit": "ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c",
+  "sha256": "1dcebab60a853262b14160e8c6a2cd404400bc3f1a46567b8e8907b22d8a5217",
+  "exported_abi": ["hkgum_begin_transaction", "hkgum_end_transaction"],
+  "architecture": "arm64",
+  "os_lane": "rootless",
+  "load_path": "/var/jb/usr/lib/HKGum.dylib",
+  "discovery_method": "dlopen_preflight",
+  "activation_behavior": {
+    "requires_provider_activation": true,
+    "requires_provider_image_load": true,
+    "constructor_behavior": "unbounded_or_unknown",
+    "thread_behavior": "none",
+    "callback_behavior": "none",
+    "executable_allocation_behavior": "dynamic"
+  },
+  "continuation_kind": "dynamic",
+  "continuation_inspectable": false,
+  "original_publication_order": "before_activation",
+  "mutation_failure_semantics": "may_partially_mutate",
+  "verification_capability": "self_reported_only",
+  "device_test_results": [
+    {
+      "test_id": "provider-gum-raw-smoke",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-21-device-provider3-arm64",
+      "date": "2026-08-21"
+    },
+    {
+      "test_id": "hk3-provider-gum-lifecycle",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-22-device-provider-lifecycle3-arm64",
+      "date": "2026-08-22"
+    }
+  ],
+  "certification_status": "device_certified"
+}

@@ -15,6 +15,7 @@
 
 #include "fake_objc_runtime.h"
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "../../Sources/Engines/HKObjCVtable.h"
@@ -74,6 +75,9 @@ static void test_local_method_full_lifecycle(void) {
     assert(hook->matched_engine == hk_objc_vtable());  // routed on the ObjC target kind
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hook->result.continuation.kind ==
+           HK_CONTINUATION_KIND_DIRECT_PREDECESSOR);
+    assert(hook->result.continuation.address == (uintptr_t)imp_child_bar);
     // Prepare mutated nothing: the method still holds its original IMP and the
     // runtime saw no replace at all.
     assert(imp_on(&w.child, "bar") == (void *)imp_child_bar);
@@ -511,6 +515,76 @@ static void test_absent_required_target_still_fails(void) {
     printf("  absent-required-target-still-fails: PASS\n");
 }
 
+static void test_deferred_target_survives_plan_and_retries(void) {
+    world_t w; world_init(&w);
+    hk_objc_engine_ctx_t ectx = engine_ctx_for(&w.rt);
+
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_objc_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t spec = objc_spec("hook.deferred", &w.child, "late",
+                                    HK_OBJC_INSTANCE_METHOD,
+                                    HK_OBJC_LOCAL_METHOD_ONLY,
+                                    (void *)imp_replacement);
+    // The target-specific field is authoritative; leave the mirrored
+    // spec-level field at its helper default to catch routing the decision
+    // through the wrong copy.
+    spec.target.objc.availability = HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE;
+
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_PENDING);
+    assert(hk_plan_state(plan) == HK_PLAN_PREPARED);
+    hk_id_t plan_id = hook->result.plan_id;
+    hk_id_t request_id = hook->hook_id;
+
+    hk_plan_release(plan);
+    assert(rt->pending_count == 1);
+
+    hk_report_t *pending_report = NULL;
+    assert(hk_runtime_drain_pending(rt, &pending_report) == HK_STATUS_OK);
+    assert(pending_report != NULL);
+    assert(pending_report->result_count == 1);
+    assert(pending_report->results[0].outcome == HK_OUTCOME_PENDING);
+    assert(rt->pending_count == 1);
+    assert(w.rt.replace_calls == 0);
+    hk_report_release(pending_report);
+
+    assert(w.child.count < 8);
+    w.child.methods[w.child.count].sel = (const char *)intern_sel("late");
+    w.child.methods[w.child.count].imp = (void *)imp_child_bar;
+    w.child.methods[w.child.count].types = "v@:";
+    w.child.count++;
+
+    hk_report_t *active_report = NULL;
+    assert(hk_runtime_drain_pending(rt, &active_report) == HK_STATUS_OK);
+    assert(active_report != NULL);
+    assert(active_report->result_count == 1);
+    assert(active_report->results[0].outcome == HK_OUTCOME_ACTIVE);
+    assert(active_report->results[0].mutation == HK_MUTATION_COMPLETE);
+    assert(rt->pending_count == 0);
+    assert(imp_on(&w.child, "late") == (void *)imp_replacement);
+    assert(w.rt.replace_calls == 1);
+
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(active_report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 1);
+    hk_artifact_t artifact;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &artifact) == HK_STATUS_OK);
+    assert(artifact.plan_id.high == plan_id.high && artifact.plan_id.low == plan_id.low);
+    assert(artifact.request_id.high == request_id.high && artifact.request_id.low == request_id.low);
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(active_report);
+    hk_runtime_release(rt);
+    printf("  deferred-target-survives-plan-and-retries: PASS\n");
+}
+
 // Distinct refusals now reach the result with distinct reasons, instead of
 // every one reading as an undifferentiated "prepare failed".
 static void test_refusals_carry_distinct_diagnostics(void) {
@@ -557,17 +631,21 @@ static void test_refusals_carry_distinct_diagnostics(void) {
 }
 
 int main(void) {
-    test_local_method_full_lifecycle();
-    test_class_method_through_the_lifecycle();
-    test_inherited_override_reports_irreversible();
-    test_unresolvable_target_fails_at_prepare();
-    test_two_runtimes_with_different_contexts();
-    test_prepared_state_released_without_commit();
-    test_second_prepare_is_refused_by_state();
-    test_failed_preparation_retains_no_state();
-    test_absent_optional_target_does_not_fail_the_plan();
-    test_absent_required_target_still_fails();
-    test_refusals_carry_distinct_diagnostics();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_local_method_full_lifecycle);
+    RUN_TEST(test_class_method_through_the_lifecycle);
+    RUN_TEST(test_inherited_override_reports_irreversible);
+    RUN_TEST(test_unresolvable_target_fails_at_prepare);
+    RUN_TEST(test_two_runtimes_with_different_contexts);
+    RUN_TEST(test_prepared_state_released_without_commit);
+    RUN_TEST(test_second_prepare_is_refused_by_state);
+    RUN_TEST(test_failed_preparation_retains_no_state);
+    RUN_TEST(test_absent_optional_target_does_not_fail_the_plan);
+    RUN_TEST(test_absent_required_target_still_fails);
+    RUN_TEST(test_deferred_target_survives_plan_and_retries);
+    RUN_TEST(test_refusals_carry_distinct_diagnostics);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all objc wired tests passed\n");
     return 0;
 }

@@ -103,7 +103,7 @@ typedef struct {
 //     trie, fall back to the symbol table, or go straight to the symbol table
 //     because private symbols are explicitly acceptable. That is a
 //     resolver-selection decision belonging to the layer above both
-//     resolvers, which is not written yet. Within a symbol-table search on
+//     resolvers. Within a symbol-table search on
 //     its own there is genuinely nothing for the two to differ about: the
 //     symbol table is a private-symbol source by nature.
 //   - Name matching: HK_SYMBOL_NAME_MACHO_EXACT compares the table string

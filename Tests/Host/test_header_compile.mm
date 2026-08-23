@@ -25,13 +25,11 @@ static_assert(HK_MEMORY_KIND_DATA == 1, "hk_memory_target_kind_t numeric values 
 static_assert(HK_IMAGE_EXPLICIT_SET == 5, "hk_image_selector_kind_t numeric values are part of the ABI");
 static_assert(HK_ARTIFACT_FILE_MAPPING == 15, "hk_artifact_kind_t numeric values are part of the ABI");
 
-// hk_report_copy_artifacts() etc. are declared but not implemented yet
-// (Milestone 4). Taking their address into a correctly-typed function
-// pointer proves the declarations themselves are well-formed C++ (no
-// implicit-int, no incomplete-type-by-value) without needing to link
-// against an implementation.
+// Taking their addresses into correctly-typed function pointers proves the
+// declarations and the implemented snapshot ABI are well-formed C++.
 static hk_status_t (*const g_copy_artifacts_fn)(const hk_report_t *, hk_artifact_snapshot_t **) = &hk_report_copy_artifacts;
 static void (*const g_release_snapshot_fn)(hk_artifact_snapshot_t *) = &hk_artifact_snapshot_release;
+static hk_status_t (*const g_find_symbol_fn)(hk_runtime_t *, const char *, const char *, void **) = &hk_runtime_find_symbol;
 
 static hk_memory_target_t make_sample_memory_target() {
     hk_memory_target_t target;
@@ -124,7 +122,8 @@ int main() {
     if (target.address != 0x1000 || sel == nullptr) {
         return 1;
     }
-    if (g_copy_artifacts_fn == nullptr || g_release_snapshot_fn == nullptr) {
+    if (g_copy_artifacts_fn == nullptr || g_release_snapshot_fn == nullptr ||
+        g_find_symbol_fn == nullptr) {
         return 1;
     }
     return 0;

@@ -20,8 +20,7 @@
 //     design goes out of its way to avoid.
 //   - Class/SEL are carried as `void *` here, not `Class`/`SEL`, to keep
 //     this header importable from plain C without <objc/runtime.h>.
-//     HookKitObjC.h (not yet written) is where a typed convenience wrapper
-//     belongs.
+//     HookKitObjC.h is where the typed convenience wrapper belongs.
 //   - Memory targets use an explicit `address_is_image_relative` bool
 //     rather than overloading an image-selector value to mean "absolute
 //     address" -- the whole spec's "no hidden fallback" principle applied
@@ -177,9 +176,7 @@ typedef struct {
     hk_image_selector_t base_image;  // meaningful only when address_is_image_relative
 
     hk_bytes_view_t replacement_bytes;
-    hk_bytes_view_t expected_bytes;  // required for a new-API request (spec 6.19); a
-                                      // legacy-compat-only path may capture these at
-                                      // preparation instead -- see HookKitLegacy.h (pending)
+    hk_bytes_view_t expected_bytes;  // required for every memory-patch request (spec 6.19)
     hk_bytes_view_t expected_mask;
     size_t size;
 

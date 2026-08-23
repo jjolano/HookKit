@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKReportInternal.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "../../Sources/Engines/HKInlineVtable.h"
@@ -114,6 +115,15 @@ static void test_full_lifecycle_installs_and_reports(void) {
     assert(hook->matched_engine == hk_reloc_inline_vtable());
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hook->result.declared_prepare_effects == HK_EFFECT_EXECUTABLE_ALLOCATION);
+    assert(hook->result.observed_prepare_effects == HK_EFFECT_EXECUTABLE_ALLOCATION);
+    assert(hook->has_prepared_continuation);
+    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC);
+    assert(hook->result.continuation.address == hook->prepared_continuation.address);
+    assert(hook->result.continuation.mapping_id.high ==
+               hook->prepared_continuation.mapping_id.high &&
+           hook->result.continuation.mapping_id.low ==
+               hook->prepared_continuation.mapping_id.low);
     // The trampoline exists BEFORE anything branches anywhere -- invariant #5,
     // and the reason the page is built at prepare rather than at commit.
     assert(s.alloc_calls == 1 && s.seal_calls == 1);
@@ -123,6 +133,11 @@ static void test_full_lifecycle_installs_and_reports(void) {
     hk_report_t *report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC);
+    assert(hook->result.continuation.address != 0);
+    assert(hook->result.continuation.mapping_id.high != 0 ||
+           hook->result.continuation.mapping_id.low != 0);
+    assert(hook->result.continuation.executable_memory_allocated);
     assert(fn[0] != A64_NOP);      // entry patched
     assert(fn[4] == A64_RET);      // nothing past the window moved
 
@@ -134,6 +149,8 @@ static void test_full_lifecycle_installs_and_reports(void) {
     assert(hk_artifact_snapshot_copy_at(snap, 0, &t) == HK_STATUS_OK);
     assert(hk_artifact_snapshot_copy_at(snap, 1, &a) == HK_STATUS_OK);
     assert(t.kind == HK_ARTIFACT_TRAMPOLINE && !t.mechanically_reversible);
+    assert(t.mapping.mapping_id.high == hook->result.continuation.mapping_id.high &&
+           t.mapping.mapping_id.low == hook->result.continuation.mapping_id.low);
     assert(a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH && a.mechanically_reversible);
     assert(a.request_id.high == hook->hook_id.high && a.request_id.low == hook->hook_id.low);
 
@@ -529,15 +546,18 @@ static void test_effect_and_forbid_layouts_are_not_conflated(void) {
 }
 
 int main(void) {
-    test_full_lifecycle_installs_and_reports();
-    test_both_inline_engines_coexist();
-    test_registration_order_is_a_cost_decision();
-    test_refusals_are_distinguishable();
-    test_image_scope_is_checked_before_allocating();
-    test_pinned_prologue_reaches_the_engine();
-    test_forbidding_executable_allocation_routes_to_terminal();
-    test_continuation_policy_forbids_allocation_too();
-    test_effect_and_forbid_layouts_are_not_conflated();
+    #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
+    RUN_TEST(test_full_lifecycle_installs_and_reports);
+    RUN_TEST(test_both_inline_engines_coexist);
+    RUN_TEST(test_registration_order_is_a_cost_decision);
+    RUN_TEST(test_refusals_are_distinguishable);
+    RUN_TEST(test_image_scope_is_checked_before_allocating);
+    RUN_TEST(test_pinned_prologue_reaches_the_engine);
+    RUN_TEST(test_forbidding_executable_allocation_routes_to_terminal);
+    RUN_TEST(test_continuation_policy_forbids_allocation_too);
+    RUN_TEST(test_effect_and_forbid_layouts_are_not_conflated);
+    #undef RUN_TEST
+    hk_ownership_reset_for_testing();
     printf("all relocating inline wired tests passed\n");
     return 0;
 }

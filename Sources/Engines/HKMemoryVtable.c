@@ -32,7 +32,14 @@ static hk_engine_capabilities_t memory_describe(void) {
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "memory";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
-    caps.achievable_reach = HK_REACH_EXACT_MEMORY;
+    caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                         HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.certified_architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                                   HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.minimum_ios_version = HK_ENGINE_IOS_VERSION(15, 0, 0);
+    caps.achievable_reach = HK_REACH_EXACT_MEMORY |
+                            HK_REACH_EXACT_IMAGE_SCOPE;
+    caps.exact_image_scope_targets = HK_TARGET_KIND_BIT(HK_TARGET_MEMORY_PATCH);
     // A controlled byte patch. NOTE: the spec has no HK_FORBID_* bit for a
     // plain memory mutation, so a caller cannot forbid this one -- see
     // hk_effect_forbid_bit.
@@ -119,15 +126,39 @@ static hk_mutation_state_t memory_commit_one_ctx(void *engine_ctx,
                               ctx->write, ctx->write_ctx, sink);
 }
 
+static hk_verify_result_t memory_verify_one_ctx(void *engine_ctx,
+                                                const hk_hook_spec_t *spec,
+                                                void *prepared,
+                                                hk_verify_diag_t *out_diag) {
+    (void)engine_ctx;
+    if (!spec || !prepared ||
+        spec->target_kind != HK_TARGET_MEMORY_PATCH ||
+        !spec->target.memory.replacement_bytes.data) {
+        out_diag->error_message = "memory verification received an invalid prepared patch";
+        return HK_VERIFY_FAILED;
+    }
+    const prepared_patch_t *p = prepared;
+    if (memcmp((const void *)p->address,
+               spec->target.memory.replacement_bytes.data,
+               p->plan.size) != 0) {
+        out_diag->error_message = "memory patch readback does not match the replacement";
+        return HK_VERIFY_FAILED;
+    }
+    return HK_VERIFY_OK;
+}
+
 static void memory_release_prepared(void *engine_ctx, void *prepared) {
     (void)engine_ctx;
     free(prepared);
 }
 
 static const hk_engine_vtable_t g_memory_vtable = {
+    .abi_version = HK_ENGINE_VTABLE_ABI_VERSION_1,
+    .struct_size = sizeof(hk_engine_vtable_t),
     .describe = memory_describe,
     .prepare_one_ctx_status = memory_prepare_one_ctx_status,
     .commit_one_ctx = memory_commit_one_ctx,
+    .verify_one_ctx = memory_verify_one_ctx,
     .release_prepared = memory_release_prepared,
 };
 

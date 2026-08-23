@@ -1,7 +1,7 @@
 # HookKit 1.x Module API — Reverse-Dependency Audit
 
-Status: **in progress**, local evidence gathered, public-source search not
-yet done. Required by spec §2.3 before ABI freeze (Milestone 3). Governs the
+Status: **complete**, local and public-source evidence gathered. Required by
+spec §2.3 before ABI freeze (Milestone 3). Governs the
 policy stated in `LEGACY_ABI.md` and the `CompatibilityV1/` decision in
 `ARCHITECTURE.md`.
 
@@ -23,14 +23,20 @@ sibling repo under `/home/coder/projects/ios/`: `shadow`, `AltList`,
 `depictions/ios/me.jjolano.shadow.json`) — real "package metadata" per the
 spec's own audit-source list (§2.3: "public source repositories, package
 metadata, and known HookKit consumers"). Also confirmed current HookKit 2.x
-source (`Headers/`, `Backends/`, `Internal/`, `native/`) has zero references
+source has zero references
 to any of the six class names — the replacement described in `README.md`
 ("This replaces the v1 Modulous plugin-bundle architecture") is complete on
 the provider side already.
 
-**Not yet done**: search of public source repositories/package indices
-beyond what's checked out locally. Flagged as an open gap below rather than
-silently treated as covered.
+The public-source pass searched GitHub for the six v1 class names, Modulous,
+and the retained `HKSubstitutor` selectors. It found the current Shadow
+consumer using the retained facade, and an archived Enmity crash report whose
+loaded-image list includes both HookKit and Modulous, but no public source
+references to `HookKitCore`, `HookKitModule`, or the other five v1 module
+classes. The Enmity result is a binary/package dependency observation, not
+evidence that it uses the v1 module ABI. Sources: [Shadow's current
+consumer](https://github.com/jjolano/shadow/blob/master/Shadow.dylib/dylib.x),
+[Enmity's archived dependency report](https://github.com/enmity-mod/enmity/issues/82).
 
 ## Findings
 
@@ -60,14 +66,14 @@ silently treated as covered.
    `AltList`, `libSandy`, `hksmoke`, `coder-connect` have no matches at all.
 
 4. **Current HookKit 2.x source has already fully removed the v1 module
-   implementation** — confirmed by grep, zero matches for any of the six
-   class names anywhere in `Headers/`, `Backends/`, `Internal/`, `native/`.
+implementation** — confirmed by grep, zero matches for any of the six
+class names anywhere in the current source tree.
    There is nothing on the provider side left to accidentally keep binary
    compatibility with beyond the v1 `HKSubstitutor` subset, which is already
    what's shipped and tested (v1.0.1 tag present, `_OBJC_CLASS_$_HKSubstitutor`
    exported in every current build lane per the Milestone 0 baseline).
 
-## Trending conclusion (not yet final — public-source gap open)
+## Final conclusion
 
 **Preserve the v1 `HKSubstitutor` subset unconditionally** (already true
 today) and **do not preserve the full v1.x module ABI** — no real, shipped
@@ -77,10 +83,11 @@ reversed before ever reaching a release.
 
 This satisfies spec §2.3's exit condition ("if full module ABI is not
 preserved, state that clearly in migration documentation and retain
-installable HookKit 2.5 packages for those consumers") as a *provisional*
-recommendation. Final sign-off requires closing the public-source-search
-gap above before Milestone 3's ABI freeze — tracked in
-`IMPLEMENTATION_STATUS.md`.
+installable HookKit 2.5 packages for those consumers"). The archived Enmity
+binary observation reinforces retaining the installable 2.5 package; it does
+not justify inventing a v1 module ABI without source/API evidence, and the
+user decision recorded in the implementation ledger remains to leave
+Modulous out of HookKit 3.0.
 
 ## What HK3.0 does instead
 

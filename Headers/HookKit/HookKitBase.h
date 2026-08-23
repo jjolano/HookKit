@@ -2,10 +2,8 @@
 //
 // Pure C, no Foundation, no Objective-C. Milestone 3 (ABI freeze candidate)
 // per docs/3.0/PUBLIC_C_ABI.md and docs/3.0/IMPLEMENTATION_STATUS.md.
-// Not yet wired into the built framework (HookKit_PUBLIC_HEADERS in the
-// Makefile still lists only the legacy Headers/HookKit.h) -- these compile
-// standalone and are exercised by Tests/Host/test_header_compile.* until
-// the legacy facade (Milestone 11) is ready to fold them in for real.
+// Packaged by canonical HookKit beneath <HookKit/>, alongside the retained
+// Objective-C compatibility facade at <HookKit.h>.
 
 #ifndef HOOKKIT3_BASE_H
 #define HOOKKIT3_BASE_H

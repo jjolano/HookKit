@@ -50,7 +50,15 @@ static inline hk_objc_target_t hk_objc_target_make(Class cls, SEL sel,
     memset(&t, 0, sizeof(t));
     t.struct_size = sizeof(t);
     t.struct_version = HK_ABI_VERSION_3_0;
+    #if defined(__has_feature)
+    #if __has_feature(objc_arc)
+    t.cls = (__bridge void *)cls;
+    #else
     t.cls = (void *)cls;
+    #endif
+    #else
+    t.cls = (void *)cls;
+    #endif
     t.sel = (void *)sel;
     t.method_kind = kind;
     t.inheritance_policy = HK_OBJC_LOCAL_METHOD_ONLY;

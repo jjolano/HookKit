@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Initial Shadow route-feasibility report (spec section 18.4), modeled
-capabilities only -- HookKit 3's actual engines don't exist as code yet
-(Milestones 4-10), so there is no real hk_engine_vtable_t to query. What
-this does instead, and states plainly in its own output rather than hiding
-it: a small, hand-authored, clearly-labeled classifier mapping each
+capabilities only. HookKit 3 now has real engines, but this retained M2
+baseline intentionally does not query runtime descriptors or provider
+certification. What it does instead, and states plainly in its own output
+rather than hiding it: a small, hand-authored, clearly-labeled classifier mapping each
 manifest target's (target_kind, required_reach) shape to what's already
 known and true about HookKit 2.x's working engines today
 (docs/3.0/ENGINE_CONTRACT.md's "what's already true of the 2.x code" notes),
@@ -122,14 +122,20 @@ def build_report(manifest):
     # 186 targets). Use the schema's "all" lane shorthand instead, and
     # switch to real per-lane entries the day classify_target actually
     # takes lane-specific input (Milestone 10 ProviderEvidence).
-    targets = [
-        {"stable_hook_id": t["stable_hook_id"], **classify_target(t)}
-        for t in manifest["targets"]
+    classified = [
+        (target, {"stable_hook_id": target["stable_hook_id"],
+                  **classify_target(target)})
+        for target in manifest["targets"]
     ]
+    targets = [route for _target, route in classified]
     lanes = [{"lane": "all", "targets": targets}]
 
     sample = targets
-    unclassified = sum(1 for t in sample if t["disposition"] == "needs_platform_decision")
+    unclassified = sum(
+        1 for target, route in classified
+        if target.get("role") == "mandatory"
+        and route["disposition"] == "needs_platform_decision"
+    )
 
     return {
         "report_version": "0.1.0-milestone2-modeled",
@@ -150,6 +156,14 @@ def render_markdown(report, manifest):
     by_engine = Counter(
         t["selected_route"]["engine_id"] for t in sample if t["selected_route"]
     )
+    unit_ids = {
+        target["stable_hook_id"] for target in manifest["targets"]
+        if "parent_install_unit" not in target
+    }
+    decomposed_units = {
+        target["parent_install_unit"] for target in manifest["targets"]
+        if target.get("parent_install_unit") in unit_ids
+    }
 
     lines = [
         "# Shadow Route Feasibility — Initial (Modeled) Pass",
@@ -157,10 +171,10 @@ def render_markdown(report, manifest):
         f"Generated {report['generated_at']} from manifest "
         f"`{report['manifest_version']}` ({len(manifest['targets'])} targets).",
         "",
-        "**Modeled, not measured**: HookKit 3's engines don't exist as code yet. "
-        "This classifies each target against what's already known and working in "
-        "HookKit 2.x (see `docs/3.0/ENGINE_CONTRACT.md`), not a real router "
-        "decision. Reported under a single lane-agnostic `\"all\"` entry (schema "
+        "**Historical model, not current routing evidence**: this retained M2 "
+        "baseline classifies each target against HookKit 2.x (see "
+        "`docs/3.0/ENGINE_CONTRACT.md`), not current HK3 descriptors or a real "
+        "router decision. Reported under a single lane-agnostic `\"all\"` entry (schema "
         "`shadow-route-report.schema.json`) rather than 4 duplicated copies of "
         "the same data — no real per-lane provider-availability data exists yet "
         "(Milestone 10) to make rootful-legacy/rootful-modern/rootless/roothide "
@@ -200,12 +214,12 @@ def render_markdown(report, manifest):
         "",
         "## Caveats (read before treating this as an ABI-freeze input)",
         "",
-        "- Manifest coverage is partial: 13/22 Shadow install units are decomposed "
-        "into individual targets as of this report; the rest are unit-level only "
-        "(see `docs/3.0/IMPLEMENTATION_STATUS.md`, Milestone 2).",
+        f"- Concrete children are associated with {len(decomposed_units)}/{len(unit_ids)} "
+        "Shadow install-unit records in this manifest; the aggregate unit rows "
+        "are retained as provenance alongside their source-extracted children.",
         "- \"Routable\" here means \"a HookKit 2.x engine already does this today\", "
-        "not \"a certified HK3 engine has been proven to do this\" — that's Milestone "
-        "6+'s job. Do not cite this report alone as satisfying the ABI-freeze gate "
+        "not \"a certified HK3 engine has been proven to do this\". Do not cite "
+        "this retained initial report alone as satisfying the ABI-freeze gate "
         "in spec section 18.5.",
     ]
     return "\n".join(lines) + "\n"

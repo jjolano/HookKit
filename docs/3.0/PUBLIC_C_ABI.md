@@ -547,10 +547,10 @@ typedef struct {
 } hk_runtime_config_t;
 ```
 
-With no executor supplied, late image events queue internally and the
-consumer drains them with `hk_runtime_drain_pending()`; a request requiring
-autonomous late application reports no route unless the caller-drained
-lifecycle actually satisfies it.
+The current deferred ObjC lifecycle is caller-driven: once its host observes
+the relevant class/load event, it calls `hk_runtime_drain_pending()`. No
+current engine claims future-image reach or registers an automatic callback,
+so `submit` is not used for automatic installation yet.
 
 ```c
 HK_INSTALL_CONTEXT_EARLY_PROCESS

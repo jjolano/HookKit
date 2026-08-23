@@ -86,6 +86,7 @@ fi
 for bin in "${bins[@]}"; do
 	case "$bin" in
 		*HKGum.dylib) check_binary "$bin" "$ALLOW_HKGUM" ;;
+		*HookKit.framework/HookKit) check_binary "$bin" "$ALLOW_HOOKKIT" ;;
 		*) check_binary "$bin" "$ALLOW_HOOKKIT" ;;
 	esac
 done

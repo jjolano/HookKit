@@ -48,6 +48,7 @@ extern "C" {
 #define HK_MH_CIGAM    0xcefaedfeu
 #define HK_FAT_MAGIC   0xcafebabeu
 #define HK_FAT_CIGAM   0xbebafecau
+#define HK_MH_EXECUTE  0x2u
 
 // Load command types used here; more can be added as resolvers need them.
 #define HK_LC_SYMTAB             0x02u

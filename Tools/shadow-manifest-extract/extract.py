@@ -7,15 +7,17 @@ Milestone 2). Two layers, both from real parsed source, neither fabricated:
 1. Install units: `kSHDWInstallUnits[]` in Shadow.framework/HookConfiguration.m
    — a genuine C array-of-structs the coordinator itself walks
    (HookCoordinator.m calls SHDWInstallUnits() to get it) — cross-referenced
-   against `kSHDWCoordinatorInstallers[]` in ShadowCore.dylib/dylib.x (spec
-   section 18.2's "Coordinator installer table") for the exact C function
-   implementing each unit. extraction_method: structured_table.
+   against `kSHDWCoordinatorInstallers[]` in the coordinator source (the
+   historical `ShadowCore.dylib/dylib.x`, or the current
+   `ShadowCore.dylib/shadowcore.x`) for the exact C function implementing
+   each unit. extraction_method: structured_table.
 
 2. Per-hook decomposition, best-effort: for every install function this
    script can locate and read, scans the body for direct
-   `[hooks hookFunction:TARGET withReplacement:R outOldPtr:O]` call sites —
-   HKSubstitutor's real function-hook API — and emits one child target per
-   call, linked via `parent_install_unit`. Resolves the common
+   `[receiver hookFunction:TARGET withReplacement:R outOldPtr:O]` call sites —
+   HKSubstitutor's real function-hook API, including local category-specific
+   receivers such as `rebindOnly` — and emits one child target per call,
+   linked via `parent_install_unit`. Resolves the common
    dlsym-then-hook pattern (`sym = [hooks findSymbolInImage:...
    symbolName:@"..."]; if(sym) [hooks hookFunction:sym ...]`) back to the
    real symbol name, using the NEAREST preceding assignment to the variable,
@@ -28,14 +30,15 @@ Milestone 2). Two layers, both from real parsed source, neither fabricated:
    than a compiler-grade parse — see the schema's own description of the
    confidence ordering between structured_table/static_ast/pattern_scan).
 
-What this does NOT do yet: units that delegate to `shdw_libc_install_group`
-(4 files sharing one big descriptor/switch in libc.x, not yet parsed),
-Logos `%hook`/`%init` blocks (7+ files confirmed to still use them), or
+What this does NOT do by default: Logos `%hook`/`%init` blocks (7+ files
+confirmed to still use them), or
 non-`hookFunction:` HKSubstitutor calls (`hookMessage:`, batching) yield
 zero pattern_scan children and stay unit-level, with an explicit note in
 that unit's known_compatibility_risks saying so — never silently implied
-as covered. Needs logos_preprocess.py / clang_ast_extract.py (not built) or
-a targeted structured-table parse of shdw_libc_install_group's own table.
+as covered. `--include-logos` adds the source-level Logos pass; the separate
+`logos_preprocess.py` / `clang_ast_extract.py` tools provide the stronger
+declaration check. Targeted structured-table parses cover libc groups and
+DeviceCheck's ABI-variant method descriptors.
 
 required_reach / original_requirement / commit_domain for install-unit rows
 are reasoned defaults derived from the real capability/phase enums (see the
@@ -55,6 +58,8 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
+
+from logos_preprocess import parse_file as parse_logos_file
 
 MANIFEST_VERSION = "0.2.0-milestone2-partial-decomposition"
 
@@ -247,7 +252,7 @@ def parse_install_units_from_text(raw: str, source_label: str = "<text>"):
 
 
 def parse_coordinator_installers_from_text(raw: str, source_label: str = "<text>"):
-    """Parses kSHDWCoordinatorInstallers[] (ShadowCore.dylib/dylib.x) -- the
+    """Parses kSHDWCoordinatorInstallers[] from the coordinator source -- the
     OTHER real structured table, explicitly named in spec section 18.2 as
     "Coordinator installer table". Its own source comment says it "must stay
     in SHDWInstallUnits() order" and its struct (SHDWHookInstaller,
@@ -276,17 +281,42 @@ def parse_coordinator_installers_from_text(raw: str, source_label: str = "<text>
     return installers
 
 
-# Matches "[hooks hookFunction:" specifically (not any bracket expression) --
-# a deliberate precision-over-recall choice: every direct call this session
-# found uses exactly this receiver name (the HKSubstitutor* hooks parameter),
-# and matching only that avoids false positives on unrelated bracket sends.
-# Extend if a real file turns up using a differently-named receiver.
-HOOK_FUNCTION_CALL_RE = re.compile(r"\[\s*hooks\s+hookFunction\s*:")
+def find_coordinator_installers_source(shadow_repo: str):
+    """Return the first known source path carrying the coordinator table.
+
+    Shadow moved the table from the old standalone `dylib.x` source into the
+    current `shadowcore.x`; both are real source layouts, so path selection is
+    compatibility logic rather than a source-specific guess.
+    """
+    candidates = (
+        os.path.join(shadow_repo, "ShadowCore.dylib", "dylib.x"),
+        os.path.join(shadow_repo, "ShadowCore.dylib", "shadowcore.x"),
+        os.path.join(shadow_repo, "ShadowCore.dylib", "HookCoordinator.m"),
+    )
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+# Matches a simple receiver's real HKSubstitutor hookFunction send -- not any
+# bracket expression. Restricting the receiver to an identifier keeps the
+# source scan precise while covering both the usual `hooks` parameter and
+# current category-specific locals such as `rebindOnly`.
+HOOK_FUNCTION_CALL_RE = re.compile(
+    r"\[\s*([A-Za-z_][A-Za-z0-9_]*)\s+hookFunction\s*:"
+)
+DELEGATE_CALL_RE = re.compile(
+    r"\b((?:shadowhook|shdw)_[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*hooks\b"
+)
+LOGOS_INIT_RE = re.compile(
+    r"%init\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"
+)
 
 
 def find_hook_function_calls(body_text: str, body_start_line: int):
     """Scans an already comment-stripped function body for
-    `[hooks hookFunction:TARGET withReplacement:REPL outOldPtr:OUT]` sends --
+    `[receiver hookFunction:TARGET withReplacement:REPL outOldPtr:OUT]` sends --
     HKSubstitutor's real function-hook API (Headers/HookKit.h) -- and returns
     one dict per call. Depth-aware from the opening '[' to its matching ']',
     so multi-line calls and nested `(void **)&x` casts inside outOldPtr: are
@@ -306,7 +336,7 @@ def find_hook_function_calls(body_text: str, body_start_line: int):
         call_text = body_text[open_idx + 1:i - 1]
         line = body_start_line + body_text.count("\n", 0, open_idx)
 
-        # call_text is now: hooks hookFunction:X withReplacement:Y outOldPtr:Z
+        # call_text is now: receiver hookFunction:X withReplacement:Y outOldPtr:Z
         parts = re.split(r"\bhookFunction\s*:|\bwithReplacement\s*:|\boutOldPtr\s*:", call_text)
         # parts[0] is "hooks "; parts[1..3] are the three argument expressions
         # when all three keyword args are present (outOldPtr: is optional in
@@ -316,6 +346,7 @@ def find_hook_function_calls(body_text: str, body_start_line: int):
         outptr_expr = parts[3].strip() if len(parts) > 3 else None
 
         calls.append({
+            "receiver": parts[0].strip(),
             "target_expr": target_expr,
             "replacement_expr": replacement_expr,
             "outptr_expr": outptr_expr,
@@ -325,13 +356,23 @@ def find_hook_function_calls(body_text: str, body_start_line: int):
     return calls
 
 
+def find_delegated_functions(body_text: str):
+    """Return one-level helper calls receiving the same `hooks` object."""
+    return list(dict.fromkeys(DELEGATE_CALL_RE.findall(body_text)))
+
+
+def find_logos_init_groups(body_text: str):
+    """Return Logos groups initialized by one installer function body."""
+    return list(dict.fromkeys(LOGOS_INIT_RE.findall(body_text)))
+
+
 def resolve_symbol_variable(func_body: str, var_name: str, before_offset: int):
     """If `var_name` was assigned from
-    `[hooks findSymbolInImage:IMG symbolName:@"REAL_NAME"]` earlier in the
-    same function body, return REAL_NAME -- resolves the
-    dlsym-at-runtime-then-hook pattern seen in iokit.x/mach.x/syscall.x back
-    to the actual symbol it targets, instead of leaving it as an opaque
-    local variable name.
+    `[hooks findSymbolInImage:IMG symbolName:@"REAL_NAME"]` or
+    `shdw_resolve_libsystem("REAL_NAME")` earlier in the same function body,
+    return REAL_NAME -- resolves the dlsym-at-runtime-then-hook pattern seen
+    in iokit.x/mach.x/syscall.x/sandbox.x back to the actual symbol it
+    targets, instead of leaving it as an opaque local variable name.
 
     Takes the LAST such assignment strictly before `before_offset` (the
     call site's own position), not just the first one anywhere in the body:
@@ -339,14 +380,21 @@ def resolve_symbol_variable(func_body: str, var_name: str, before_offset: int):
     resolve-then-hook steps, so "first match in the whole function" resolved
     every one of them to the first symbol -- a real bug this session hit and
     validate.py caught as duplicate stable_hook_ids."""
-    pattern = re.compile(
-        rf'\b{re.escape(var_name)}\s*=\s*\[\s*hooks\s+findSymbolInImage\s*:[^\]]*?symbolName\s*:\s*@"([^"]+)"'
-    )
     last = None
-    for m in pattern.finditer(func_body):
-        if m.start() >= before_offset:
-            break
-        last = m
+    patterns = (
+        re.compile(
+            rf'\b{re.escape(var_name)}\s*=\s*\[\s*hooks\s+findSymbolInImage\s*:[^\]]*?symbolName\s*:\s*@"([^"]+)"'
+        ),
+        re.compile(
+            rf'\b{re.escape(var_name)}\s*=\s*shdw_resolve_libsystem\s*\(\s*"([^"]+)"\s*\)'
+        ),
+    )
+    for pattern in patterns:
+        for match in pattern.finditer(func_body):
+            if match.start() >= before_offset:
+                break
+            if last is None or match.start() > last.start():
+                last = match
     return last.group(1) if last else None
 
 
@@ -412,7 +460,7 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def hook_call_to_manifest_target(call, parent_id, parent_domain, source_file_rel, func_body):
-    """One [hooks hookFunction:...] call site -> one child manifest target.
+    """One [receiver hookFunction:...] call site -> one child manifest target.
     target_expr is usually a bare C identifier (a real exported symbol, e.g.
     `sandbox_check`) but is sometimes a local variable holding a
     dlsym-resolved pointer -- resolve_symbol_variable() traces those back to
@@ -456,23 +504,29 @@ def hook_call_to_manifest_target(call, parent_id, parent_domain, source_file_rel
 
 
 def find_function_definition_file(shadow_repo: str, func_name: str):
-    """Which file under ShadowCore.dylib/hooks/**/* defines `func_name`?
+    """Which ShadowCore source file defines `func_name`?
     Greps rather than assumes a filename convention (shadowhook_iokit does
     live in iokit.x, but nothing guarantees that in general, and dyld.x
     already breaks a naive convention by having its real entry point be a
     dyld callback, not a shadowhook_dyld wrapper -- see the caller)."""
-    hooks_dir = os.path.join(shadow_repo, "ShadowCore.dylib", "hooks")
+    search_roots = [os.path.join(shadow_repo, "ShadowCore.dylib", "hooks"),
+                    os.path.join(shadow_repo, "ShadowCore.dylib")]
     pattern = re.compile(rf"^\s*[\w\*\s]+\b{re.escape(func_name)}\s*\(")
-    for root, _dirs, files in os.walk(hooks_dir):
-        for fn in files:
-            if not fn.endswith((".x", ".m", ".c")):
-                continue
-            path = os.path.join(root, fn)
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
-            for line in text.splitlines():
-                if pattern.match(line):
-                    return path
+    seen = set()
+    for search_root in search_roots:
+        for root, _dirs, files in os.walk(search_root):
+            for fn in files:
+                if not fn.endswith((".x", ".m", ".c")):
+                    continue
+                path = os.path.join(root, fn)
+                if path in seen:
+                    continue
+                seen.add(path)
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = strip_comments_preserve_lines(f.read())
+                for line in text.splitlines():
+                    if pattern.match(line):
+                        return path
     return None
 
 
@@ -494,7 +548,8 @@ LIBC_GROUP_ALIASES = {
 # shdw_libc_install_group(hooks, THIS_CONSTANT) as its only statement
 # (confirmed reading iokit.x-style one-liners in libc_lowlevel.x,
 # libc_antidebugging.x, libc.x itself). SHADW_HOOK_GROUP_ENVVAR is one step
-# further: "Hook_EnvVars@c"'s installer is shdw_coord_envvars_c (dylib.x),
+# further: "Hook_EnvVars@c"'s installer is shdw_coord_envvars_c (coordinator
+# source),
 # which does its own unsetenv/setenv scrubbing AND calls
 # shadowhook_libc_envvar(hooks) AND shadowhook_envpolicy(hooks) -- the
 # middle call is the one that reaches shdw_libc_install_group(hooks,
@@ -586,6 +641,155 @@ def libc_row_to_manifest_target(row, parent_id, parent_domain, source_file_rel):
     return target
 
 
+def parse_devicecheck_descriptor_table(raw: str, source_label: str = "<text>"):
+    """Parse DeviceCheck's DCHDescriptor table without guessing from Logos.
+
+    Two rows may describe the same method with mutually exclusive runtime
+    encodings (`B`/`@`); callers collapse those variants into one manifest
+    target because Shadow installs at most one replacement for that method.
+    """
+    clean = strip_comments_preserve_lines(raw)
+    body, body_start_line = find_c_array_body(
+        clean, "shdw_devicecheck_descriptors", source_label)
+    rows = []
+    for row_match in ROW_RE.finditer(body):
+        row_line = body_start_line + body.count("\n", 0, row_match.start())
+        fields = parse_row_fields(row_match.group(1))
+        if len(fields) != 6:
+            raise ValueError(
+                f"{source_label}:{row_line}: expected 6 DeviceCheck descriptor "
+                f"fields, got {len(fields)}: {fields!r}")
+        class_f, selector_f, kind_f, encoding_f, _arg_count_f, _policy_f = fields
+        if class_f.strip() in ("NULL", "nil"):
+            continue
+        if kind_f.strip() not in ("DCHMethodInstance", "DCHMethodClass"):
+            raise ValueError(f"{source_label}:{row_line}: unknown method kind {kind_f!r}")
+        encoding = encoding_f.strip()
+        if not re.fullmatch(r"'(?:[^'\\]|\\.)'", encoding):
+            raise ValueError(f"{source_label}:{row_line}: expected char encoding, got {encoding!r}")
+        rows.append({
+            "target_class": parse_string_literal(class_f),
+            "target_selector": parse_string_literal(selector_f),
+            "method_kind": "instance" if kind_f.strip() == "DCHMethodInstance" else "class",
+            "encoding": encoding[1:-1],
+            "source_line": row_line,
+        })
+    return rows
+
+
+def devicecheck_rows_to_manifest_targets(rows, parent_id, parent_target,
+                                         source_file_rel):
+    """Collapse DeviceCheck's encoding variants into concrete ObjC methods."""
+    grouped = {}
+    for row in rows:
+        key = (row["target_class"], row["target_selector"], row["method_kind"])
+        grouped.setdefault(key, []).append(row)
+
+    targets = []
+    for (target_class, target_selector, method_kind), variants in grouped.items():
+        encodings = ", ".join(sorted({row["encoding"] for row in variants}))
+        targets.append({
+            "stable_hook_id": (
+                f"{parent_id}::{target_class}::{method_kind}:{target_selector}"),
+            "parent_install_unit": parent_id,
+            "source": {"file": source_file_rel,
+                       "line": variants[0]["source_line"]},
+            "target_kind": "objc_method",
+            "target_class": target_class,
+            "target_selector": target_selector,
+            "role": parent_target["role"],
+            "commit_domain": parent_target["commit_domain"],
+            "required_reach": ["objc_dispatch"],
+            # DeviceCheck passes outOldPtr:NULL intentionally.
+            "original_requirement": "none",
+            "continuation_policy": "any",
+            # Missing classes/methods or a non-matching runtime encoding are
+            # skipped by shdw_devicecheck_install_hooks.
+            "availability": "optional_if_present",
+            "extraction_method": "structured_table",
+            "current_implementation": "shdw_devicecheck_install_hooks",
+            "known_compatibility_risks": [
+                f"runtime return encoding must match one of {encodings}; "
+                "otherwise Shadow skips this method"
+            ],
+        })
+    return targets
+
+
+def extract_logos_targets(shadow_repo: str, group_parent_units=None,
+                          unit_targets=None):
+    """Extract direct Objective-C targets from Logos `%hook` blocks.
+
+    Logos expands these blocks before Clang sees them, so this pass records
+    source-level targets with the weaker `logos_preprocess` confidence. The
+    companion AST tool is available when compiler-grade declaration checks are
+    needed.
+    """
+    targets = []
+    group_parent_units = group_parent_units or {}
+    unit_targets = unit_targets or {}
+    root = os.path.join(shadow_repo, "ShadowCore.dylib")
+    if not os.path.isdir(root):
+        return targets
+    for source_root, _dirs, files in os.walk(root):
+        for filename in sorted(files):
+            if not filename.endswith((".x", ".xm")):
+                continue
+            path = os.path.join(source_root, filename)
+            metadata = parse_logos_file(path)
+            relative = os.path.relpath(path, shadow_repo)
+            for hook in metadata["hooks"]:
+                cls = hook.get("class")
+                if not cls:
+                    continue
+                group = hook.get("group")
+                parent_ids = sorted(group_parent_units.get(group, ()))
+                parent_target = (
+                    unit_targets.get(parent_ids[0]) if len(parent_ids) == 1
+                    else None
+                )
+                parent = parent_ids[0] if parent_target else f"logos:{relative}:{cls}"
+                domain = (parent_target["commit_domain"] if parent_target
+                          else f"logos_{os.path.splitext(filename)[0]}")
+                risks = [
+                    "Logos source was normalized without compiler macro expansion; "
+                    "verify %orig and conditional paths before migration"
+                ]
+                if not parent_target:
+                    if parent_ids:
+                        risks.append(
+                            f"Logos group {group!r} maps to multiple install units "
+                            f"({', '.join(parent_ids)}); parent needs review"
+                        )
+                    else:
+                        risks.append(
+                            f"could not map Logos group {group!r} to a coordinator "
+                            "install unit; parent needs review"
+                        )
+                for method in hook["methods"]:
+                    selector = method["selector"]
+                    kind = method["kind"]
+                    targets.append({
+                        "stable_hook_id": f"{parent}::{cls}::{kind}:{selector}",
+                        "parent_install_unit": parent,
+                        "source": {"file": relative, "line": method["line"]},
+                        "target_kind": "objc_method",
+                        "target_class": cls,
+                        "target_selector": selector,
+                        "role": parent_target["role"] if parent_target else "mandatory",
+                        "commit_domain": domain,
+                        "required_reach": ["objc_dispatch"],
+                        "original_requirement": "direct_predecessor",
+                        "continuation_policy": "any",
+                        "availability": (parent_target.get("availability", "required_now")
+                                         if parent_target else "required_now"),
+                        "extraction_method": "logos_preprocess",
+                        "current_implementation": f"{relative}:{method['line']}",
+                        "known_compatibility_risks": risks,
+                    })
+    return targets
+
+
 def load_manual_overrides(path):
     if not os.path.exists(path):
         return {}
@@ -612,6 +816,26 @@ def apply_overrides(targets, overrides):
     return applied
 
 
+def resolve_shadow_commit(shadow_repo, explicit_commit=None):
+    """Return an explicit provenance value or the checkout's HEAD.
+
+    git archive snapshots intentionally have no .git directory.  They must
+    either carry their known source commit explicitly or omit the optional
+    schema field; `null` is not valid manifest provenance.
+    """
+    if explicit_commit:
+        return explicit_commit
+    if not os.path.exists(os.path.join(shadow_repo, ".git", "HEAD")):
+        return None
+    try:
+        import subprocess
+        return subprocess.check_output(
+            ["git", "-C", shadow_repo, "rev-parse", "HEAD"],
+            text=True).strip()
+    except Exception:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--shadow-repo", default=os.environ.get("SHADOW_REPO"),
@@ -620,6 +844,10 @@ def main():
     ap.add_argument("--out", default=None,
                      help="output path (default: artifacts/shadow-current-manifest.json "
                           "under this script's HookKit repo root)")
+    ap.add_argument("--include-logos", action="store_true",
+                    help="also emit per-method targets from Logos %hook blocks")
+    ap.add_argument("--shadow-commit", default=None,
+                    help="provenance for an immutable snapshot without .git")
     args = ap.parse_args()
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -637,19 +865,20 @@ def main():
     targets = [unit_to_manifest_target(u, source_rel) for u in units]
     target_by_id = {t["stable_hook_id"]: t for t in targets}
 
-    # Cross-reference the coordinator installer table (dylib.x) -- the OTHER
-    # real structured table named in spec section 18.2 ("Coordinator
-    # installer table"). Gives the exact C function per unit mechanically,
-    # instead of guessing from a filename convention, and doubles as a
-    # cross-check: the source's own comment says the two tables "must stay
-    # in SHDWInstallUnits() order," so a mismatch here is a real finding.
-    dylib_x = os.path.join(shadow_repo, "ShadowCore.dylib", "dylib.x")
+    # Cross-reference the coordinator installer table -- the OTHER real
+    # structured table named in spec section 18.2 ("Coordinator installer
+    # table"). Gives the exact C function per unit mechanically, instead of
+    # guessing from a filename convention, and doubles as a cross-check: the
+    # source's own comment says the two tables "must stay in
+    # SHDWInstallUnits() order," so a mismatch here is a real finding.
+    coordinator_source = find_coordinator_installers_source(shadow_repo)
     installers = {}
-    if os.path.exists(dylib_x):
-        with open(dylib_x, "r", encoding="utf-8") as f:
-            installers = parse_coordinator_installers_from_text(f.read(), source_label=dylib_x)
+    if coordinator_source:
+        with open(coordinator_source, "r", encoding="utf-8") as f:
+            installers = parse_coordinator_installers_from_text(
+                f.read(), source_label=coordinator_source)
     else:
-        print(f"warning: {dylib_x} not found -- current_implementation left "
+        print("warning: no known coordinator source found -- current_implementation left "
               "unset, no per-hook decomposition attempted", file=sys.stderr)
 
     missing_installer = [uid for uid in target_by_id if uid not in installers]
@@ -661,15 +890,12 @@ def main():
         print(f"warning: coordinator installer table has {len(missing_unit)} "
               f"unit(s) not in kSHDWInstallUnits: {missing_unit}", file=sys.stderr)
 
-    # Per-hook decomposition, best-effort: for every unit whose install
-    # function we can locate and read, scan its body for direct
-    # [hooks hookFunction:...] call sites (pattern_scan, see the function
-    # doc). Units that delegate elsewhere (shdw_libc_install_group, Logos
-    # %init) or use a differently-shaped API (hookMessage:, etc.) yield zero
-    # calls here and stay unit-level -- said explicitly in their risks list,
-    # not left silently unexplained.
+    # Per-hook decomposition, best-effort: direct calls first, then one
+    # bounded helper hop for coordinator wrappers that pass the same hooks
+    # object onward. This is intentionally not a call-graph walker.
     child_targets = []
     decomposed = []
+    logos_group_units = {}
     for unit_id, installer in installers.items():
         t = target_by_id.get(unit_id)
         if not t:
@@ -691,6 +917,8 @@ def main():
             continue
         body, body_start_line = found
         calls = find_hook_function_calls(body, body_start_line)
+        for group in find_logos_init_groups(body):
+            logos_group_units.setdefault(group, set()).add(unit_id)
 
         t["known_compatibility_risks"] = [
             r for r in t["known_compatibility_risks"] if not r.startswith("unit-level only")
@@ -705,12 +933,41 @@ def main():
                 f"[hooks hookFunction:...] scan of {installer['install_fn']}() in {rel}"
             )
         else:
-            t["known_compatibility_risks"].append(
-                f"no [hooks hookFunction:...] call sites found in "
-                f"{installer['install_fn']}() ({rel}) -- likely delegates to a "
-                "descriptor table, shdw_libc_install_group, or a Logos %hook/"
-                "%init block; needs a follow-up pass to classify, not yet done"
-            )
+            delegated_calls = []
+            delegated_names = find_delegated_functions(body)
+            for delegated_name in delegated_names:
+                delegated_path = find_function_definition_file(shadow_repo, delegated_name)
+                if not delegated_path:
+                    continue
+                with open(delegated_path, "r", encoding="utf-8") as f:
+                    delegated_clean = strip_comments_preserve_lines(f.read())
+                delegated_found = find_function_body(delegated_clean, delegated_name)
+                if not delegated_found:
+                    continue
+                delegated_body, delegated_start_line = delegated_found
+                for group in find_logos_init_groups(delegated_body):
+                    logos_group_units.setdefault(group, set()).add(unit_id)
+                delegated_calls.extend((call, delegated_path, delegated_body)
+                                       for call in find_hook_function_calls(
+                                           delegated_body, delegated_start_line))
+
+            if delegated_calls:
+                for call, delegated_path, delegated_body in delegated_calls:
+                    child_targets.append(hook_call_to_manifest_target(
+                        call, unit_id, t["commit_domain"],
+                        os.path.relpath(delegated_path, shadow_repo), delegated_body))
+                decomposed.append(unit_id)
+                t["known_compatibility_risks"].append(
+                    f"decomposed into {len(delegated_calls)} pattern_scan child target(s) "
+                    f"through one helper hop from {installer['install_fn']}()"
+                )
+            else:
+                t["known_compatibility_risks"].append(
+                    f"no [hooks hookFunction:...] call sites found in "
+                    f"{installer['install_fn']}() ({rel}) -- delegates {delegated_names or 'nothing visible'}; "
+                    "may use a descriptor table, shdw_libc_install_group, or a "
+                    "Logos %hook/%init block; needs a follow-up pass to classify"
+                )
 
     # shdw_libc_hooks[] (libc.x): the other real descriptor table found this
     # iteration, shared by 4 units (Hook_Filesystem@c, Hook_LowLevelC,
@@ -743,29 +1000,67 @@ def main():
             )
             decomposed.append(unit_id)
 
+    # DeviceCheck's message hooks are a separate real descriptor table. Its
+    # rows are ABI variants, so parse them directly rather than claiming an
+    # opaque unit-level message route or mistaking both variants for hooks.
+    devicecheck_m = os.path.join(
+        shadow_repo, "ShadowCore.dylib", "hooks", "Environment",
+        "DeviceCheckHooks.m")
+    devicecheck_parent = target_by_id.get("Hook_DeviceCheck")
+    if devicecheck_parent and os.path.exists(devicecheck_m):
+        with open(devicecheck_m, "r", encoding="utf-8") as f:
+            devicecheck_rows = parse_devicecheck_descriptor_table(
+                f.read(), source_label=devicecheck_m)
+        devicecheck_rel = os.path.relpath(devicecheck_m, shadow_repo)
+        devicecheck_targets = devicecheck_rows_to_manifest_targets(
+            devicecheck_rows, "Hook_DeviceCheck", devicecheck_parent,
+            devicecheck_rel)
+        child_targets.extend(devicecheck_targets)
+        devicecheck_parent["known_compatibility_risks"] = [
+            risk for risk in devicecheck_parent["known_compatibility_risks"]
+            if not risk.startswith("no [hooks hookFunction:...] call sites")
+        ]
+        devicecheck_parent["known_compatibility_risks"].append(
+            f"decomposed into {len(devicecheck_targets)} structured_table "
+            "child target(s) from shdw_devicecheck_descriptors[]"
+        )
+        decomposed.append("Hook_DeviceCheck")
+
+    logos_targets = (extract_logos_targets(
+        shadow_repo, logos_group_units, target_by_id)
+        if args.include_logos else [])
+    if logos_targets:
+        child_targets.extend(logos_targets)
+        logos_counts = Counter(
+            target["parent_install_unit"] for target in logos_targets
+            if target["parent_install_unit"] in target_by_id
+        )
+        for unit_id, count in logos_counts.items():
+            t = target_by_id[unit_id]
+            t["known_compatibility_risks"] = [
+                risk for risk in t["known_compatibility_risks"]
+                if not risk.startswith("no [hooks hookFunction:...] call sites")
+            ]
+            t["known_compatibility_risks"].append(
+                f"decomposed into {count} logos_preprocess child target(s)"
+            )
+            decomposed.append(unit_id)
+
     targets.extend(child_targets)
 
     overrides_path = os.path.join(os.path.dirname(__file__), "manual_overrides.yaml")
     overrides = load_manual_overrides(overrides_path)
     applied = apply_overrides(targets, overrides)
 
-    shadow_commit = None
-    head_path = os.path.join(shadow_repo, ".git", "HEAD")
-    if os.path.exists(head_path):
-        try:
-            import subprocess
-            shadow_commit = subprocess.check_output(
-                ["git", "-C", shadow_repo, "rev-parse", "HEAD"],
-                text=True).strip()
-        except Exception:
-            pass
+    shadow_commit = resolve_shadow_commit(shadow_repo, args.shadow_commit)
 
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "shadow_commit": shadow_commit,
         "targets": targets,
     }
+    if shadow_commit:
+        manifest["shadow_commit"] = shadow_commit
 
     out_path = args.out or os.path.join(repo_root, "artifacts", "shadow-current-manifest.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)

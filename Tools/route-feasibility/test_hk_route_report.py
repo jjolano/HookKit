@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Self-check for hk_route_report.py. Run directly: python3 test_hk_route_report.py"""
 
-from hk_route_report import classify_target, build_report
+from hk_route_report import classify_target, build_report, render_markdown
 
 
 def test_objc_method_routable():
@@ -56,6 +56,25 @@ def test_lane_agnostic_pass_emits_one_all_lane_not_four_copies():
     assert report["summary"]["unclassified_mandatory_targets"] == 0
     assert report["summary"]["dobby_required"] is False
     assert report["summary"]["gum_required"] is False
+
+
+def test_summary_excludes_optional_unclassified_target_and_counts_decomposition():
+    manifest = {
+        "manifest_version": "test",
+        "targets": [
+            {"stable_hook_id": "unit-a", "target_kind": "function_symbol",
+             "role": "mandatory", "required_reach": ["existing_imports"]},
+            {"stable_hook_id": "unit-b", "target_kind": "function_symbol",
+             "role": "optional", "required_reach": ["private_address"]},
+            {"stable_hook_id": "unit-a::symbol", "parent_install_unit": "unit-a",
+             "target_kind": "function_symbol", "role": "mandatory",
+             "required_reach": ["existing_imports"]},
+        ],
+    }
+    report = build_report(manifest)
+    assert report["summary"]["unclassified_mandatory_targets"] == 0
+    markdown = render_markdown(report, manifest)
+    assert "1/2 Shadow install-unit records" in markdown
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ case "$PROFILE" in
         ceiling=14.0
         hookkit_expected='armv7=9.0,armv7s=9.0,arm64=9.0,arm64e=12.0'
         hkgum_expected=
+        arm64e_abi=00
         ;;
     rootful-modern)
         package=me.jjolano.fmwk.hookkit
@@ -21,6 +22,7 @@ case "$PROFILE" in
         ceiling=
         hookkit_expected='arm64=14.0,arm64e=14.0'
         hkgum_expected="$hookkit_expected"
+        arm64e_abi=80
         ;;
     rootless)
         package=me.jjolano.fmwk.hookkit
@@ -29,6 +31,7 @@ case "$PROFILE" in
         ceiling=
         hookkit_expected='arm64=15.0,arm64e=15.0'
         hkgum_expected="$hookkit_expected"
+        arm64e_abi=80
         ;;
     roothide)
         package=me.jjolano.fmwk.hookkit
@@ -37,6 +40,7 @@ case "$PROFILE" in
         ceiling=18.0
         hookkit_expected='arm64=15.0,arm64e=15.0'
         hkgum_expected="$hookkit_expected"
+        arm64e_abi=80
         ;;
     *) echo "usage: $0 rootful-legacy|rootful-modern|rootless|roothide ARTIFACT.deb" >&2; exit 2 ;;
 esac
@@ -68,6 +72,7 @@ find_tool() {
 
 DPKG_DEB=$(find_tool dpkg-deb) || { echo "error: dpkg-deb not found" >&2; exit 1; }
 LIPO=$(find_tool lipo llvm-lipo) || { echo "error: lipo not found" >&2; exit 1; }
+OD=$(find_tool od) || { echo "error: od not found" >&2; exit 1; }
 VTOOL=$(find_tool vtool || true)
 OTOOL=$(find_tool otool || true)
 OBJDUMP=$(find_tool llvm-objdump \
@@ -81,9 +86,11 @@ trap 'rm -rf "$tmp"' EXIT
 
 actual_package=$("$DPKG_DEB" -f "$ARTIFACT" Package)
 actual_arch=$("$DPKG_DEB" -f "$ARTIFACT" Architecture)
+actual_version=$("$DPKG_DEB" -f "$ARTIFACT" Version)
 depends=$("$DPKG_DEB" -f "$ARTIFACT" Depends)
 [ "$actual_package" = "$package" ] || { echo "FAIL package '$actual_package' != '$package'" >&2; exit 1; }
 [ "$actual_arch" = "$package_arch" ] || { echo "FAIL architecture '$actual_arch' != '$package_arch'" >&2; exit 1; }
+[ "$actual_version" = 3.0.0-1 ] || { echo "FAIL version '$actual_version' != '3.0.0-1'" >&2; exit 1; }
 printf '%s\n' "$depends" | grep -Fq "firmware (>= $floor)" || {
     echo "FAIL package dependency does not require firmware >= $floor" >&2; exit 1;
 }
@@ -98,10 +105,20 @@ if [ "$PROFILE" = rootful-legacy ]; then
             exit 1
         }
     done
+    for field in Conflicts Replaces; do
+        "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit3 || {
+            echo "FAIL legacy package $field does not replace the retired HookKit3 package" >&2
+            exit 1
+        }
+    done
 else
     for field in Conflicts Replaces; do
         "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit.legacy || {
             echo "FAIL modern package $field does not include me.jjolano.fmwk.hookkit.legacy" >&2
+            exit 1
+        }
+        "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit3 || {
+            echo "FAIL modern package $field does not replace the retired HookKit3 package" >&2
             exit 1
         }
     done
@@ -109,7 +126,20 @@ fi
 
 HOOKKIT=$(find "$tmp/root" -path '*/HookKit.framework/HookKit' -type f -print)
 [ "$(printf '%s\n' "$HOOKKIT" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || {
-    echo "FAIL package must contain exactly one HookKit framework binary" >&2; exit 1;
+    echo "FAIL package must contain exactly one expected framework binary" >&2; exit 1;
+}
+framework=$(dirname "$HOOKKIT")
+[ -f "$framework/Headers/HookKit.h" ] || {
+    echo "FAIL package is missing historical <HookKit.h>" >&2; exit 1;
+}
+[ -f "$framework/Headers/HookKit/HookKit.h" ] || {
+    echo "FAIL package is missing new <HookKit/HookKit.h>" >&2; exit 1;
+}
+[ -z "$(find "$tmp/root" -path '*/HookKit3.framework/*' -print)" ] || {
+    echo "FAIL package contains retired HookKit3.framework files" >&2; exit 1;
+}
+[ -z "$(find "$tmp/root" -name 'Info-HookKit3.plist' -print)" ] || {
+    echo "FAIL package contains a retired HookKit3 bundle plist" >&2; exit 1;
 }
 HKGUM=$(find "$tmp/root" -name HKGum.dylib -type f -print)
 if [ -n "$hkgum_expected" ]; then
@@ -148,7 +178,7 @@ load_commands() {
 }
 
 check_binary() {
-    local bin=$1 expected=$2 actual_archs expected_archs old_ifs item arch wanted slice output actual sdk header
+    local bin=$1 expected=$2 actual_archs expected_archs old_ifs item arch wanted slice output actual sdk abi
     echo "lipo -info $bin"
     "$LIPO" -info "$bin"
     actual_archs=$("$LIPO" -archs "$bin" | tr ' ' '\n' | sort | xargs)
@@ -187,17 +217,15 @@ check_binary() {
                 IFS=$old_ifs
                 return 1
             }
-            [ -n "$OTOOL" ] || {
-                echo "FAIL otool is required to verify old-ABI arm64e" >&2
+        fi
+        if [ "$arch" = arm64e ]; then
+            abi=$("$OD" -An -tx1 -j11 -N1 "$slice" | tr -d '[:space:]')
+            [ "$abi" = "$arm64e_abi" ] || {
+                echo "FAIL $bin [$arch] arm64e ABI '$abi' != '$arm64e_abi'" >&2
                 IFS=$old_ifs
                 return 1
             }
-            header=$("$OTOOL" -hv "$slice" | tail -n 1)
-            printf '%s\n' "$header" | grep -Eq '[[:space:]]E[[:space:]]+0x00[[:space:]]' || {
-                echo "FAIL $bin [$arch] is not an old-ABI arm64e Mach-O" >&2
-                IFS=$old_ifs
-                return 1
-            }
+            echo "PASS $bin [$arch] arm64e ABI $abi"
         fi
         echo "PASS $bin [$arch] iOS $actual+"
     done

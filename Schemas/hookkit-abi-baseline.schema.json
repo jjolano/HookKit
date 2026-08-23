@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hookkit.dev/schemas/hookkit-abi-baseline.schema.json",
   "title": "HookKit ABI Baseline",
-  "description": "One release's ABI baseline (spec section 17.1), stored under Tests/LegacyABI/Baselines/<tag>.json. Tools/abi/extract_abi.py produces these from a built framework; Tools/abi/compare_abi.py (not built yet) diffs two of them for scripts/check_legacy_abi.sh's CI gate. Fields the extractor could not populate for a given baseline (e.g. Objective-C metadata, not implemented as of the first version of extract_abi.py) are omitted, not fabricated as empty/null -- see each field's description for what \"absent\" means.",
+  "description": "One release's ABI baseline (spec section 17.1), stored under Tests/LegacyABI/Baselines/<tag>.json. Tools/abi/extract_abi.py produces these from a built framework; Tools/abi/compare_abi.py diffs two of them for scripts/check_legacy_abi.sh's CI gate. Fields the extractor could not populate for a given baseline are omitted, not fabricated as empty/null -- see each field's description for what \"absent\" means.",
   "type": "object",
   "required": ["tag", "generated_at", "install_name", "architectures", "exported_symbols"],
   "properties": {
@@ -31,7 +31,7 @@
     },
 
     "objc": {
-      "description": "Classes, methods, and type encodings. Omitted entirely (not an empty object) when the extractor that produced this baseline didn't implement Mach-O ObjC metadata parsing yet -- check extractor_version / the ledger before treating an absent objc field as \"this release has no ObjC classes\".",
+      "description": "Classes, methods, properties, and type encodings. Omitted entirely (not an empty object) when the selected Mach-O toolchain cannot provide ObjC metadata -- check extractor_version / the ledger before treating an absent objc field as \"this release has no ObjC classes\".",
       "type": "object",
       "properties": {
         "classes": {
@@ -71,7 +71,7 @@
     },
 
     "enum_values": {
-      "description": "Historical enum name -> numeric value, for the enums spec section 2.2 requires exact preservation of (hookkit_status_t, hookkit_lib_t, hookkit_cat_t, HKStrategy, ...). Sourced from header parsing, not the binary -- omitted (not {}) until that parser exists.",
+      "description": "Historical enum name -> numeric value, for the enums spec section 2.2 requires exact preservation of (hookkit_status_t, hookkit_lib_t, hookkit_cat_t, HKStrategy, ...). Sourced from header parsing, not the binary -- omitted (not {}) when no enum header was supplied.",
       "type": "object",
       "additionalProperties": { "type": "integer" }
     },

@@ -614,11 +614,8 @@ static bool symbol_matches(const char *entry, const char *name) {
     return entry[0] == '_' && strcmp(entry + 1, name) == 0;
 }
 
-void *hk_native_find_symbol(hk_image *image, const char *name) {
-    if(!image || !name || !*name) {
-        return NULL;
-    }
-
+static void *find_nlist_symbol(hk_image *image, const char *name,
+                               uint64_t *out_raw_value) {
     if(image->nlist && image->strings) {
         for(uint32_t i = 0; i < image->nlist_count; i++) {
             const struct nlist_64 *symbol = &image->nlist[i];
@@ -633,6 +630,10 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
 
             if(symbol_matches(image->strings + symbol->n_un.n_strx, name)) {
                 void *addr = (void *)(uintptr_t)((intptr_t)symbol->n_value + image->slide);
+
+                if(out_raw_value) {
+                    *out_raw_value = symbol->n_value;
+                }
 
                 // Sign code only: n_sect identifies the Mach-O section the
                 // symbol lives in. Instruction sections (code) get the
@@ -650,11 +651,48 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
         }
     }
 
+    return NULL;
+}
+
+void *hk_native_find_symbol(hk_image *image, const char *name) {
+    if(!image || !name || !*name) {
+        return NULL;
+    }
+
+    void *found = find_nlist_symbol(image, name, NULL);
+    if(found) {
+        return found;
+    }
+
     if(image->dl_handle) {
         return dlsym(image->dl_handle, name);
     }
 
     return NULL;
+}
+
+void *hk_native_find_loaded_cache_symbol(const void *header, intptr_t slide,
+                                         const char *name,
+                                         uint64_t *out_raw_value) {
+    if(out_raw_value) {
+        *out_raw_value = 0;
+    }
+    if(!header || !name || !*name) {
+        return NULL;
+    }
+
+    struct hk_image image;
+    memset(&image, 0, sizeof(image));
+    image.slide = slide;
+    image.sect_flags = collect_section_flags(header, &image.sect_count);
+    if(!bind_cache_symbols(header, &image)) {
+        free(image.sect_flags);
+        return NULL;
+    }
+
+    void *found = find_nlist_symbol(&image, name, out_raw_value);
+    free(image.sect_flags);
+    return found;
 }
 
 #pragma mark - Loaded cache entries (fast NULL-image lookup)
@@ -852,6 +890,18 @@ void *hk_native_find_symbol(hk_image *image, const char *name) {
 
 void *hk_native_find_cache_symbol(const char *name) {
     (void)name;
+    return NULL;
+}
+
+void *hk_native_find_loaded_cache_symbol(const void *header, intptr_t slide,
+                                         const char *name,
+                                         uint64_t *out_raw_value) {
+    (void)header;
+    (void)slide;
+    (void)name;
+    if(out_raw_value) {
+        *out_raw_value = 0;
+    }
     return NULL;
 }
 

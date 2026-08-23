@@ -1,0 +1,42 @@
+{
+  "provider_family": "ellekit",
+  "version": "1.2 (rootless device package)",
+  "sha256": "6defe6009fe64c1a1e8c041eea8ce046d2a83f7b9a7cf8c6ec3a710048c7efe1",
+  "exported_abi": ["EKHookFunction", "LHHookFunctions", "MSHookFunction"],
+  "architecture": "arm64",
+  "os_lane": "rootless",
+  "load_path": "/var/jb/usr/lib/libellekit.dylib",
+  "discovery_method": "dlopen_preflight",
+  "activation_behavior": {
+    "requires_provider_activation": true,
+    "requires_provider_image_load": true,
+    "constructor_behavior": "unbounded_or_unknown",
+    "executable_allocation_behavior": "dynamic"
+  },
+  "continuation_kind": "dynamic",
+  "continuation_inspectable": true,
+  "continuation_owner": "hookkit",
+  "provider_max_overwrite_size": 16,
+  "original_publication_order": "before_activation",
+  "mutation_failure_semantics": "may_partially_mutate",
+  "verification_capability": "hookkit_relocation_inspected",
+  "device_test_results": [
+    {
+      "test_id": "provider-ellekit-alias-smoke",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-22-device-provider-alias3-arm64",
+      "date": "2026-08-22"
+    },
+    {
+      "test_id": "hk3-provider-ellekit-hybrid-lifecycle",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-22-device-provider-lifecycle3-ellekit-hybrid-arm64",
+      "date": "2026-08-22"
+    }
+  ],
+  "certification_status": "device_certified"
+}

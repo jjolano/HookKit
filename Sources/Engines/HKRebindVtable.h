@@ -16,8 +16,8 @@
 // images concurrently, and there is no fixed stash to overflow.
 //
 // On device the context is not a test fixture: image_base/size/slide come
-// from the image catalog (the dyld populator, still unbuilt), and the writer
-// is the VM-protection-changing, arm64e-re-signing store -- all device-only.
+// from the live image catalog, and the writer is the VM-protection-changing,
+// arm64e-re-signing store -- all device-only.
 
 #ifndef HK_ENGINES_REBIND_VTABLE_H
 #define HK_ENGINES_REBIND_VTABLE_H
@@ -34,9 +34,11 @@ extern "C" {
 // so a caller reading error_code can tell them apart without a second field.
 #define HK_REBIND_DIAG_IMAGE_SCOPE_BASE 100
 
-// What the adapter needs to act: which image, and how to write a slot.
-// Registered as the engine context; caller-owned and not copied, so it must
-// outlive the runtime it is registered with.
+// What the adapter needs to act: which image (or a catalog of images), and
+// how to write a slot. Registered as the engine context; caller-owned and not
+// copied, so it must outlive the runtime it is registered with. A NULL
+// image_base with a non-NULL catalog means "all catalog entries matching the
+// request's caller_image_scope".
 typedef struct {
     const void *image_base;
     size_t image_size;

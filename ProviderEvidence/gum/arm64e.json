@@ -1,0 +1,32 @@
+{
+  "provider_family": "gum",
+  "version": "17.17.0+hookkit-hkgum-wrapper-2026-08-10",
+  "commit": "ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c",
+  "sha256": "cefa6f6be5bbc4b65351c89030f310e881bf8c33daf4f4bf67155497eddaf3cd",
+  "exported_abi": ["hkgum_begin_transaction", "hkgum_end_transaction"],
+  "architecture": "arm64e",
+  "os_lane": "rootless",
+  "load_path": "/var/jb/usr/lib/HKGum.dylib",
+  "discovery_method": "dlopen_preflight",
+  "activation_behavior": {
+    "requires_provider_activation": true,
+    "requires_provider_image_load": true,
+    "constructor_behavior": "unbounded_or_unknown",
+    "thread_behavior": "none",
+    "callback_behavior": "none",
+    "executable_allocation_behavior": "dynamic"
+  },
+  "continuation_kind": "dynamic",
+  "continuation_inspectable": true,
+  "original_publication_order": "before_activation",
+  "mutation_failure_semantics": "may_partially_mutate",
+  "verification_capability": "self_reported_only",
+  "device_test_results": [
+    {
+      "test_id": "hk3-provider-gum-conformance",
+      "verification_level": "host_verified",
+      "result": "not_run"
+    }
+  ],
+  "certification_status": "uncertified"
+}

@@ -9,18 +9,17 @@
 // every (state, op) cell was actually exercised, so a passing run really did
 // visit the whole table rather than a lucky slice of it.
 //
-// Scope: all hooks succeed (fake_rebind, no failures, and ownership conflicts
-// don't exist), so prepare always reaches PREPARED and commit COMMITTED --
-// the four reachable states are DRAFT/ANALYZED/PREPARED/COMMITTED. The
-// FAILED/PARTIAL rollups and their transitions are covered by
-// test-plan-prepare / test-plan-commit; INVALIDATED/DISCARDED are enum values
-// no operation produces yet (stated gap, not tested here).
+// The random walk below keeps the clean success model deliberately small so
+// every state/op cell remains easy to audit. A second deterministic model at
+// the end covers the failure rollups too; the two models share no state or
+// transition code with HKPlan.c.
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "../../Sources/Core/HKPlanInternal.h"
+#include "../../Sources/Core/HKOwnership.h"
 #include "../../Sources/Core/HKRuntimeInternal.h"
 #include "fake_engines.h"
 
@@ -112,6 +111,7 @@ static unsigned lcg_next(unsigned *state) {
 static bool g_covered[M_STATE_COUNT][OP_COUNT];
 
 static void run_seed(unsigned seed, int steps) {
+    hk_ownership_reset_for_testing();
     hk_runtime_t *rt = NULL;
     hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
@@ -145,6 +145,173 @@ static void run_seed(unsigned seed, int steps) {
 
     hk_plan_release(plan);
     hk_runtime_release(rt);
+    hk_ownership_reset_for_testing();
+}
+
+// Independent rollup model for the outcomes that the successful random walk
+// cannot reach. The counts are observations of the scenario setup, not
+// implementation state copied out of HKPlan.c.
+typedef enum {
+    F_ANALYZED,
+    F_PREPARED,
+    F_PARTIAL,
+    F_FAILED,
+    F_COMMITTED,
+} failure_model_state_t;
+
+static bool model_prepare_rollup(failure_model_state_t *state,
+                                 size_t prepared, size_t failed) {
+    if (!state || *state != F_ANALYZED) {
+        return false;
+    }
+    if (failed == 0) {
+        *state = F_PREPARED;
+    } else if (prepared == 0) {
+        *state = F_FAILED;
+    } else {
+        *state = F_PARTIAL;
+    }
+    return true;
+}
+
+static bool model_commit_rollup(failure_model_state_t *state,
+                                size_t active, size_t failed,
+                                size_t attempted) {
+    if (!state || (*state != F_PREPARED && *state != F_PARTIAL)) {
+        return false;
+    }
+    if (failed == 0) {
+        *state = F_COMMITTED;
+    } else if (active == 0 && attempted > 0) {
+        *state = F_FAILED;
+    } else {
+        *state = F_PARTIAL;
+    }
+    return true;
+}
+
+static hk_hook_t *add_model_hook(hk_plan_t *plan, const char *id) {
+    hk_hook_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.struct_size = sizeof(spec);
+    spec.struct_version = HK_ABI_VERSION_3_0;
+    spec.stable_hook_id = id;
+    spec.target_kind = HK_TARGET_FUNCTION_SYMBOL;
+    spec.target.symbol.name = "getpid";
+    spec.required_reach = HK_REACH_EXISTING_IMPORTS;
+    spec.original_requirement = HK_ORIGINAL_NONE;
+    spec.continuation_policy = HK_CONTINUATION_ANY;
+    spec.availability = HK_AVAILABILITY_REQUIRED_NOW;
+    spec.role = HK_OPERATION_MANDATORY;
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    return hook;
+}
+
+static void test_failure_rollup_model(void) {
+    // Prepare: one success plus one failure produces PARTIAL.
+    {
+        hk_ownership_reset_for_testing();
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_for_testing(rt, &fake_rebind_engine));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_t *ok = add_model_hook(plan, "model.prepare.ok");
+        hk_hook_t *bad = add_model_hook(plan, "model.prepare.bad");
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        bad->matched_engine = &fake_always_fails_engine;
+
+        failure_model_state_t model = F_ANALYZED;
+        assert(model_prepare_rollup(&model, 1, 1));
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+        assert(ok->result.outcome == HK_OUTCOME_PREPARED);
+        assert(bad->result.outcome == HK_OUTCOME_FAILED_SAFE);
+        assert(model == F_PARTIAL && hk_plan_state(plan) == HK_PLAN_PARTIAL);
+
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        hk_ownership_reset_for_testing();
+    }
+
+    // Prepare: zero successes plus one failure produces FAILED, and commit is
+    // rejected from that terminal state.
+    {
+        hk_ownership_reset_for_testing();
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_for_testing(rt, &fake_rebind_engine));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_t *bad = add_model_hook(plan, "model.prepare.only-bad");
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        bad->matched_engine = &fake_always_fails_engine;
+
+        failure_model_state_t model = F_ANALYZED;
+        assert(model_prepare_rollup(&model, 0, 1));
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+        assert(bad->result.outcome == HK_OUTCOME_FAILED_SAFE);
+        assert(model == F_FAILED && hk_plan_state(plan) == HK_PLAN_FAILED);
+        assert(hk_plan_commit(plan, NULL) == HK_STATUS_INVALID_STATE);
+
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        hk_ownership_reset_for_testing();
+    }
+
+    // Commit: one active plus one clean refusal produces PARTIAL.
+    {
+        hk_ownership_reset_for_testing();
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_for_testing(rt, &fake_rebind_engine));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_t *ok = add_model_hook(plan, "model.commit.ok");
+        hk_hook_t *bad = add_model_hook(plan, "model.commit.bad");
+        bad->spec.target.symbol.name = "getppid";
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        bad->matched_engine = &fake_commit_none_engine;
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+        failure_model_state_t model = F_ANALYZED;
+        assert(model_prepare_rollup(&model, 2, 0));
+        assert(model_commit_rollup(&model, 1, 1, 2));
+        assert(hk_plan_commit(plan, NULL) == HK_STATUS_OK);
+        assert(ok->result.outcome == HK_OUTCOME_ACTIVE);
+        assert(bad->result.outcome == HK_OUTCOME_FAILED_SAFE);
+        assert(model == F_PARTIAL && hk_plan_state(plan) == HK_PLAN_PARTIAL);
+
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        hk_ownership_reset_for_testing();
+    }
+
+    // Commit: one clean refusal with no active hook produces FAILED.
+    {
+        hk_ownership_reset_for_testing();
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_for_testing(rt, &fake_commit_none_engine));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_t *bad = add_model_hook(plan, "model.commit.only-bad");
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+
+        failure_model_state_t model = F_ANALYZED;
+        assert(model_prepare_rollup(&model, 1, 0));
+        assert(model_commit_rollup(&model, 0, 1, 1));
+        assert(hk_plan_commit(plan, NULL) == HK_STATUS_OK);
+        assert(bad->result.outcome == HK_OUTCOME_FAILED_SAFE);
+        assert(model == F_FAILED && hk_plan_state(plan) == HK_PLAN_FAILED);
+
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        hk_ownership_reset_for_testing();
+    }
+
+    puts("all plan failure rollup model scenarios passed (4 scenarios)");
 }
 
 int main(void) {
@@ -168,5 +335,6 @@ int main(void) {
 
     printf("all plan model tests passed (%d state x op cells covered)\n",
            M_STATE_COUNT * OP_COUNT);
+    test_failure_rollup_model();
     return 0;
 }

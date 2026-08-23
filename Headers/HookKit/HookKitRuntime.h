@@ -36,11 +36,10 @@ typedef enum {
     HK_INSTALL_CONTEXT_ARBITRARY_RUNTIME,
 } hk_install_context_t;
 
-// No internal worker thread is created by default (docs/3.0/ARCHITECTURE.md
-// invariant #7 -- loading the framework, and creating a runtime with no
-// executor, does no implicit work). Late-image delta work queues internally
-// until either an executor is supplied (submit() is called for each queued
-// task) or the caller drains it explicitly via hk_runtime_drain_pending().
+// No internal worker thread is created (docs/3.0/ARCHITECTURE.md invariant #7).
+// Deferred work remains queued until the caller invokes hk_runtime_drain_pending().
+// `submit` is retained for a future event source; no current engine claims
+// future-image reach or registers an automatic image callback.
 typedef void (*hk_task_fn)(void *task_context);
 
 typedef bool (*hk_executor_submit_fn)(
@@ -59,7 +58,7 @@ typedef void (*hk_diagnostic_callback_fn)(
 typedef struct {
     HK_STRUCT_HEADER;
 
-    hk_executor_submit_fn submit;   // NULL: no executor: caller must drain_pending()
+    hk_executor_submit_fn submit;   // reserved for a future event source
     void *executor_context;
 
     hk_diagnostic_callback_fn diagnostic_callback;  // NULL: no diagnostics emitted

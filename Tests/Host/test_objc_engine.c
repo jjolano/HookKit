@@ -252,12 +252,14 @@ static void test_availability_policies(void) {
                                              HK_AVAILABILITY_OPTIONAL_IF_PRESENT);
     assert(hk_objc_prepare(&rt, &no_sel_opt, &plan) == HK_OBJC_NOT_APPLICABLE);
 
-    // Deferral needs machinery this codebase does not have -- reported, not
-    // silently downgraded to "required now".
+    // An already-present target is prepared immediately even when the caller
+    // selected deferred availability; only an absent target is queued by the
+    // plan-level lifecycle.
     hk_objc_target_t deferred = target_for(&w.child, NULL, "bar", HK_OBJC_INSTANCE_METHOD,
                                            HK_OBJC_LOCAL_METHOD_ONLY,
                                            HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE);
-    assert(hk_objc_prepare(&rt, &deferred, &plan) == HK_OBJC_UNSUPPORTED_POLICY);
+    assert(hk_objc_prepare(&rt, &deferred, &plan) == HK_OBJC_OK);
+    assert(plan.captured);
 
     assert(w.rt.replace_calls == 0);
     printf("  availability-policies: PASS\n");

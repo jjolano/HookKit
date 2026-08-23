@@ -157,6 +157,50 @@ static void test_gate_on_blocks_whole_domain(void) {
     printf("  gate-on-blocks-whole-domain: PASS\n");
 }
 
+static void test_gate_on_blocks_after_mandatory_prepare_failure(void) {
+    // The first mandatory member prepares successfully, then a later
+    // mandatory member fails. The domain gate must release the first member's
+    // prepared state and refuse the domain as a whole; leaving the first
+    // member PREPARED would make the later commit path able to mutate part of
+    // a domain whose preparation contract already failed.
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt, &fake_rebind_engine));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_domain_spec_t dspec = gated_domain_spec("domain.prepare-failure");
+    hk_domain_t *domain = NULL;
+    assert(hk_plan_define_domain(plan, &dspec, &domain) == HK_STATUS_OK);
+
+    hk_hook_spec_t ok_spec = symbol_spec_in_domain(
+        "hook.prepare-ok", "getpid", domain, HK_OPERATION_MANDATORY);
+    hk_hook_t *ok_hook = NULL;
+    assert(hk_plan_add_hook(plan, &ok_spec, &ok_hook) == HK_STATUS_OK);
+
+    hk_hook_spec_t fail_spec = symbol_spec_in_domain(
+        "hook.prepare-fail", "getppid", domain, HK_OPERATION_MANDATORY);
+    hk_hook_t *fail_hook = NULL;
+    assert(hk_plan_add_hook(plan, &fail_spec, &fail_hook) == HK_STATUS_OK);
+
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(ok_hook->result.outcome == HK_OUTCOME_ANALYZED);
+    assert(fail_hook->result.outcome == HK_OUTCOME_ANALYZED);
+    fail_hook->matched_engine = &fake_always_fails_engine;
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_prepare(plan, &report) == HK_STATUS_OK);
+    assert(ok_hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(fail_hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+    assert(ok_hook->prepared_state == NULL);
+    assert(hk_plan_state(plan) == HK_PLAN_FAILED);
+
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  gate-on-blocks-after-mandatory-prepare-failure: PASS\n");
+}
+
 static void test_optional_hook_does_not_trigger_gate(void) {
     // An OPTIONAL hook with no route must not block its domain -- only
     // MANDATORY members count toward the gate (spec section 15.1).
@@ -204,6 +248,7 @@ int main(void) {
     test_no_domain_is_never_gated();
     test_gate_off_ignores_failed_mandatory_sibling();
     test_gate_on_blocks_whole_domain();
+    test_gate_on_blocks_after_mandatory_prepare_failure();
     test_optional_hook_does_not_trigger_gate();
     printf("all domain gate tests passed\n");
     return 0;

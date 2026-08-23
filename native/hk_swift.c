@@ -72,8 +72,8 @@ static bool hk_swift_resolve(Class cls, void ***out_vtable, const uint32_t **out
         return false;
     }
 
-    // 2. Swift class? The low bit of the class metadata Data word is set for
-    // Swift metatypes (SWIFT_CLASS_IS_SWIFT_MASK = 1 on Swift 5 runtimes).
+    // 2. Swift class? Apple stable-ABI metadata tags Data with bit 1
+    // (SWIFT_CLASS_IS_SWIFT_MASK = 2). Bit 0 is pre-stable ABI only.
     uintptr_t data = *(const uintptr_t *)((const char *)cls + HK_SWIFT_METADATA_DATA_OFFSET);
 
     if(!(data & HK_SWIFT_METADATA_IS_SWIFT_BIT)) {
@@ -278,13 +278,16 @@ bool hk_swift_find_slot(Class cls, const char *name, uint32_t *out_index) {
     return true;
 }
 
-bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out_orig) {
+bool hk_swift_prepare_slot(Class cls, uint32_t index,
+                           hk_swift_slot_plan_t *out_plan) {
     hk_swift_errno = 0;
 
-    if(!cls || !replacement) {
+    if(!cls || !out_plan) {
         hk_swift_errno = HK_SWIFT_ERR_ARG;
         return false;
     }
+
+    memset(out_plan, 0, sizeof(*out_plan));
 
     void **vtable = NULL;
     const uint32_t *methods = NULL;
@@ -332,16 +335,43 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
         return false;
     }
 
+    out_plan->slot = slot;
+    out_plan->original = old;
+    out_plan->discriminator = disc;
+    out_plan->prepared = true;
+    return true;
+}
+
+bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
+                          void *replacement, void **out_orig) {
+    hk_swift_errno = 0;
+
+    if(!plan || !plan->prepared || !plan->slot || !replacement) {
+        hk_swift_errno = HK_SWIFT_ERR_ARG;
+        return false;
+    }
+
+    if(!hk_native_range_readable(plan->slot, sizeof(void *))) {
+        hk_swift_errno = HK_SWIFT_ERR_UNREADABLE;
+        return false;
+    }
+
+    void *old = *plan->slot;
+    if(old != plan->original) {
+        hk_swift_errno = HK_SWIFT_ERR_STALE;
+        return false;
+    }
+
     // Publish the stripped original BEFORE the slot mutates: callers wiring a
     // trampoline chain to the original need it before the write, not after.
     if(out_orig) {
-        *out_orig = hk_strip_code(old);
+        *out_orig = hk_strip_code(plan->original);
     }
 
     // Strip-then-sign: the replacement may arrive already PAC-signed (dlsym,
     // objc methodImplementation, a hooked slot's old value). Signing it
     // directly would bake stale PAC bits in under the slot discriminator.
-    void *new_value = hk_sign_code(hk_strip_code(replacement), disc);
+    void *new_value = hk_sign_code(hk_strip_code(replacement), plan->discriminator);
 
     // Single aligned pointer store. Deliberately NOT hk_native_patch_memory:
     // this is LIVE class metadata that other threads dispatch through, and
@@ -349,12 +379,20 @@ bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out
     // when the protection flip is refused. hk_native_patch_pointer breaks the
     // COW and stores atomically, or fails — a vtable slot is never worth a
     // page swap.
-    if(!hk_native_patch_pointer(slot, new_value)) {
+    if(!hk_native_patch_pointer(plan->slot, new_value)) {
         hk_swift_errno = HK_SWIFT_ERR_WRITE;
         return false;
     }
 
     return true;
+}
+
+bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out_orig) {
+    hk_swift_slot_plan_t plan;
+    if(!hk_swift_prepare_slot(cls, index, &plan)) {
+        return false;
+    }
+    return hk_swift_commit_slot(&plan, replacement, out_orig);
 }
 
 bool hk_swift_hook_method(Class cls, const char *name, void *replacement, void **out_orig) {

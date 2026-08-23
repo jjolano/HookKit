@@ -1,6 +1,5 @@
-// hk_report_t construction/release. Real hk_report_release now -- it used
-// to be a no-op in HKRuntime.c because no concrete hk_report_t existed
-// yet (every out_report was NULL); that placeholder is replaced below.
+// hk_report_t construction/release. The concrete report owns result and
+// artifact snapshots returned by the plan lifecycle.
 
 #include "HKReportInternal.h"
 

@@ -462,6 +462,43 @@ static void tramp_release(hk_tramp_lease *lease) {
     lease->slot = NULL;
 }
 
+uintptr_t hk_native_reloc_alloc(size_t size, uintptr_t near) {
+    size_t page = (size_t)getpagesize();
+    if (size == 0 || size > page) {
+        hk_errno = HK_NATIVE_ERR_NO_MEMORY;
+        return 0;
+    }
+    vm_address_t address = tramp_map_near((uint64_t)near, page);
+    if (!address) {
+        hk_errno = HK_NATIVE_ERR_NO_MEMORY;
+    }
+    return (uintptr_t)address;
+}
+
+bool hk_native_reloc_seal(uintptr_t page, size_t size) {
+    (void)size;
+    if (!page) {
+        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
+        return false;
+    }
+    kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)page,
+                                  (vm_size_t)getpagesize(), FALSE,
+                                  VM_PROT_READ | VM_PROT_EXECUTE);
+    if (kr == KERN_SUCCESS) {
+        sys_icache_invalidate((void *)page, (size_t)getpagesize());
+    }
+    hk_errno = kr == KERN_SUCCESS ? 0 : kr;
+    return kr == KERN_SUCCESS;
+}
+
+void hk_native_reloc_free(uintptr_t page, size_t size) {
+    (void)size;
+    if (page) {
+        (void)vm_deallocate(mach_task_self(), (vm_address_t)page,
+                            (vm_size_t)getpagesize());
+    }
+}
+
 #pragma mark - Hooking
 
 // The engine's own capability gate, shared by hk_native_hook_function and the
@@ -713,6 +750,20 @@ bool hk_native_patch_pointer(void *slot, void *value) {
 bool hk_native_range_readable(const void *addr, size_t len) {
     (void)addr; (void)len;
     return false;
+}
+
+uintptr_t hk_native_reloc_alloc(size_t size, uintptr_t near) {
+    (void)size; (void)near;
+    return 0;
+}
+
+bool hk_native_reloc_seal(uintptr_t page, size_t size) {
+    (void)page; (void)size;
+    return false;
+}
+
+void hk_native_reloc_free(uintptr_t page, size_t size) {
+    (void)page; (void)size;
 }
 
 #endif

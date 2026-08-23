@@ -71,9 +71,8 @@ typedef struct {
 // EXACT NAME ONLY: the trie stores names in linker form, so a C symbol
 // `malloc` is present as `_malloc` and must be queried that way. Convention
 // normalization (the leading-underscore handling HKSymbolTable does
-// internally) deliberately is NOT repeated here -- that belongs in the
-// resolver-selection layer which will sit above both and is not yet written.
-// Stated so the asymmetry with HKSymbolTable is a known gap, not a surprise.
+// internally) deliberately is NOT repeated here -- resolver selection owns
+// convention normalization above this parser.
 //
 // Returns HK_EXPORT_UNSUPPORTED_KIND for a re-export: those name another
 // dylib rather than carrying an address, so resolving one requires following

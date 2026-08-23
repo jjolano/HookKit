@@ -1,0 +1,43 @@
+{
+  "provider_family": "dobby",
+  "version": "5dfc8546954ce3b3198132ab13fddb89ee92cdd7+hookkit-publication-order-2026-08-11",
+  "commit": "5dfc8546954ce3b3198132ab13fddb89ee92cdd7",
+  "sha256": "b193c5a97da61908d675723cbc14d86791e009ca2273a413fcd40793a525e6c9",
+  "exported_abi": ["DobbyHook", "DobbyDestroy"],
+  "architecture": "arm64",
+  "os_lane": "rootless",
+  "load_path": "compiled_in:vendor/dobby/libdobby.a",
+  "discovery_method": "compiled_in",
+  "activation_behavior": {
+    "requires_provider_activation": true,
+    "requires_provider_image_load": false,
+    "constructor_behavior": "unbounded_or_unknown",
+    "thread_behavior": "none",
+    "callback_behavior": "none",
+    "executable_allocation_behavior": "dynamic"
+  },
+  "continuation_kind": "dynamic",
+  "continuation_inspectable": false,
+  "original_publication_order": "before_activation",
+  "mutation_failure_semantics": "may_partially_mutate",
+  "verification_capability": "self_reported_only",
+  "device_test_results": [
+    {
+      "test_id": "provider-dobby-raw-smoke",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-21-device-provider3-arm64",
+      "date": "2026-08-21"
+    },
+    {
+      "test_id": "hk3-provider-dobby-lifecycle",
+      "verification_level": "device_verified",
+      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "result": "pass",
+      "evidence_run_id": "2026-08-22-device-provider-lifecycle3-arm64",
+      "date": "2026-08-22"
+    }
+  ],
+  "certification_status": "device_certified"
+}

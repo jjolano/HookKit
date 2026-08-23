@@ -1,11 +1,15 @@
-// Image catalog implementation -- the platform-agnostic half (structure +
-// selector matching). See HKImageCatalog.h for the host/device split; the
-// dyld populator is deliberately absent.
+// Image catalog implementation. Structure/selector matching is portable;
+// the dyld population path is compiled only on Darwin.
 
 #include "HKImageCatalog.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include "../Resolvers/HKMachO.h"
+#endif
 
 struct hk_image_catalog {
     hk_image_entry_t *entries;   // path points into per-entry owned storage
@@ -119,4 +123,57 @@ size_t hk_image_catalog_match(const hk_image_catalog_t *catalog,
         }
     }
     return visited;
+}
+
+bool hk_image_catalog_populate_from_dyld(hk_image_catalog_t *catalog) {
+#if defined(__APPLE__)
+    if (!catalog) {
+        return false;
+    }
+
+    bool all_added = true;
+    const uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const struct mach_header *header = _dyld_get_image_header(i);
+        const char *path = _dyld_get_image_name(i);
+        if (!header || !path) {
+            all_added = false;
+            continue;
+        }
+
+        hk_macho_header_t parsed;
+        if (hk_macho_peek_header(header, HK_MACHO_HEADER_64_SIZE, &parsed) != HK_MACHO_OK) {
+            all_added = false;
+            continue;
+        }
+
+        hk_image_entry_t entry;
+        memset(&entry, 0, sizeof(entry));
+        entry.path = path;
+        entry.header = header;
+        entry.slide = (uintptr_t)_dyld_get_image_vmaddr_slide(i);
+        // Jailbreak injection can place a dylib before the executable in the
+        // dyld list, so index 0 is not a reliable main-image test.
+        entry.is_main_executable = (parsed.filetype == HK_MH_EXECUTE);
+
+        const size_t command_size = HK_MACHO_HEADER_64_SIZE + parsed.sizeofcmds;
+        size_t uuid_offset = 0;
+        uint32_t uuid_cmd_size = 0;
+        if (hk_macho_find_load_command(header, command_size, HK_LC_UUID,
+                                       &uuid_offset, &uuid_cmd_size) == HK_MACHO_OK &&
+            uuid_cmd_size >= 24u) {
+            memcpy(entry.uuid, (const uint8_t *)header + uuid_offset + 8u, 16u);
+            entry.uuid_present = true;
+        }
+
+        if (!hk_image_catalog_add_entry(catalog, &entry)) {
+            all_added = false;
+            break;
+        }
+    }
+    return all_added;
+#else
+    (void)catalog;
+    return false;
+#endif
 }

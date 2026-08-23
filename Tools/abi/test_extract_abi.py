@@ -3,7 +3,8 @@
 
 import re
 
-from extract_abi import sha256_file
+from extract_abi import (_complete_objc_arches, _parse_objc_arch,
+                         parse_enum_values, sha256_file)
 import hashlib
 import tempfile
 import os
@@ -20,6 +21,24 @@ REAL_OTOOL_SAMPLE = """Load command 4
 compatibility version 2.5.0
 Load command 5
           cmd LC_SEGMENT_64
+"""
+
+OBJC_OTOOL_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKSubstitutor
+    data 0x200
+        name 0x20 HKSubstitutor
+        baseMethods 0x30 __OBJC_$_INSTANCE_METHODS_HKSubstitutor
+            name 0x40 (0x50)
+            types 0x60 v16@0:8
+            imp 0x70 -[HKSubstitutor init]
+        baseProperties 0x80 __OBJC_$_PROP_LIST_HKSubstitutor
+            name 0x90 (0xa0)
+            attributes 0xb0 T@,N,Vvalue
+Meta Class
+        baseMethods 0xc0 __OBJC_$_CLASS_METHODS_HKSubstitutor
+            name 0xd0 (0xe0)
+            types 0xf0 @16@0:8
+            imp 0x100 +[HKSubstitutor shared]
+0000000000001100 0x100 _OBJC_CLASS_$_HKSubstitutor
 """
 
 
@@ -57,6 +76,43 @@ def test_sha256_file_matches_hashlib_directly():
         path = f.name
     try:
         assert sha256_file(path) == hashlib.sha256(content).hexdigest()
+    finally:
+        os.unlink(path)
+
+
+def test_objc_parser_reads_address_only_selectors_and_deduplicates_refs():
+    parsed = _parse_objc_arch(OBJC_OTOOL_SAMPLE, "arm64e", {"HKSubstitutor"})
+    substitutor = parsed["HKSubstitutor"]
+    assert substitutor["instance_methods"] == [
+        {"selector": "init", "type_encoding": {"arm64e": "v16@0:8"}}
+    ]
+    assert substitutor["class_methods"] == [
+        {"selector": "shared", "type_encoding": {"arm64e": "@16@0:8"}}
+    ]
+    assert substitutor["properties"] == [{"name": "(0xa0)"}]
+
+
+def test_objc_metadata_fallback_can_fill_unresolved_slice():
+    merged = {"HKSubstitutor": {"instance_methods": [{
+        "selector": "init", "type_encoding": {"arm64": "v16@0:8"}
+    }]}}
+    _complete_objc_arches(merged, ["arm64", "arm64e"])
+    assert merged["HKSubstitutor"]["instance_methods"][0]["type_encoding"] == {
+        "arm64": "v16@0:8", "arm64e": "v16@0:8"
+    }
+
+
+def test_enum_parser_preserves_implicit_and_bit_values():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".h", delete=False) as f:
+        f.write("""
+        typedef enum { A = 0, B = (1 << 2), C } Old;
+        typedef NS_ENUM(NSUInteger, New) { D, E = B | 1, F };
+        """)
+        path = f.name
+    try:
+        assert parse_enum_values([path]) == {
+            "A": 0, "B": 4, "C": 5, "D": 0, "E": 5, "F": 6
+        }
     finally:
         os.unlink(path)
 

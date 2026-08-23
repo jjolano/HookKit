@@ -9,8 +9,7 @@
 #include "../Resolvers/HKMachO.h"
 #include "../Resolvers/HKSymbolResolve.h"
 
-static uint64_t read_slot(const void *base, uintptr_t address) {
-    (void)base;
+uint64_t hk_rebind_read_slot(uintptr_t address) {
     uint64_t v;
     memcpy(&v, (const void *)address, sizeof(v));
     return v;
@@ -31,7 +30,7 @@ static bool add_site(hk_rebind_plan_t *plan, uintptr_t address, bool from_chaine
     }
     hk_rebind_site_t *s = &plan->sites[plan->count++];
     s->address = address;
-    s->original = read_slot(NULL, address);
+    s->original = hk_rebind_read_slot(address);
     s->from_chained = from_chained;
     return true;
 }
@@ -191,6 +190,16 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
         return HK_MUTATION_NONE;  // nothing attempted, nothing touched
     }
 
+    if (sink && sink->require_predecessor_match) {
+        const uint64_t predecessor =
+            (uint64_t)(uintptr_t)sink->required_predecessor;
+        for (uint32_t i = 0; i < plan->count; i++) {
+            if (plan->sites[i].original != predecessor) {
+                return HK_MUTATION_NONE;
+            }
+        }
+    }
+
     uint32_t written = 0;
     for (uint32_t i = 0; i < plan->count; i++) {
         const hk_rebind_site_t *site = &plan->sites[i];
@@ -199,7 +208,7 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
         // no longer holds what prepare saw, something else changed it since --
         // possibly another hooking consumer -- and writing would silently
         // destroy their work.
-        if (read_slot(target->image_base, site->address) != site->original) {
+        if (hk_rebind_read_slot(site->address) != site->original) {
             // Refusing on the FIRST site means nothing was touched; refusing
             // later means the image is already mixed.
             if (out_written) { *out_written = written; }

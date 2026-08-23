@@ -208,6 +208,40 @@ static void test_partial_when_some_hooks_fail(void) {
     printf("  partial-when-some-hooks-fail: PASS\n");
 }
 
+static void test_group_prepare_batches_adjacent_hooks(void) {
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    fake_group_prepare_reset();
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_for_testing(rt,
+                                                  &fake_group_rebind_engine));
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+
+    hk_hook_spec_t first_spec = symbol_spec("group.first", "getpid");
+    hk_hook_spec_t second_spec = symbol_spec("group.second", "getppid");
+    hk_hook_t *first = NULL;
+    hk_hook_t *second = NULL;
+    assert(hk_plan_add_hook(plan, &first_spec, &first) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &second_spec, &second) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(first->result.outcome == HK_OUTCOME_ANALYZED);
+    assert(second->result.outcome == HK_OUTCOME_ANALYZED);
+
+    hk_report_t *report = NULL;
+    assert(hk_plan_prepare(plan, &report) == HK_STATUS_OK);
+    assert(fake_group_prepare_calls == 1);
+    assert(fake_group_prepare_members == 2);
+    assert(first->result.outcome == HK_OUTCOME_PREPARED);
+    assert(second->result.outcome == HK_OUTCOME_PREPARED);
+    assert(report->results[0].outcome == HK_OUTCOME_PREPARED);
+    assert(report->results[1].outcome == HK_OUTCOME_PREPARED);
+
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+    printf("  group-prepare-batches-adjacent-hooks: PASS\n");
+}
+
 int main(void) {
     test_prepare_requires_analyzed_state();
     test_analyzed_hook_prepares_successfully();
@@ -215,6 +249,7 @@ int main(void) {
     test_prepare_failure_reports_failed_safe();
     test_engine_without_prepare_one_treated_as_failure();
     test_partial_when_some_hooks_fail();
+    test_group_prepare_batches_adjacent_hooks();
     printf("all plan prepare tests passed\n");
     return 0;
 }

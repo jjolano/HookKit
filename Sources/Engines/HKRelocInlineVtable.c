@@ -11,15 +11,28 @@ static hk_engine_capabilities_t reloc_describe(void) {
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-relocating";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
-    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                         HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.certified_architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                                   HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.minimum_ios_version = HK_ENGINE_IOS_VERSION(15, 0, 0);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT |
+                            HK_REACH_EXACT_IMAGE_SCOPE;
+    caps.exact_image_scope_targets = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     // All three, and that is the whole reason this engine exists alongside the
     // terminal one: it preserves the displaced prologue in a trampoline, so
     // the original stays reachable in every form a request can ask for.
     caps.original_requirements = HK_ORIGINAL_REQ_ALL;
-    // The entry patch AND an executable page. Declaring the allocation is what
-    // lets a caller who forbids it be routed to the terminal engine instead of
-    // silently getting a page anyway.
-    caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION | HK_EFFECT_EXECUTABLE_ALLOCATION;
+    // The page is obtained and sealed during preparation; only the entry is
+    // changed during commit. Keeping the phases separate is what lets the
+    // router honor a no-dynamic-memory request before any target mutation.
+    caps.prepare_effects = HK_EFFECT_EXECUTABLE_ALLOCATION;
+    // The continuation artifact is published with the commit report, so
+    // retain the resource effect in this upper bound as well as the target
+    // mutation. The prepare declaration is what makes pre-commit routing
+    // constraints enforceable.
+    caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION |
+                          HK_EFFECT_EXECUTABLE_ALLOCATION;
     return caps;
 }
 
@@ -108,8 +121,35 @@ static hk_prepare_result_t reloc_prepare_one_ctx_status(void *engine_ctx,
         return HK_PREPARE_FAILED;
     }
 
+    out_diag->observed_effects = ctx->static_continuation
+        ? HK_EFFECT_STATIC_CONTINUATION_USE
+        : HK_EFFECT_EXECUTABLE_ALLOCATION;
     *out_prepared = plan;
     return HK_PREPARE_OK;
+}
+
+static void reloc_fill_continuation(const hk_reloc_engine_ctx_t *ctx,
+                                    const hk_reloc_plan_t *plan,
+                                    hk_continuation_info_t *out) {
+    hk_reloc_describe_continuation(plan, ctx->static_continuation, out);
+}
+
+static hk_verify_result_t reloc_inspect_continuation(
+    void *engine_ctx,
+    const hk_hook_spec_t *spec,
+    void *prepared,
+    hk_continuation_info_t *out_info,
+    hk_verify_diag_t *out_diag) {
+    const hk_reloc_engine_ctx_t *ctx = engine_ctx;
+    if (!ctx || !spec || !prepared || !out_info ||
+        spec->target_kind != HK_TARGET_FUNCTION_ADDRESS) {
+        out_diag->error_code = HK_STATUS_INVALID_ARGUMENT;
+        out_diag->error_message =
+            "relocating-inline continuation inspection received invalid state";
+        return HK_VERIFY_FAILED;
+    }
+    reloc_fill_continuation(ctx, (const hk_reloc_plan_t *)prepared, out_info);
+    return HK_VERIFY_OK;
 }
 
 static hk_mutation_state_t reloc_commit_one_ctx(void *engine_ctx,
@@ -121,9 +161,37 @@ static hk_mutation_state_t reloc_commit_one_ctx(void *engine_ctx,
     if (!ctx || !prepared) {
         return HK_MUTATION_NONE;
     }
-    return hk_reloc_commit((const hk_reloc_plan_t *)prepared,
-                           ctx->write, ctx->write_ctx,
-                           ctx->free_page, ctx->seam_ctx, sink);
+    const hk_reloc_plan_t *plan = (const hk_reloc_plan_t *)prepared;
+    if (sink) {
+        sink->static_continuation = ctx->static_continuation;
+    }
+    hk_mutation_state_t state =
+        hk_reloc_commit(plan, ctx->write, ctx->write_ctx,
+                        ctx->free_page, ctx->seam_ctx, sink);
+    if (state == HK_MUTATION_COMPLETE && sink) {
+        sink->published_original = (void *)plan->original_entry;
+        reloc_fill_continuation(ctx, plan, &sink->continuation);
+        sink->has_continuation = true;
+    }
+    return state;
+}
+
+static hk_verify_result_t reloc_verify_one_ctx(void *engine_ctx,
+                                               const hk_hook_spec_t *spec,
+                                               void *prepared,
+                                               hk_verify_diag_t *out_diag) {
+    (void)engine_ctx;
+    (void)spec;
+    if (!prepared) {
+        out_diag->error_message = "relocating-inline verification received no prepared plan";
+        return HK_VERIFY_FAILED;
+    }
+    const hk_reloc_plan_t *plan = prepared;
+    if (memcmp((const void *)plan->address, plan->patch, plan->patch_size) != 0) {
+        out_diag->error_message = "relocating-inline readback does not match the emitted branch";
+        return HK_VERIFY_FAILED;
+    }
+    return HK_VERIFY_OK;
 }
 
 static void reloc_release_prepared(void *engine_ctx, void *prepared) {
@@ -143,26 +211,38 @@ static hk_engine_capabilities_t static_describe(void) {
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-static";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
-    caps.achievable_reach = HK_REACH_ENTRYPOINT;
+    caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                         HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.certified_architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
+                                   HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.minimum_ios_version = HK_ENGINE_IOS_VERSION(15, 0, 0);
+    caps.achievable_reach = HK_REACH_ENTRYPOINT |
+                            HK_REACH_EXACT_IMAGE_SCOPE;
+    caps.exact_image_scope_targets = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     caps.original_requirements = HK_ORIGINAL_REQ_ALL;
     // The entry patch, and NOTHING else. No HK_EFFECT_EXECUTABLE_ALLOCATION:
     // the slot was executable before the process ran a line of hook code.
     // HK_EFFECT_STATIC_CONTINUATION_USE says which kind of continuation this
     // is, and is separately forbiddable -- a caller can refuse static
     // continuations without refusing dynamic ones, and vice versa.
+    caps.prepare_effects = HK_EFFECT_STATIC_CONTINUATION_USE;
     caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION |
                           HK_EFFECT_STATIC_CONTINUATION_USE;
     return caps;
 }
 
 static const hk_engine_vtable_t g_static_vtable = {
+    .abi_version = HK_ENGINE_VTABLE_ABI_VERSION_1,
+    .struct_size = sizeof(hk_engine_vtable_t),
     .describe = static_describe,
     // Deliberately the SAME functions as the dynamic vtable below. If these
     // ever diverge, the two have stopped being one mechanism and the header's
     // claim that only the declaration differs has become false.
     .prepare_one_ctx_status = reloc_prepare_one_ctx_status,
     .commit_one_ctx = reloc_commit_one_ctx,
+    .verify_one_ctx = reloc_verify_one_ctx,
     .release_prepared = reloc_release_prepared,
+    .inspect_continuation = reloc_inspect_continuation,
 };
 
 const hk_engine_vtable_t *hk_static_inline_vtable(void) {
@@ -170,10 +250,14 @@ const hk_engine_vtable_t *hk_static_inline_vtable(void) {
 }
 
 static const hk_engine_vtable_t g_reloc_vtable = {
+    .abi_version = HK_ENGINE_VTABLE_ABI_VERSION_1,
+    .struct_size = sizeof(hk_engine_vtable_t),
     .describe = reloc_describe,
     .prepare_one_ctx_status = reloc_prepare_one_ctx_status,
     .commit_one_ctx = reloc_commit_one_ctx,
+    .verify_one_ctx = reloc_verify_one_ctx,
     .release_prepared = reloc_release_prepared,
+    .inspect_continuation = reloc_inspect_continuation,
 };
 
 const hk_engine_vtable_t *hk_reloc_inline_vtable(void) {

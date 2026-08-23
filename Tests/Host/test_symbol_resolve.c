@@ -452,6 +452,13 @@ static void test_sources_from_loaded_image(void) {
     assert(r.raw_value == 0x4000);
     assert(r.address == 0x4000 + slide);
 
+    // The production wrapper uses the same normal Mach-O sources before it
+    // falls through to the device-only shared-cache reader.
+    assert(hk_resolve_loaded_image_symbol(
+               img, IMG, slide, "lpriv", HK_SYMBOL_NAME_C,
+               HK_SYMBOL_VISIBILITY_PRIVATE_ALLOWED, &r) == HK_RESOLVE_OK);
+    assert(r.source == HK_RESOLVE_SOURCE_SYMBOL_TABLE && r.raw_value == 0x4000);
+
     free(img);
     printf("  sources-from-loaded-image: PASS\n");
 }

@@ -10,10 +10,9 @@
 # not a parse.
 #
 # Empty for now -- extract.py's structured_table pass hasn't needed a
-# correction yet. Add entries here once the per-hook decomposition pass
-# (logos_preprocess.py / clang_ast_extract.py, not built yet -- see
-# extract.py's module docstring) finds something it genuinely can't resolve
-# statically, or once a reviewer disagrees with one of extract.py's
+# correction yet. Add entries here once a source-level parser finds something
+# it genuinely can't resolve statically, or once a reviewer disagrees with
+# one of extract.py's
 # documented reasoned defaults (original_requirement, required_reach).
 #
 # Example shape:

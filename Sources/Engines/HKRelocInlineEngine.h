@@ -122,6 +122,7 @@ typedef struct {
     uintptr_t address;                     // the entry being patched
     uintptr_t trampoline;                  // the page, as handed back
     size_t trampoline_size;
+    hk_id_t mapping_id;                    // stable identity for this continuation mapping
     // What a caller invokes to reach the original: the body, not the page.
     uintptr_t original_entry;
     uint8_t original[HK_RELOC_MAX_PATCH];  // bytes the patch replaces
@@ -146,6 +147,22 @@ hk_reloc_status_t hk_reloc_prepare(uintptr_t target, uintptr_t replacement,
                                    hk_reloc_alloc_fn alloc, hk_reloc_seal_fn seal,
                                    hk_reloc_free_fn free_page, void *seam_ctx,
                                    hk_reloc_plan_t *out_plan);
+
+// Build only the callable continuation, relocating exactly
+// `overwrite_size` bytes. The caller owns target activation and promises its
+// patch cannot extend beyond that audited span. This is the provider-hybrid
+// path: HookKit preserves the prologue; the provider performs the write.
+hk_reloc_status_t hk_reloc_prepare_continuation(
+    uintptr_t target, size_t overwrite_size,
+    const uint8_t *expected_initial_bytes, size_t expected_size,
+    hk_reloc_alloc_fn alloc, hk_reloc_seal_fn seal,
+    hk_reloc_free_fn free_page, void *seam_ctx,
+    hk_reloc_plan_t *out_plan);
+
+// Shared description for every HookKit-built relocation continuation.
+void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
+                                    bool static_continuation,
+                                    hk_continuation_info_t *out_info);
 
 // Phase 2. Revalidates the entry against what prepare read, then patches it.
 // Records HK_ARTIFACT_TARGET_TEXT_PATCH and, for the page,

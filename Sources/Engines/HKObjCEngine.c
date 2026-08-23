@@ -33,13 +33,15 @@ hk_objc_status_t hk_objc_prepare(const hk_objc_runtime_t *rt,
     }
     memset(out_plan, 0, sizeof(*out_plan));
 
-    // Deferral needs somewhere to retry from. Refuse rather than quietly
-    // treating it as "required now", which would turn a caller's "whenever it
-    // shows up" into a hard failure at a moment they did not choose.
-    if (target->availability == HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE) {
-        return HK_OBJC_UNSUPPORTED_POLICY;
-    }
-    const bool optional = (target->availability == HK_AVAILABILITY_OPTIONAL_IF_PRESENT);
+    // DEFER_UNTIL_AVAILABLE used to be refused here, because deferral needed
+    // somewhere to retry from and there was nowhere. Milestone 12 built that:
+    // the plan marks an absent deferred target PENDING and the runtime retries
+    // it on drain. So this engine's job is the same for both conditional
+    // forms -- report that the target is not here -- and the difference
+    // between "skip it" and "wait for it" is the plan's to make, not the
+    // engine's.
+    const bool optional = (target->availability == HK_AVAILABILITY_OPTIONAL_IF_PRESENT ||
+                           target->availability == HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE);
 
     // A pointer, when given, wins over the name -- the caller already did the
     // lookup and may have a class the name would not reach.
@@ -114,6 +116,11 @@ hk_mutation_state_t hk_objc_commit(const hk_objc_runtime_t *rt,
                                    void **out_original,
                                    hk_artifact_sink_t *sink) {
     if (!runtime_complete(rt) || !plan || !plan->captured || !replacement) {
+        return HK_MUTATION_NONE;
+    }
+
+    if (sink && sink->require_predecessor_match &&
+        plan->original_imp != sink->required_predecessor) {
         return HK_MUTATION_NONE;
     }
 

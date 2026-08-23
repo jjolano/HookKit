@@ -15,9 +15,21 @@ static hk_engine_capabilities_t objc_describe(void) {
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "objc";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
+    caps.architectures = HK_ENGINE_ARCHITECTURE_ARMV7 |
+                         HK_ENGINE_ARCHITECTURE_ARMV7S |
+                         HK_ENGINE_ARCHITECTURE_ARM64 |
+                         HK_ENGINE_ARCHITECTURE_ARM64E;
+    caps.certified_architectures = caps.architectures;
+    caps.minimum_ios_version = HK_ENGINE_IOS_VERSION(9, 0, 0);
+    // Objective-C method replacement has no compare-and-exchange primitive;
+    // keep it to the serialized install contexts the contract can certify.
+    caps.install_contexts = HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_EARLY_PROCESS) |
+                            HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_MAIN_THREAD_SERIALIZED) |
+                            HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_RUNTIME_SERIALIZED);
     caps.achievable_reach = HK_REACH_OBJC_DISPATCH;
     // A method implementation swapped; no code written, no memory allocated.
     caps.commit_effects = HK_EFFECT_OBJC_METADATA_MUTATION;
+    caps.chainable_target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
     return caps;
 }
 
@@ -28,8 +40,8 @@ static hk_prepare_result_t objc_classify(hk_objc_status_t st, hk_prepare_diag_t 
     switch (st) {
         case HK_OBJC_NOT_APPLICABLE:
             // The one status that is NOT a failure: the request said
-            // OPTIONAL_IF_PRESENT and the target is absent, so it is
-            // satisfied. This is the whole reason for the richer result.
+            // OPTIONAL_IF_PRESENT or DEFER_UNTIL_AVAILABLE and the target is
+            // absent, so the plan decides whether it is satisfied or queued.
             diag->error_message = NULL;
             diag->error_code = 0;
             return HK_PREPARE_NOT_APPLICABLE;
@@ -42,7 +54,7 @@ static hk_prepare_result_t objc_classify(hk_objc_status_t st, hk_prepare_diag_t 
         case HK_OBJC_NO_IMPLEMENTATION:
             diag->error_message = "method has no implementation to publish as the original"; break;
         case HK_OBJC_UNSUPPORTED_POLICY:
-            diag->error_message = "DEFER_UNTIL_AVAILABLE needs an image-load callback, which is unbuilt"; break;
+            diag->error_message = "unsupported Objective-C availability policy"; break;
         case HK_OBJC_INVALID_ARGUMENT:
             diag->error_message = "invalid objc target"; break;
         case HK_OBJC_OK:
@@ -85,10 +97,61 @@ static hk_mutation_state_t objc_commit_one_ctx(void *engine_ctx,
     if (!ctx || !spec || !prepared) {
         return HK_MUTATION_NONE;  // never prepared, or prepared by someone else
     }
-    // out_original is NULL: the original travels in the artifact instead --
-    // see the header.
-    return hk_objc_commit(&ctx->runtime, (const hk_objc_plan_t *)prepared,
-                          spec->replacement, NULL, sink);
+    void *original = NULL;
+    hk_mutation_state_t state =
+        hk_objc_commit(&ctx->runtime, (const hk_objc_plan_t *)prepared,
+                       spec->replacement, &original, sink);
+    if (state == HK_MUTATION_COMPLETE && sink) {
+        sink->published_original = original;
+    }
+    return state;
+}
+
+static hk_verify_result_t objc_verify_one_ctx(void *engine_ctx,
+                                              const hk_hook_spec_t *spec,
+                                              void *prepared,
+                                              hk_verify_diag_t *out_diag) {
+    hk_objc_engine_ctx_t *ctx = engine_ctx;
+    if (!ctx || !spec || !prepared ||
+        spec->target_kind != HK_TARGET_OBJC_METHOD ||
+        !ctx->runtime.get_instance_method || !ctx->runtime.method_get_imp) {
+        out_diag->error_message = "objc verification received an invalid prepared plan";
+        return HK_VERIFY_FAILED;
+    }
+    const hk_objc_plan_t *plan = prepared;
+    void *method = ctx->runtime.get_instance_method(ctx->runtime.ctx,
+                                                    plan->cls, plan->sel);
+    if (!method || ctx->runtime.method_get_imp(ctx->runtime.ctx, method) !=
+                     spec->replacement) {
+        out_diag->error_message = "objc method readback does not match the replacement";
+        return HK_VERIFY_FAILED;
+    }
+    return HK_VERIFY_OK;
+}
+
+static hk_verify_result_t objc_inspect_continuation(
+    void *engine_ctx, const hk_hook_spec_t *spec, void *prepared,
+    hk_continuation_info_t *out_info, hk_verify_diag_t *out_diag) {
+    (void)engine_ctx;
+    const hk_objc_plan_t *plan = prepared;
+    if (!spec || !plan || !plan->captured || !out_info ||
+        spec->target_kind != HK_TARGET_OBJC_METHOD || !plan->original_imp) {
+        out_diag->error_code = HK_STATUS_INVALID_ARGUMENT;
+        out_diag->error_message =
+            "objc continuation inspection received invalid prepared state";
+        return HK_VERIFY_FAILED;
+    }
+    memset(out_info, 0, sizeof(*out_info));
+    out_info->struct_size = sizeof(*out_info);
+    out_info->struct_version = HK_ABI_VERSION_3_0;
+    out_info->kind = HK_CONTINUATION_KIND_DIRECT_PREDECESSOR;
+    out_info->address = (uintptr_t)plan->original_imp;
+    out_info->mapping_kind = HK_MAPPING_UNKNOWN;
+    out_info->readable = true;
+    out_info->mechanically_reversible = plan->is_local;
+    out_info->safe_to_reverse_after_activation = plan->is_local;
+    out_info->fully_inspected = true;
+    return HK_VERIFY_OK;
 }
 
 static void objc_release_prepared(void *engine_ctx, void *prepared) {
@@ -97,10 +160,14 @@ static void objc_release_prepared(void *engine_ctx, void *prepared) {
 }
 
 static const hk_engine_vtable_t g_objc_vtable = {
+    .abi_version = HK_ENGINE_VTABLE_ABI_VERSION_1,
+    .struct_size = sizeof(hk_engine_vtable_t),
     .describe = objc_describe,
     .prepare_one_ctx_status = objc_prepare_one_ctx_status,
     .commit_one_ctx = objc_commit_one_ctx,
+    .verify_one_ctx = objc_verify_one_ctx,
     .release_prepared = objc_release_prepared,
+    .inspect_continuation = objc_inspect_continuation,
 };
 
 const hk_engine_vtable_t *hk_objc_vtable(void) {

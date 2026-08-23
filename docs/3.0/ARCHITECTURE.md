@@ -125,8 +125,6 @@ Headers/
     HookKitArtifacts.h
     HookKitObjC.h
     HookKitSwift.h
-    HookKitLegacy.h             # deprecated HKSubstitutor declarations
-    Compat.h                    # imports HookKitLegacy.h
 
 Sources/
   Core/          # HKRuntime, HKPlan, HKDomain, HKOperation, HKRouter,
@@ -150,28 +148,20 @@ Tools/            # abi/ shadow-manifest-extract/ route-feasibility/ provider-au
 docs/3.0/
 ```
 
-The existing 2.x implementation (`Backends/`, `Internal/`, `native/`,
-`HKSubstitutor.m`, `HKBackendRegistry.m`) coexists during migration. It is
-removed only once the compatibility facade runs entirely over the new
-runtime (end of Milestone 11) — not deleted preemptively, and not kept
-around past that point either.
+The former 2.x router/backend implementation was removed after the canonical
+facade moved entirely to the new runtime. The retained compatibility surface
+lives in `Sources/Compatibility/`; Git history preserves the retired source
+for forensic reference without leaving a second implementation in-tree.
 
 ## Relationship to HookKit 2.x
 
-Every 2.x mechanism this rewrite needs already exists and is, in most
-cases, already correct: nine backends, a working ARM64 relocator, a Swift
-vtable engine, an inline-hook ownership guard with explicit PENDING/TAINTED
-states, vendored and integrated providers. HK3.0 is substantially a
-*formalization* project — turning invariants that are currently enforced by
-careful code and comments (see `native/hk_native.h`, `Internal/HKInlineGuard.c`)
-into an explicit, versioned, testable ABI — not a from-scratch build. Treat
-existing 2.x behavior as the reference implementation to conform to the new
-contract, not as legacy code to discard and reinvent.
+The 2.x audit informed the HK3 engine contracts, but HK3 now owns the only
+in-tree implementation. Its versioned ABI, lifecycle tests, provider
+evidence, and historical binary fixtures are the compatibility contract.
 
 ## Compatibility policy
 
-Full policy: `LEGACY_ABI.md` (Milestone 1, pending) and
-`V1_MODULE_COMPATIBILITY_AUDIT.md`.
+Full policy: `LEGACY_ABI.md` and `V1_MODULE_COMPATIBILITY_AUDIT.md`.
 
 Summary: HookKit 2.1.1 through 2.5.0 fixture binaries must run against
 HookKit 3 unrecompiled. The v1.0.1 `HKSubstitutor` subset must run

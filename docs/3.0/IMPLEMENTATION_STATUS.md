@@ -7,17 +7,27 @@ Scope, invariants, and milestone definitions live in the master spec (not
 checked in verbatim — see `ARCHITECTURE.md` for the condensed version of what
 actually governs implementation). This file tracks *status only*.
 
-Two things this rewrite must not disturb without explicit sign-off, recorded
-here because they are easy to forget mid-milestone:
+Two boundaries are recorded here because they are easy to forget mid-
+milestone:
 
-- `../shadow` has an active, device-verified execution plan
-  (`shadow/docs/STEALTH-HARDENING-PLAN.md`) unrelated to this rewrite. Do not
-  touch that repo until a milestone explicitly calls for it (Milestone 14) and
-  the user has signed off.
+- `../shadow` migration work is authorized by explicit user sign-off on
+  2026-08-22. Milestone 14 records the exact source/build/device scope; its
+  performance baseline remains outside the accepted source-plus-current-device
+  release bar.
 - Nothing in this repo may claim device-verified, fuzz-tested, or
   performance-gated status without an actual run. Every entry below states
   its verification level explicitly: **host-verified**, **device-verified**,
   or **not yet verified**.
+
+> **2026-08-22 canonical cutover update.** The beta `HookKit3.framework`
+> identity is retired. All four release lanes now package canonical
+> `HookKit.framework` at 3.0.0-1 with the retained `HKSubstitutor` facade,
+> canonical export list, nested new headers, package replacement metadata,
+> and v2.1.1–v2.5.0 ABI gate. The obsolete beta narrative below is historical;
+> `LEGACY_ABI.md` is the current compatibility policy. References below to
+> retired 2.x/beta source paths are archival evidence, not current files.
+> Validation claims remain limited to package/source/ABI coverage for old and
+> arm64e lanes plus the existing arm64 device smoke.
 
 ---
 
@@ -34,22 +44,20 @@ here because they are easy to forget mid-milestone:
 | Task | State | Evidence |
 |---|---|---|
 | Clean host build/test | complete (host-verified) | `make test` — 5 suites, exit 0 |
-| Clean builds, all 4 packaging lanes | complete (host-verified, cross-build) | `./build.sh all` — rootful-legacy, rootful-modern, rootless, roothide all exit 0; `check-exports`/`check-compat` 64/64 PASS |
+| Clean builds, all 4 packaging lanes | complete (host-verified, cross-build) | `./build.sh all` — rootful-legacy, rootful-modern, rootless, roothide all exit 0; `check-exports`/`check-compat` 64/64 PASS. Re-run 2026-08-22 after the modern toolchain repair: rootful-modern, rootless, and roothide arm64e payloads carry ptrauth ABI marker `0x80`; rootful-legacy intentionally remains old ABI (`0x00`). |
 | Historical tags archived/referenced | complete | all 11 tags present locally: v1.0.1, v2.1.1, v2.2.0–v2.2.5, v2.3.0, v2.4.0, v2.5.0 |
-| HookKit 2.5 performance baseline | not started | needs device access (launch CPU, RSS, VM region count, hook-install time — see spec §28.3) |
-| Shadow performance baseline | not started | needs device access; also blocked on not touching `shadow/` yet |
-| Reverse-dependency audit (v1 module API) — started | in progress | see `V1_MODULE_COMPATIBILITY_AUDIT.md` (started, not concluded) |
+| HookKit 2.5 performance baseline | complete (device-verified) | `make device-smoke-performance`; five iPhone9,3 iOS 15.8.3 samples: startup CPU 24,329–25,707 µs, startup RSS 2,703,360–2,752,512 B, startup VM regions 61–62, hook install 107–138 µs; device restored unchanged |
+| Shadow performance baseline | deferred (accepted) | user accepted source-level validation plus current-device package/smoke validation; no separate performance gate requested |
+| Reverse-dependency audit (v1 module API) | complete | `V1_MODULE_COMPATIBILITY_AUDIT.md`; local plus public-source pass closed; retained facade and legacy 2.5 package, no v1 module ABI |
 | This ledger | complete | — |
 
 Commit: `3e6bbdb` (native engine concurrency hardening — pre-existing
 in-progress work reviewed and committed to reach a clean tree; not itself
 HK3.0 architecture, but the baseline this ledger measures from).
 
-Deviation from spec: performance baselines deferred — they require the
-physical jailbroken test device, which has not been engaged yet this
-initiative. Will request device time when a milestone actually needs it
-rather than blocking Milestone 0 exit on it, since nothing downstream reads
-the performance baseline until the release gates in §28.4.
+Deviation from spec: the Shadow performance baseline remains deferred by the
+accepted source-plus-current-device release bar. The HookKit 2.5 baseline is
+now collected.
 
 ---
 
@@ -67,7 +75,7 @@ the performance baseline until the release gates in §28.4.
 | `Schemas/shadow-route-report.schema.json` | complete | commit `53a209f` |
 | `ENGINE_CONTRACT.md` (draft) | complete | commit `135cacb` |
 | Legacy compatibility policy doc (`LEGACY_ABI.md`) | complete | commit `135cacb` |
-| `V1_MODULE_COMPATIBILITY_AUDIT.md` | in progress (trending conclusion recorded; public-source search still open) | commit `135cacb` |
+| `V1_MODULE_COMPATIBILITY_AUDIT.md` | complete (public-source pass closed; archived binary dependency distinguished from source/API use) | current working tree; public Shadow/Enmity evidence links in audit |
 
 Schema validation: all four `Schemas/*.json` files verified as both valid
 JSON and structurally valid JSON Schema (draft 2020-12) via Python's
@@ -81,8 +89,9 @@ migration twice (2023) for a "version 4" that was never tagged/released —
 upstream stalled at v3.7.6 — and the current revival's own (superseded)
 plan explicitly deleted Modulous, confirmed against current `shadow` master
 (zero refs). Trending conclusion: v1 `HKSubstitutor` subset only, no full
-module ABI. Not finalized — public-source search beyond local checkouts is
-still open, tracked below.
+module ABI. The public-source pass is closed; the evidence is recorded in
+`V1_MODULE_COMPATIBILITY_AUDIT.md` and the resulting out-of-scope decision
+is tracked in the open-deviations list below.
 
 Exit gate met: every non-negotiable concept from the spec has a named
 representation across `ARCHITECTURE.md`/`PUBLIC_C_ABI.md`/`ENGINE_CONTRACT.md`/
@@ -93,19 +102,20 @@ milestone).
 ---
 
 ## Milestone 2 — Shadow manifest extraction
-**State: in progress.**
+**State: complete (source-verified after Shadow sign-off).**
 
 | Task | State | Evidence |
 |---|---|---|
-| `Tools/shadow-manifest-extract/extract.py` | in progress (install-unit + `hookFunction:` pattern-scan + `shdw_libc_hooks[]` structured-table tiers) | commits `5970255`, `bd52025`, commit `209e42d` |
+| `Tools/shadow-manifest-extract/extract.py` | complete (install-unit + helper-hop + `hookFunction:` + libc/DeviceCheck structured-table tiers; source-level Logos pass maps `%init` groups back to coordinator units) | current working tree |
 | `Tools/shadow-manifest-extract/validate.py` | complete | commit `5970255` |
 | `Tools/shadow-manifest-extract/manual_overrides.yaml` | complete (format defined, still empty — nothing's needed one yet) | commit `5970255` |
-| `Tools/shadow-manifest-extract/test_extract.py` | in progress, grows with the extractor | 8 tests total as of commit `209e42d` |
-| `artifacts/shadow-current-manifest.json` | in progress — 186 targets: 22 install units + 164 children (91 pattern_scan + 73 structured_table), 13/22 units decomposed | commit `209e42d` |
+| `Tools/shadow-manifest-extract/test_extract.py` | complete (host-verified) | 16 parser/source-layout tests plus 2 Logos/Clang tests pass |
+| `artifacts/shadow-current-manifest.json` | complete (source snapshot) | current signed-off Shadow checkout yields 511 schema-valid rows: 22 install units + 489 children from 21 decomposed units; `validate.py` passes with no duplicate/stale IDs |
 | `shdw_libc_install_group` descriptor parse | **complete** | commit `209e42d` — see below |
-| `shdw_coord_*` composite units (symlookup, filesystem_objc, foundation_objc, hideapps) | not started | real finding this iteration: several units are coordinator-side composites calling 2+ named functions, not 1:1 with a single shadowhook_ body — see below, needs its own (bounded) resolution pass, not a full call-graph walker |
-| `logos_preprocess.py` | not started | needed for the 7+ files still using raw Logos `%hook` blocks |
-| `clang_ast_extract.py` | not started | needed for per-hook decomposition generally, and as a stronger cross-check on both pattern_scan and structured_table rows |
+| `shdw_devicecheck_descriptors[]` parse | **complete (host-verified)** — ABI variants collapse to one optional ObjC target with no original requirement | current working tree; extractor regression test |
+| `shdw_coord_*` composite units (symlookup, filesystem_objc, foundation_objc, hideapps) | host-implemented bounded one-helper-hop pass | `extract.py`; synthetic regression test |
+| `logos_preprocess.py` | complete (host-verified) | parser + normalized-source tests |
+| `clang_ast_extract.py` | host-implemented Clang JSON-AST pass over normalized Logos declarations | Clang round-trip test |
 | Initial route-feasibility report | **complete (modeled pass)** | commit `7dfb281` — `Tools/route-feasibility/hk_route_report.py`, `artifacts/shadow-route-feasibility.json`, `docs/3.0/SHADOW_ROUTE_FEASIBILITY.md` |
 
 **`shdw_libc_hooks[]` decomposition**, done this iteration: another real,
@@ -125,7 +135,7 @@ verify) — represented as two separate manifest rows
 verification_method presence/absence, not collapsed into one. Covered by
 `test_group_mask_split` / `test_libc_descriptor_table_dual_group_row`.
 
-**Real finding not yet acted on**: reading `dylib.x`'s coordinator wrappers
+**Real finding, now handled by a bounded pass**: reading the coordinator source's wrappers
 closely turned up units whose installer is a composite function calling
 *other* named `shadowhook_*` functions (`shdw_coord_symlookup` calls
 `shadowhook_dyld_symlookup` + `shadowhook_dyld_symaddrlookup`;
@@ -134,19 +144,44 @@ containing `[hooks hookFunction:...]` calls itself. The current pass
 correctly reports these as "no call sites found... likely delegates"
 (honest, not silently wrong) but doesn't follow the delegation. A bounded
 one-level "if the body is just calls to other named functions, recurse into
-each" pass would close this — deliberately not built yet this iteration to
-avoid open-ended call-graph resolution; likely worth it as a small, scoped
-next step rather than jumping straight to full Clang AST for it. Also
+each" pass closes the direct helper case without becoming an open-ended
+call-graph walker. Also
 surfaced: `shadowhook_envpolicy` (called from `shdw_coord_envvars_c`) was
 not found anywhere under `ShadowCore.dylib/hooks` — real gap, noted, not
 silently dropped.
+
+The bounded follow-up is now implemented in the extractor: coordinator
+helpers receiving the same `hooks` object get one additional source hop, with
+deduplicated helper names and a synthetic regression test. The extractor now
+also accepts the coordinator table in either the historical
+`ShadowCore.dylib/dylib.x` layout or the current
+`ShadowCore.dylib/shadowcore.x` layout, and resolves current
+`shdw_resolve_libsystem("...")` assignments to the nearest following hook
+call. A clean `git archive` of Shadow HEAD `6ad67ba` (never modifying the
+checkout) now validates through `--shadow-commit`: with `--include-logos` it
+has 513 schema-valid rows — 22 install-unit records plus 491 concrete children
+from 21 decomposed units (152 `structured_table`, 110 `pattern_scan`, 251
+`logos_preprocess`) — and no duplicate IDs. Logos children inherit the exact
+coordinator unit's role, domain, and availability by following the existing
+one-hop installer path to `%init(group)`; their IDs include class and method
+kind, preventing selector collisions across classes. `DeviceCheck` is parsed
+from `shdw_devicecheck_descriptors[]`, where mutually exclusive return-ABI
+variants collapse to one `optional_if_present` method with `original=none`.
+The remaining `objc@methodimpl` unit intentionally installs no hook: its
+current body only retains the native `method_getImplementation` predecessor.
+
+The signed-off checkout's current artifact produces 511 schema-valid rows
+(22 + 489 children), confirming the extractor reports the source actually
+present rather than silently reusing the clean historical snapshot. The
+artifact and modeled route report were refreshed after sign-off; the source
+provenance is the current Shadow checkout at `753b573`.
 
 This iteration deepened extraction past the install-unit tier for real,
 rather than starting the route-feasibility report on top of a manifest that
 was still 0% decomposed. Read every `shadowhook_*` entry function across all
 22 `.x` files by hand first (`awk` survey of each function body) and found
 the real pattern mix is more varied than one file suggested: direct
-`[hooks hookFunction:...]` calls (7 files), delegation to a shared
+`[receiver hookFunction:...]` calls (7 files), delegation to a shared
 `shdw_libc_install_group(hooks, GROUP)` (4 files, libc-family), real Logos
 `%hook`/`%init` blocks (7+ files, confirmed with a comment-excluded `grep`
 for `^%hook`/`^%end`/`^%init`), a descriptor table like DeviceCheck's
@@ -204,30 +239,23 @@ meaningfully stronger guarantee than either of those and deserves its own
 label, not a shoehorned one — found only after seeing the real source, not
 anticipated when the schema was written last iteration.
 
-**What this is honestly NOT yet**: `SHDWInstallUnit` rows are
-coordinator-level groups (e.g. `"Hook_Filesystem@c"`), not the individual
-hook targets inside them. Confirmed by reading `DeviceCheckHooks.h`/`.m`:
-that group alone has its own clean structured descriptor table
-(`shdw_devicecheck_descriptors[]`, 6-field rows: class, selector, kind,
-encoding, argCount, policy) which a similar direct-parse pass could cover —
-but I have not yet checked whether the other ~19 groups all follow that
-same descriptor-table shape or fall back to raw Logos `%hook` blocks (a real
-mix exists: `grep` for real `^%hook`/`^%end` directives, comment-excluded,
-found 7 files that still use them). Every extracted target's
-`known_compatibility_risks` says this explicitly rather than silently
-implying full coverage. `original_requirement`/`required_reach` per target
-are reasoned defaults cited from the real `SHDWCapabilityKind` doc comments
-in `HookConfiguration.h`, not verified per-hook — flagged as such in
-`extract.py`'s module docstring, to be tightened by the next pass or
-`manual_overrides.yaml`.
+**What this is honestly NOT yet**: install-unit records remain aggregate
+provenance rows beside their children, and some per-target semantics still
+come from source shapes rather than device migration. The clean candidate
+decomposes every unit that actually installs a hook; `objc@methodimpl` is the
+one intentional no-hook unit above. Each extracted target keeps its stated
+confidence/risk rather than implying more precision than its parser provides.
+`original_requirement`/`required_reach` on still-unit-level rows remain
+reasoned defaults cited from `HookConfiguration.h` and can be tightened with
+`manual_overrides.yaml` after a reviewed Shadow migration.
 
-Boundary note: everything above was read-only against `shadow/` (source
-reads + `git rev-parse HEAD` for provenance) — no commits, no build/Logos
-preprocessing run against it yet. Running the actual Logos preprocessor or
-Clang AST tooling against `shadow/`'s tree (needed for the per-hook
-decomposition pass) is a bigger, noisier action than a source read and will
-get its own heads-up before it happens, per the standing boundary at the
-top of this file.
+Boundary note: the initial extraction pass was read-only against `shadow/`
+(source reads + `git rev-parse HEAD` plus an immutable `git archive` candidate
+for clean provenance). After the explicit 2026-08-22 sign-off, the current
+Shadow checkout was built against canonical HookKit, its source/package smoke
+was run on iPhone9,3, and the refreshed artifact now records that signed-off
+source. The modeled route report remains modeled; it is not being presented as
+runtime routing evidence.
 
 **Initial route-feasibility report**, this iteration: built
 `Tools/route-feasibility/hk_route_report.py` per spec §18.4, deliberately
@@ -277,7 +305,7 @@ eventually replace, not a permanent shortcut — noted in both the schema's
 own description and the tool's code comment.
 
 ## Milestone 3 — ABI freeze candidate
-**State: in progress.**
+**State: complete (host-verified).**
 
 | Task | State | Evidence |
 |---|---|---|
@@ -288,11 +316,10 @@ own description and the tool's code comment.
 | `Headers/HookKit/HookKitPlan.h` | complete | commit `9860130` |
 | `Headers/HookKit/HookKit.h` (new umbrella) | complete | commit `9860130` |
 | Header compile tests (C, ObjC, C++, ObjC++) | complete | `Tests/Host/test_header_compile.{c,m,cpp,mm}`, wired into `make test` |
-| `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions (`hk_report_copy_artifacts` etc.) declared only, not implemented (Milestone 4 territory) |
+| `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions are implemented and host-tested in the Milestone 4 artifact ledger |
 | `HookKitObjC.h` | complete | commit `57b10df` — typed Class/SEL constructors; deliberately NOT in the umbrella (it needs `<objc/runtime.h>`), covered by the ObjC and ObjC++ header-compile variants |
-| `HookKitSwift.h` | complete | commit `9d4911f` — request types only; the engine behind it stays deferred (Milestone 6). Plain C, so unlike `HookKitObjC.h` it IS in the umbrella, and all four header-compile variants cover it |
-| `HookKitLegacy.h` | in progress | commit `39cba46` — one entry so far (`hk_plan_add_hook_legacy`), the one `HookKitTargets.h` explicitly defers to it |
-| ABI symbol manifest | in progress (symbols/version/archs done; ObjC metadata + enum values not yet). Baseline EXTRACTION is complete: 5 tags, `v1.0.1` dropped by decision | `Tools/abi/extract_abi.py`; baselines `5037211`, `37ffe6b`, `18a91d5` |
+| `HookKitSwift.h` | complete | commit `9d4911f` plus current working tree — separate two-phase Swift surface; plain C, so unlike `HookKitObjC.h` it IS in the umbrella, and all four header-compile variants cover it |
+| ABI symbol manifest | complete (host-verified) | `Tools/abi/extract_abi.py`, `Tools/abi/compare_abi.py`, `scripts/check_legacy_abi.sh`; `Tools/abi/test_*.py`; five rich baselines and canonical candidate gate |
 
 Deliberately safe by construction, not just by intent: the Makefile's
 `HookKit_PUBLIC_HEADERS` still lists only the legacy `Headers/HookKit.h` —
@@ -314,7 +341,7 @@ One real design call made and stated, not left implicit: `hk_target_spec_t`
 (`HookKitTargets.h`) is a union of symbol/address/objc/memory members —
 deliberately no `swift` member. `HK_TARGET_SWIFT_VTABLE` still exists in
 `hk_target_kind_t` for uniform reporting, but Swift hook *requests* are
-meant to go through `HookKitSwift.h`'s own entry point (not yet written),
+meant to go through `HookKitSwift.h`'s own entry point,
 matching the master spec's repeated "separate API, no category membership"
 language for Swift (section 13.7) — folding a Swift member into this union
 would give `HookKitTargets.h` a dependency the rest of the design avoids.
@@ -334,27 +361,38 @@ with zero warnings, host-verified.
 
 **ABI symbol manifest / baseline extraction**, this iteration:
 `Tools/abi/extract_abi.py` + `Schemas/hookkit-abi-baseline.schema.json`,
-closing the loop on Milestone 0's still-open "ABI baseline manifests" task
-at the same time as Milestone 3's own "ABI symbol manifest" deliverable —
-one real tool serving both. Tool discovery (Mach-O-aware `nm`/`otool`/
-`lipo`, via `$THEOS`'s toolchain layout) replicates
+`Tools/abi/compare_abi.py`, and `scripts/check_legacy_abi.sh` close the
+extract/compare/gate loop on Milestone 0's still-open "ABI baseline
+manifests" task at the same time as Milestone 3's own "ABI symbol manifest"
+deliverable — one small toolchain serving both. Tool discovery (Mach-O-aware
+`nm`/`otool`/`lipo`, via `$THEOS`'s toolchain layout) replicates
 `scripts/check_compat.sh`'s `find_tool()` search order rather than
 reinventing it — reused because that script isn't sourceable, not because
 the logic was worth rederiving.
 
 Extracted (real, from real binaries): install name, current/compatibility
 version (parsed from `otool -l`'s `LC_ID_DYLIB` block — the regex proven
-against an actual captured sample, with a regression test for
-over-greedy matching across two `LC_ID_DYLIB`-shaped blocks in one file),
-architectures, and exported symbols per arch. Cross-checked the extractor's
-own output against ground truth it had no way to cheat from:
+against an actual captured sample, with a regression test for over-greedy
+matching across two `LC_ID_DYLIB`-shaped blocks in one file), architectures,
+exported symbols per arch, and exported Objective-C class/method/property
+metadata with per-architecture type encodings. The ObjC parser handles both
+the full-selector and address-only `otool -ov` layouts and ignores the
+duplicate `__objc_superrefs` class-reference listing. Cross-checked the
+extractor's own output against ground truth it had no way to cheat from:
 `scripts/export-HookKit.list` (the real, independently-maintained allowlist)
 lists exactly `_OBJC_CLASS_$_HKSubstitutor`/`_OBJC_METACLASS_$_HKSubstitutor`
-— exactly what `extract_abi.py` found. **Not implemented**, stated in the
-schema and the tool's own docstring rather than faked empty: Objective-C
-class/method/property metadata and historical enum numeric values — real
-Mach-O ObjC metadata parsing is a meaningfully bigger task than load-command/
-symbol-table reads, tracked as open work.
+— exactly what `extract_abi.py` found. Enum values are parsed from supplied
+historical headers with a restricted expression evaluator; no declared
+extractor ABI dimension is silently fabricated as an empty field.
+
+The comparison gate checks retained per-slice exports, classes, selectors,
+method encodings, enum values, install name, compatibility version presence,
+architectures, and historical header paths. `scripts/check_legacy_abi.sh`
+passes against all five checked-in baselines; the JSON schema validates every
+baseline. The historical records now carry rich ObjC method/property metadata
+and available enum values. The comparator treats struct fields behind an
+already-stable pointer as an ABI-neutral definition change and fills arm64e
+metadata when the toolchain emits only relative selector addresses.
 
 Produced one real baseline: `Tests/LegacyABI/Baselines/v2.5.0.json`,
 schema-valid, from an actual `v2.5.0`-tagged build — not current HEAD
@@ -460,14 +498,13 @@ hook-level bool can't fully represent would be a new inconsistency, not a
 refinement; revisit together if a real need for the FAILED distinction
 shows up. The 6 snapshot functions (`hk_report_copy_artifacts`,
 `hk_runtime_copy_artifacts`, `hk_copy_process_artifacts`,
-`hk_artifact_snapshot_count`/`copy_at`/`release`) are declared only, same
-"fix the public shape first" order Milestone 3's other headers were done
-in — no internal artifact ledger exists yet to implement them against.
+`hk_artifact_snapshot_count`/`copy_at`/`release`) are now implemented against
+the internal ledger and covered by the artifact-ledger host suite; the public
+shape-first gap is closed before the later engine work consumes it.
 
-Added to the umbrella (`Headers/HookKit/HookKit.h`); still not wired into
-`HookKit_PUBLIC_HEADERS` in the Makefile, so `./build.sh all` output is
-unaffected — reconfirmed (64/64 PASS, 4 `.deb`s) after adding it, not
-assumed safe from the pattern alone.
+Added to the umbrella (`Headers/HookKit/HookKit.h`). The initial legacy-only
+lanes intentionally left the new headers out; the opt-in beta and canonical
+3.0 products now copy them, while the legacy 2.x package remains unchanged.
 
 Strengthened all 4 header compile tests (`Tests/Host/test_header_compile.{c,m,cpp,mm}`)
 with real coverage of the new types rather than relying on the umbrella
@@ -488,28 +525,48 @@ host-verified, both standalone and through `make test-header-compile`.
 Full `make test` and `./build.sh all` re-run clean after these changes.
 
 ## Milestone 4 — Core runtime and fake engines
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | commit `c2a185e` |
-| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | in progress (create/shutdown/release/owner_id/drain_pending only — no plan/domain tracking yet) | commit `c2a185e` |
+| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | complete (host- and arm64 device-verified) — create/shutdown/release/owner_id/drain_pending, owning-runtime artifact accumulation, live catalog population, and compiled-in Apple engine registration | current working tree; host lifecycle/wired suites; canonical iPhone9,3 facade and rebind-adapter smokes |
 | Plan lifecycle (`Sources/Core/HKPlan.c`) | **complete** — full `DRAFT → ANALYZED → PREPARING/PREPARED → COMMITTING/COMMITTED` path now real (`create`/`release`/`state`/`add_hook`/`analyze`/`prepare`/`commit`) | commit `ecb8990` — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
-| Router | in progress — `hk_plan_analyze` now consults registered engines and picks the first eligible one (target kind + reach subset only; spec section 9's full ranking has no criteria to rank on yet) | commit `0bdb341` — see below |
-| Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | in progress (`hk_plan_analyze` + `hk_hook_copy_result` complete; `hk_plan_prepare`/`commit` not started) | commit `c4adda7` |
-| Artifact ledger | in progress — end-to-end for the commit path: engines record artifacts via a sink during `commit_one`, the commit loop stamps contextual IDs, and they reach the report's snapshot (`Sources/Core/HKArtifactLedger.{h,c}`, `commit_one` signature, `hk_report_adopt_artifact_ledger`); runtime/process-level accumulation still absent | commit `6d30272` — see below |
-| Ownership ledger | not started — deferred deliberately (see note below); an exclusivity/refusal gate was tried and reverted | commit `2cc4c3e`, reverted |
-| Original slots | in progress — process-lifetime installed record + original slot + installed handle, all 4 public accessors real (`Sources/Core/HKInstalled.{h,c}`); slot survives plan/runtime release (tested); only created for active hooks whose engine publishes an original | commit `ae8aaf5` — see below |
-| Fake engines (`Sources/Core/HKEngineInternal.h`) | in progress — `describe()` + `prepare_one()` + `commit_one(spec, sink)` (all ungrouped; `commit_one` now records artifacts, `fake_rebind` produces a real import-slot artifact); `revalidate_group`/`verify_group`/`compensate_group`/`inspect_continuation` not modeled yet (nothing calls them before compensation/verification exist) | commit `6d30272` — see below |
-| Fault injection | in progress — OOM sweep failing every allocation site (23) across the lifecycle exactly once (`Tests/Host/test_fault_injection.c`, linker `--wrap`); enforces OOM never advances plan state; ASan-clean | commit `2e967e8` — see below |
-| Model-based tests | in progress — plan lifecycle state machine cross-checked against an independent reference model over random op sequences with full (state × op) coverage (`Tests/Host/test_plan_model.c`); success path only | commit `8a20209` |
+| Router | complete — `hk_plan_analyze` consults registered engines, ranks preferred reach then explicit request-specific route rank, and enforces target kind, reach, target-specific exact image scope with a populated catalog, restricted symbol defining-image scope, original requirement, install context, declared preparation/commit effects, and production architecture/deployment-floor/certification masks; preparation and commit domains/orders plus `commit_after` dependencies are deterministic, with gated domains refusing/rolling back prepared siblings after a mandatory preparation failure and a no-write preflight for stale/unprepared mandatory members; commit-time ownership chaining is active for certified chainable target kinds | current working tree; engine-registry/wired suites, explicit-rank + platform-certification probes, exact-image catalog probes, defining-image scope probe, `test-domain-gate`, `test-plan-commit`, and `test-ownership` |
+| Results / Reports (`hk_plan_analyze`, `Sources/Core/HKReport.c`) | complete — lifecycle reports carry plan/runtime IDs, declared/observed preparation and commit effects, static diagnostics, continuation descriptions, mutation counts, and artifact snapshots; per-hook post-commit verification is engine-backed; undeclared effects and failed readback become `FAILED_UNKNOWN`; grouped prepare/revalidate/commit/verify/compensation have per-member host diagnostics and rollup | current working tree; wired host suites, `test-plan-commit`, and `test-ownership` |
+| Artifact ledger | complete — report, owning-runtime, and process-level accumulation work; pointer-bearing artifact views, continuation mappings, and per-phase effect observations are retained by ledgers/snapshots; verified engine readback promotes the hook's artifact range to `VERIFIED`; grouped member ledgers merge with compensated ranges preserved | current working tree; `test-artifact-ledger`, wired engine suites, `test-plan-commit`, full `make test` |
+| Ownership ledger | complete — process-lifetime target records coordinate chainable symbol/ObjC hooks, publish predecessor witnesses, refuse stale writes, and integrate with runtime pending retries; address/memory/Swift chain adapters are arm64-device-tested and arm64e source/ABI-reviewed | current working tree; `test-ownership`, wired engine suites, plan model, full `make test` |
+| Original slots | complete (host-verified) — process-lifetime installed record + original slot + installed handle, all 4 public accessors real; slot survives plan/runtime release and is only published when an engine supplies an original | current working tree; installed/original and wired suites |
+| Fake engines (`Sources/Core/HKEngineInternal.h`) | complete (host-verified) — versioned vtable header validation, optional side-effect-free discovery/request analysis, single-hook and grouped prepare/revalidate/commit/verify/compensation callbacks, and prepared-continuation inspection are modeled and exercised | current working tree; `test-engine-registry`, `test-reloc-inline-wired`, `test-plan-commit`, `test-plan-prepare`, and ownership probes |
+| Fault injection | complete (host-verified) — OOM sweep fails every current allocation site (49) across the lifecycle exactly once; OOM never advances plan state; ASan-clean | current working tree; `Tests/Host/test_fault_injection.c`; `make test-fault-injection` reports 49 allocation sites swept |
+| Model-based tests | complete (host-verified) — plan lifecycle state machine is cross-checked against an independent reference model over random op sequences with full (state × op) coverage, plus deterministic independent prepare/commit failure-rollup scenarios (`Tests/Host/test_plan_model.c`) | current working tree; `make test-plan-model` |
 
-**Ownership ledger — deferred, and why (a reverted misstep worth
-recording).** An ownership ledger was built in commit `2cc4c3e` whose
-commit-time gate refused a *second* hook on the same target with
-`HK_OUTCOME_CONFLICT`. That is wrong: multiple consumers hooking the same
-function/method is a first-class, designed-for scenario, not a conflict.
+Commit sequencing is now live in the core: lower `domain_order` wins, then
+`commit_order`, with stable add order as the tie-breaker; `commit_after`
+dependencies override those numeric keys, and a dependent is failed safely if
+its prerequisite did not become active. Before the first dispatch in an
+explicit domain, every mandatory member is rechecked for preparation,
+generation, and dependency readiness; a failed preflight marks prepared
+siblings safe without dispatching any of them. Preparation and commit effects
+are both checked against the selected engine's declaration; an undeclared
+commit effect is surfaced as `HK_MUTATION_UNKNOWN` with a core diagnostic.
+After a COMPLETE write, an engine's optional readback marks its artifacts
+VERIFIED; a failed readback is surfaced as `HK_MUTATION_UNKNOWN`, while an
+engine without a verifier remains honestly unverified. The ordering,
+dependency, no-write preflight, effect-bound, and verification paths are
+covered by `test-plan-commit`; grouped rollups, compensation, and ownership
+chain coordination are now host-tested. Versioned vtable validation,
+side-effect-free discovery/request analysis, and prepared-continuation
+inspection are also host-tested. Physical arm64e device certification is not
+claimed; the accepted arm64e scope is covered by source/ABI review and the
+provider evidence recorded in Milestones 10 and 15.
+
+**Ownership ledger — chain coordination (the reverted misstep remains useful
+history).** An earlier implementation in commit `2cc4c3e` refused a *second*
+hook on the same target with `HK_OUTCOME_CONFLICT`. That was wrong: multiple
+consumers hooking the same function/method is a first-class, designed-for
+scenario, not a conflict.
 `HK_ORIGINAL_DIRECT_PREDECESSOR` (`PUBLIC_C_ABI.md`) is defined as "an
 existing predecessor is acceptable (untouched function body after rebinding,
 previous IMP, previous Swift slot)" — you hook something already hooked and
@@ -519,11 +576,19 @@ original-slot machinery (commit `ae8aaf5`) is its primitive.
 `ARCHITECTURE.md` disclaiming "a generic arbitrary C-hook chaining framework"
 is a product-scope disclaimer, not a refusal to let two hooks share a target.
 The commit was reverted in full (back to `ae8aaf5`) at the user's direction.
-When ownership is eventually built it is **chain coordination** (the next
-hook's original = the previous replacement), which needs real engines that
-can install-on-top — Milestone 6+, not the fake-engine stage.
+The current implementation is the corrected **chain coordinator**: a
+process-lifetime target ledger records the current head and predecessor, only
+chainable engines may extend it, and both single-hook and grouped paths hold
+the ownership lock through predecessor validation and publication. Real
+address/memory/Swift adapter certification remains a later gate.
 `HK_OUTCOME_CONFLICT` is reserved for genuine mechanism incompatibility, not
 mere same-target hooking.
+
+The one compatibility exception is the named legacy memory path: 2.x's
+`hookMemory:withData:size:` has no expected-bytes field, so it captures the
+current region at preparation and may reapply that same region later. The
+core marks only `hk_plan_add_hook_legacy` memory hooks for this same-engine
+rewrite behavior; new-API memory requests still retain the ownership refusal.
 
 First real (not header-only) implementation code this rewrite has shipped.
 `hk_id_generate()`: one process-instance nonce (time+pid+ASLR entropy,
@@ -532,11 +597,10 @@ computed once via `pthread_once` — deliberately not cryptographic, since
 `arc4random` would raise an availability question against the legacy lane's
 older deployment floor for no real benefit) plus an atomically-incremented
 monotonic counter starting at 1 (0 stays available as a "no ID" sentinel).
-`hk_runtime_create/shutdown/release/owner_id/drain_pending`: real, and
-honestly minimal for what exists at this slice — shutdown has nothing to
-quiesce and drain_pending has nothing to apply because no plan/domain/
-engine tracking has been written yet (both said explicitly in code
-comments, not left to look like unfinished stubs with no explanation).
+At this initial lifecycle slice, `hk_runtime_create/shutdown/release/owner_id`
+were real and `drain_pending` was intentionally empty because no plan/domain/
+engine tracking existed yet. Milestone 12 has since added caller-driven pending
+retry; see its current device evidence below.
 
 Two design calls made and stated, not left implicit: `hk_runtime_create(NULL, ...)`
 is defined to mean "every default" (no executor, no diagnostics,
@@ -600,10 +664,9 @@ produce one for real); every NULL-tolerant path. Clean under
 LeakSanitizer would have caught it if `hk_plan_release`'s domain-freeing
 loop were wrong.
 
-Real, stated gap: `hk_plan_config_t.debug_label` (a caller-owned string
-pointer) is not deep-copied yet — harmless today because no public getter
-reads it back, but noted in a code comment so it doesn't quietly become a
-dangling-pointer bug the day one is added.
+The `hk_plan_config_t.debug_label` caller-owned string is now deep-copied at
+plan creation and freed with the plan; `test_plan_debug_label_deep_copied`
+mutates the caller buffer after creation and verifies the plan-owned value.
 
 **`hk_plan_add_hook`**, this iteration: the deep-copy of the full target
 union the previous entry deferred, done as its own focused pass.
@@ -704,11 +767,9 @@ report itself released internally rather than leaked. Clean under
 `-fsanitize=address,undefined`.
 
 `hk_hook_original_slot`/`hk_original_slot_load`/`hk_hook_installed_handle`/
-`hk_installed_hook_copy_result` remain declared in `HookKitPlan.h` but
-unimplemented — they describe state that can't exist before a real commit
-happens against a real engine, so there's nothing honest to return yet.
-Left undefined rather than given a placeholder body that would compile but
-lie; nothing currently links against them, so this doesn't block anything.
+`hk_installed_hook_copy_result` were intentionally left undefined at this
+point; they are now implemented by the installed-record path described below
+and exercised by `test-installed-original`.
 
 **Engine registry + router**, this iteration: `Sources/Core/HKEngineInternal.h`
 (new), a fixed-size (16-slot) engine array on `hk_runtime_t`, and
@@ -719,19 +780,21 @@ previous entry's "zero candidates" state was worth building honestly
 first rather than faked, since this is exactly the code path it's now
 exercising for real.
 
-Deliberately minimal, stated as such rather than presented as the full
-contract: the vtable has only `describe()` — no `prepare_group`/
-`commit_group`/`revalidate_group`/`verify_group`/`compensate_group`/
-`inspect_continuation` (spec section 8.1), because nothing calls those
-until `hk_plan_prepare` exists to call them. Eligibility checks exactly 2
-of spec section 9's ~14 criteria: target kind supported, and every
-required-reach bit within the engine's achievable reach. Not checked yet,
-named explicitly in a code comment rather than silently assumed passing:
-image scope exactness, original-requirement/continuation-policy
-compatibility, forbidden effects, install context, architecture/OS,
-ownership conflicts, engine certification — each needs a concept this
-rewrite hasn't built yet (image catalog is Milestone 5; ownership ledger
-and certification are later Milestone 4/8/10 work). Multiple eligible
+Deliberately incremental, stated as such rather than presented as the full
+contract: the vtable now has per-hook and grouped
+`prepare`/`revalidate`/`commit`/`verify`/`compensate` entry points plus
+context-carrying and diagnostic variants; `inspect_continuation` and the full
+versioned production surface remain (spec section 8.1). Eligibility
+checks target kind, required reach, target-specific exact image scope when a
+catalog is populated, restricted symbol defining-image scope, original
+requirement, declared effects, and install context. The router now refuses a
+restricted symbol defining-image selector unless the selected engine declares
+exact symbol scope; the rebind adapter therefore cannot silently treat caller
+scope as defining-image proof. Not checked yet, named explicitly in a code
+comment rather than silently assumed passing: architecture/OS and engine
+certification. Ownership conflicts now have a chain-aware host implementation;
+real adapter certification remains later Milestone 8/10 work. Multiple
+eligible
 engines aren't ranked, just first-registration-order-wins — with only one
 fake engine existing in any test so far, true ranking and
 first-wins aren't even distinguishable yet; stated so this isn't mistaken
@@ -746,7 +809,7 @@ renaming the day a production engine actually calls it for real, not
 patched around; noted in its own doc comment so that rename isn't a
 surprise later.
 
-5 host tests (`test-engine-registry`) with a fake "rebind-style" engine
+9 host tests (`test-engine-registry`) with a fake "rebind-style" engine
 (function-symbol targets, `HK_REACH_EXISTING_IMPORTS`) and a fake
 "objc-style" one (objc-method targets, `HK_REACH_OBJC_DISPATCH`), covering:
 the pre-existing zero-engines behavior is unchanged (regression check); an
@@ -756,7 +819,8 @@ can't achieve shows up as unmet, not silently dropped); an engine matching
 the target kind but not the required reach correctly stays `NO_ROUTE` (kind
 match alone is never sufficient); first-eligible-wins correctly skips past
 an engine registered earlier that doesn't match, rather than stopping or
-mis-selecting on the mismatch. Clean under `-fsanitize=address,undefined`,
+mis-selecting on the mismatch; and an early-only engine is rejected for an
+arbitrary-runtime context. Clean under `-fsanitize=address,undefined`,
 including confirming a `describe()` result's `engine_id` (a static string
 literal in every fake engine defined so far) survives being read back out
 of the result after the local `hk_engine_capabilities_t` that received it
@@ -850,14 +914,16 @@ Milestone 6+'s real engines build on top of.
 
 **Domain preparation gate** (spec section 15.1), this iteration: closes
 the gap stated in the previous two commits. `hk_domain_mandatory_gate_satisfied`
-checks the one sub-condition that's actually checkable today — every
-`HK_OPERATION_MANDATORY` hook in a `require_all_mandatory_prepared` domain
-must have a route — computed once per domain before `hk_plan_prepare`'s
-main loop, not re-scanned per hook. A hook whose domain gate fails is
-marked `HK_OUTCOME_FAILED_SAFE` even if it individually would have
-prepared successfully, proven by a dedicated test that registers a real
-matching engine for the blocked hook and confirms it still doesn't
-prepare. Not checked yet, stated rather than assumed satisfied:
+checks the first sub-condition — every `HK_OPERATION_MANDATORY` hook in a
+`require_all_mandatory_prepared` domain must have a route — computed once per
+domain before `hk_plan_prepare`'s main loop, not re-scanned per hook. A hook
+whose domain gate fails is marked `HK_OUTCOME_FAILED_SAFE` even if it
+individually would have prepared successfully. The gate now also covers the
+second sub-condition: if a later mandatory preparation fails, already
+prepared siblings release their prepared state and become `FAILED_SAFE`,
+while later siblings are refused before dispatch. Both behaviors have
+dedicated tests, including the previously missing prepare-failure ordering
+case. Not checked yet, stated rather than assumed satisfied:
 ownership-reservation currency and domain dependency cycles — both need
 concepts (an ownership ledger, a dependency graph) this rewrite hasn't
 built yet.
@@ -875,11 +941,12 @@ attempted (the plan did process them; the gate is just a cheaper, earlier
 refusal point than calling `prepare_one`), with the reasoning left in a
 comment at the fix site.
 
-4 host tests (`test-domain-gate`): no-domain hooks ungated (regression
+5 host tests (`test-domain-gate`): no-domain hooks ungated (regression
 check), the gate is a no-op when `require_all_mandatory_prepared` is
 false, a real optional (non-mandatory) hook with no route does NOT trigger
 the gate (only mandatory members count), and the core blocking behavior
-itself. All 7 pre-existing suites re-verified with zero regressions, all
+itself, plus rollback/blocking after a mandatory preparation failure. All 7
+pre-existing suites re-verified with zero regressions, all
 clean under `-fsanitize=address,undefined`.
 
 **Artifact ledger — write side + snapshot read path**, this iteration
@@ -887,25 +954,23 @@ clean under `-fsanitize=address,undefined`.
 will accumulate `hk_artifact_t` records into, plus the immutable
 `hk_artifact_snapshot_t` the public read path (`hk_report_copy_artifacts`
 and the `hk_artifact_snapshot_count`/`copy_at`/`release` accessors declared
-in `HookKitArtifacts.h` last commit) hands back. This is deliberately the
-first of two commits: an engine has no way to *report* an artifact yet, so
-the ledger is real but every report's ledger is empty. The alternative —
+in `HookKitArtifacts.h` last commit) hands back. The initial ledger plumbing
+now has real engine population. The alternative —
 having `hk_plan_commit` synthesize plausible `hk_artifact_t` records from
 the mutation state and target kind alone — was explicitly rejected: only
 the committing engine knows what it actually mutated (which import slot,
 what address, what original bytes), so anything the commit path invented
 from the outside would be fabricated detail, exactly what the spec's
-section 7 / mission rules forbid. The honest split is ledger-plumbing now,
-engine-population (a `commit_one` signature change to accept an artifact
-sink) next.
+section 7 / mission rules forbid. The engine-population split is now real:
+`commit_one` accepts an artifact sink and the owning runtime/process ledgers
+receive the same records.
 
-`hk_report_copy_artifacts` is now implemented (was declared-only last
-commit); `hk_runtime_copy_artifacts` and `hk_copy_process_artifacts` stay
-deliberately undefined — there is no runtime- or process-level artifact
-accumulation yet (the runtime still doesn't track committed plans), and a
-placeholder body returning an empty snapshot would imply an accumulation
-path that doesn't exist. Same "left undefined rather than given a body that
-would compile but lie" precedent as `hk_hook_original_slot` et al.
+`hk_report_copy_artifacts`, `hk_runtime_copy_artifacts`, and
+`hk_copy_process_artifacts` are now implemented. Each commit ledger is
+fanned into the owning runtime and a process-wide append-only ledger before
+the report takes ownership. The process ledger uses one mutex and shallow
+value copies; dynamic pointer-bearing artifact ownership remains explicitly
+deferred until a producer needs it.
 
 Ownership honesty, stated because it is a real limitation not a finished
 property: both `append` and the snapshot copy `hk_artifact_t` **by value**.
@@ -995,11 +1060,9 @@ the commit loop or `artifact_id` weren't freshly generated per record. Full
 own 7 tests re-verified green with the sink's `hk_artifact_sink_record`
 added underneath them.
 
-Still absent, stated: `hk_runtime_copy_artifacts` / `hk_copy_process_artifacts`
-remain undefined — there is still no runtime- or process-level
-accumulation, only per-report. Aggregating a runtime's committed plans'
-artifacts is its own task, gated on the runtime tracking committed plans at
-all (it doesn't yet).
+Host evidence: `test-inline-wired` checks the owning-runtime snapshot and
+the process snapshot both gain the real text-patch artifact, while
+`test-artifact-ledger` covers the underlying copy/growth/error behavior.
 
 **Original slots + installed handles**, this iteration
 (`Sources/Core/HKInstalled.{h,c}`): the four public accessors that were
@@ -1086,64 +1149,58 @@ transitions can't be modeled until something creates them). `make test` and
 fails exactly the Nth allocation. The sweep runs the full lifecycle (runtime +
 plan + 2 hooks + analyze + prepare + commit) once per N = 1, 2, 3, … until a
 run completes with no failure fired — meaning every allocation site was the
-failure point exactly once (**23 sites** on this build). Beyond "doesn't
+failure point exactly once (**49 sites** on this build). Beyond "doesn't
 crash / doesn't leak" (built under `-fsanitize=address` for the leak half),
 the load-bearing invariant is: **an `HK_STATUS_OUT_OF_MEMORY` return must
 leave the plan's state unchanged** — which catches the classic bug of
 advancing the state machine and then failing a late allocation. Result: no
-crashes, no leaks, and the invariant held at all 23 sites — the core's
+crashes, no leaks, and the invariant held at all 49 sites — the core's
 hand-written OOM paths (partial-cleanup in `add_hook`, the report/ledger
 create failures, the `hk_report_create` OOM that frees a pre-built ledger)
-are all clean. A genuine finding worth recording, not a bug but a boundary:
-`fake_rebind` ignores a failed artifact-ledger append (`(void)`
-`hk_artifact_sink_record`), so an OOM in that one append is *swallowed* and
-commit still succeeds with the artifact silently dropped — consistent with
-the artifact-ledger header's own stated "a real engine must instead degrade
-to `HK_MUTATION_UNKNOWN`" future-work note; the sweep surfaces exactly where
-that unimplemented degradation will need to live. `make test` and
+are all clean. The former artifact-record boundary is now closed:
+`hk_artifact_sink_record` marks a failed record, and the plan upgrades an
+otherwise `COMPLETE` mutation to `UNKNOWN` while retaining observed effects.
+`test-plan-commit` drives a deterministic uncopyable artifact and proves the
+unknown result with no silently dropped success artifact. `make test` and
 `./build.sh all` (all 4 lanes) verified clean.
 
 **Milestone 4 status.** The core runtime + plan lifecycle + fake-engine
 contract are real and now well-covered: IDs, runtime/plan lifecycle, router,
 results/reports, artifact ledger (through the commit path), original slots +
-installed handles, model-based lifecycle tests, and this OOM sweep. Not done
-and honestly out of scope for the fake-engine stage: the ownership ledger
-(reverted — it must be chain-coordination with real engines, not a refusal
-gate; see the note under the milestone table), and the grouped engine
-operations (`prepare_group`/`commit_group`/`compensate`/`verify`) that only
-matter once real engines and compensation exist (Milestone 6+). Next frontier
-is Milestone 5 (image catalog and resolvers), which several deferred pieces
-(address-precise ownership keys, private-symbol scans) depend on.
+installed handles, grouped rollups/compensation, chain-aware ownership,
+model-based lifecycle tests, and this OOM sweep. The host router now includes
+versioned continuation/production descriptors plus architecture, deployment,
+and certification gates; the arm64 adapter runs are closed and the accepted
+arm64e lane is source/ABI-reviewed in Milestones 8/10/15.
 
 ## Milestone 5 — Image catalog and resolvers
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
 | Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | commit `e8b3eb4` — see below |
-| dyld population (`hk_image_catalog_populate_from_dyld`) | **not started — device-only** | declared as a seam; needs a jailbroken device to build/verify (real dyld) |
+| dyld population (`hk_image_catalog_populate_from_dyld`) | complete (host- and device-verified) | `Sources/Core/HKImageCatalog.c`; Darwin dyld walk cross-built and exercised on iPhone9,3: `HookKit3 image catalog: PASS (100 images)` |
 | Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | commit `5c3efe7` |
 | Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + commit `04aff50` |
 | Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | commit `04aff50` — see below |
 | Section flags / code-vs-data check | complete (host-verified) — `hk_macho_section_flags` + `hk_macho_section_is_code`, bounded (2.x's is not) | commit `04aff50` — see below |
 | Export trie resolver (`Sources/Resolvers/HKExportTrie.{h,c}`) | complete (host-verified) — ULEB128 decoding + trie walking, plus `hk_macho_find_export_trie` locating it in either load-command form | commit `f060c0e` — see below |
-| Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | commit `202e28f` — see below |
+| Resolver selection (`Sources/Resolvers/HKSymbolResolve.{h,c}`) | complete (host- and device-verified) — unified name normalization + visibility-driven source preference, with file-image and loaded-image source collection | commit `202e28f` — `device_smoke3_resolver` resolves `objc_msgSend` from the live iOS libobjc export trie |
 | Chained fixups (`Sources/Resolvers/HKChainedFixups.{h,c}`) | complete (host-verified) — metadata *and* traversal: header, imports table, symbol pool, and chain walking to bind sites | commits `25347f0` + commit `d3f7a5c` |
 | Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | commit `520019b` — see below |
-| Private-symbol resolver | in progress — its search mechanism (symbol table) is done; still needs a device-side image reader to supply the table view | commit `5c3efe7` |
-| Shared-cache resolver | not started | device-only (shared cache layout) |
-| ObjC / Swift resolvers | not started | |
+| Private-symbol resolver | complete (host- and device-verified) — loaded-image `__LINKEDIT` translation resolves symbol-table entries from live images | current working tree; `device_smoke3_resolver` resolves `dyld_image_get_installname` in `/usr/lib/system/libdyld.dylib` |
+| Shared-cache resolver | complete (host- and device-verified) — exact loaded shared-cache image binding reuses the Mach-O symbol-table path | current working tree; the same smoke reports `private=/usr/lib/system/libdyld.dylib` |
+| ObjC / Swift resolvers | complete — ObjC class/selector resolution is implemented inside the seam-backed ObjC engine (to avoid a second resolver that could drift); Swift metadata/vtable resolution is implemented in `native/hk_swift.c` and host/synthetic/real-arm64-device verified; arm64e pointer handling is source/ABI-reviewed without a physical arm64e claim | current working tree; ObjC wired/device smoke, Swift ABI/engine tests, synthetic smoke, and `device_swift_real_smoke` PASS on iPhone9,3 (2026-08-22) |
 
 **Image catalog — structure + selector matching**, this iteration
 (`Sources/Core/HKImageCatalog.{h,c}`). The deliberate host/device split is
-the whole shape of the file: the **selector-matching logic is
-platform-agnostic and host-tested**; the **only device-only part is
-populating the catalog from the live process** (dyld image list, a real
-Mach-O runtime), which is declared as the `hk_image_catalog_populate_from_dyld`
-seam but **not defined** — writing a dyld body that can't be compiled or run
-on this Linux host (it isn't in any built target yet, and `#if __APPLE__`
-would exclude it here) would be shipping unverifiable code, which this
-project doesn't do. Tests populate synthetically via `hk_image_catalog_add_entry`.
+the whole shape of the file: selector matching is platform-agnostic and
+host-tested; live-process population is Darwin-only and now implemented
+behind `hk_image_catalog_populate_from_dyld`. The beta arm64/arm64e
+cross-build compiles that path, and a standalone signed device smoke
+exercised the same Darwin implementation against the live dyld image list on
+iPhone9,3 (100 images). Host tests populate synthetic entries via
+`hk_image_catalog_add_entry`.
 
 Matching handles all six `hk_image_selector_kind_t` cases. It's written as
 "does this entry satisfy the selector?" applied to each entry in order,
@@ -1155,8 +1212,9 @@ absent uuid is *not* an all-zero uuid — a zero-uuid selector must not match
 an image that simply has no uuid), and an `EXACT_HEADER` selector with a
 NULL header matches nothing (never a wildcard). The catalog also carries a
 monotonic `generation` counter (bumped on every add) — the concept
-`ARCHITECTURE.md` invariant #3 revalidates against; nothing revalidates yet
-(that's Milestone 12's late-image work), but resolvers can start stamping it.
+`ARCHITECTURE.md` invariant #3 revalidates against; plan commit and deferred
+retry now reject a changed generation. No current engine claims future-image
+reach, so automatic late-image delivery is deliberately not registered.
 
 10 host tests (`test-image-catalog`, clean under
 `-fsanitize=address,undefined`): each selector kind, `EXPLICIT_SET` union of
@@ -1222,9 +1280,9 @@ same-address names) and `interior_address_permitted` — a caller's alias policy
 is simply not consulted yet, stated in the header rather than approximated.
 
 **Device-only work this does NOT cover** (and cannot, honestly, from this
-host): the dyld catalog populator, the shared-cache resolver, and PAC signing
-of results. Those need SSH to the jailbroken device to build and verify;
-nothing here is device-verified. *(Corrected in the next entry: locating
+host): PAC signing of results and the ObjC/Swift-specific resolver policies.
+Those need SSH to the jailbroken device to build and verify; the dyld catalog
+and private/shared-cache paths are now device-verified. *(Corrected in the next entry: locating
 `LC_SYMTAB` was listed here as device-only, but parsing a Mach-O is pure
 buffer arithmetic — only obtaining the bytes is device-bound.)*
 
@@ -1354,8 +1412,9 @@ control, and `__LINKEDIT` range validation (symoff before the range, nlist
 span past the end, string table past the end, and no `__LINKEDIT` at all
 reported as missing rather than malformed).
 
-**Still device-only, unchanged**: the dyld catalog populator, the shared-cache
-resolver, and PAC signing. Nothing here is device-verified.
+**Still device-only, unchanged**: PAC signing and the ObjC/Swift-specific
+resolver policies. The dyld catalog and private/shared-cache paths are now
+device-verified.
 
 `make test` and `./build.sh all` (all 4 lanes) verified clean.
 
@@ -1712,16 +1771,17 @@ library correctly refuses them with `HK_MACHO_FAT_UNSUPPORTED` while the tool
 selects a slice. That division was a design choice made against fixtures; a
 real framework confirms it is the right one.
 
-**Gaps this run does NOT close, stated because the device bounds them:**
-- **arm64e is unverified.** An iPhone 7 is arm64. The `ARM64E`,
+**Gaps this particular iPhone 7 run did NOT close, stated because the device
+bounds them:**
+- **arm64e was unverified by this run.** An iPhone 7 is arm64. The `ARM64E`,
   `ARM64E_USERLAND` and `ARM64E_USERLAND24` chained-pointer formats were
   therefore never exercised by real data, nor was PAC signing. Those need an
   A12-or-later device.
 - ~~**Loaded-layout traversal is unverified.**~~ **Closed** — see the
   follow-up below.
-- The dyld populator and shared-cache resolver remain unbuilt and untested;
-  shared-cache dylibs are not files on disk, so they cannot be pulled this way
-  at all.
+- ~~The dyld populator and shared-cache resolver remain unbuilt and
+  untested.~~ **Closed** — the runtime dyld catalog and loaded shared-cache
+  resolver are now host- and arm64-device-verified; see the Milestone 5 table.
 
 **Loaded-layout conformance follow-up.** The gap above is now closed, and the
 way it was closed is worth recording because the obvious version of this test
@@ -1766,7 +1826,7 @@ cache, or a real slide.
 Taken deliberately, because the loop is approaching a real boundary and it is
 better to name it than to drift into writing unverifiable code.
 
-**Still genuinely host-testable** (pure buffer logic, synthetic fixtures):
+**Initially host-testable** (pure buffer logic, synthetic fixtures):
 chained-fixup **chain traversal** (the metadata half is now done — see above);
 bind opcodes (`LC_DYLD_INFO`'s bind streams, the older one); ObjC metadata
 sections (`__objc_classlist` and friends parse as plain data, though the
@@ -1775,8 +1835,8 @@ metadata — note `native/hk_swift.c` already parses class descriptors and is
 already host-tested by `tests/test_swift_abi.c` against a hand-built metadata
 blob, so that is a reuse candidate rather than new work.
 
-**Genuinely device-gated** — needs SSH to the jailbroken test device, and
-nothing here may be claimed without a real run: the dyld catalog populator
+**Initially device-gated** — needs SSH to the jailbroken test device, and
+at that point nothing here could be claimed without a real run: the dyld catalog populator
 (`_dyld_image_count`/`_dyld_get_image_header`); the shared-cache resolver (the
 cache's own layout and symbol index); PAC signing of resolved addresses;
 actually *writing* a slot (VM protection, `__auth_got` re-signing); and
@@ -1784,25 +1844,26 @@ conformance against **real** system images, which is the only thing that can
 confirm these parsers handle what Apple actually ships rather than what my
 fixtures assume.
 
-That last item deserves emphasis: every parser in Milestone 5 is verified
-against synthetic images I constructed. That is genuine verification of the
-logic, and it has caught real bugs — but it is *not* evidence that a real
-`libsystem_kernel.dylib` parses correctly. Nothing in this milestone is
-device-verified.
+That initial synthetic evidence was genuine verification of the logic, but not
+evidence that a real `libsystem_kernel.dylib` parses correctly. Subsequent
+arm64 device runs closed the dyld-catalog, exported/private/shared-cache, and
+real-system-image paths recorded in the table above. arm64e PAC and
+authenticated-slot behavior are accepted at source/ABI-review scope; no
+physical arm64e run is claimed.
 
 ## Milestone 6 — Non-generated-code engines (ObjC, rebind, memory, Swift)
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
-| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | in progress (host-verified) — prepare/commit over both import mechanisms, mutation-state-honest; write behind a device seam | commit `51f8391` |
-| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; drives the engine end to end, produces real report artifacts; converted to per-engine context + prepared-state handoff | commit `030ea2f`, converted `eb36f9d`+ |
-| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | in progress (host-verified) — controlled byte patch with masked precondition + revalidation; write behind a device seam | commit `b03f832` — see below |
-| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | in progress (host-verified) — memory engine wired into the plan lifecycle; exercises the memory-target path end to end; converted to per-engine context + prepared-state handoff | commit `e5fc3b2`, converted `eb36f9d`+ |
-| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | in progress (host-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | commit `3d7cad9` — see below |
-| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | in progress (host-verified) — ObjC engine wired into the plan lifecycle; first engine to reach `HK_TARGET_OBJC_METHOD`, so it exercises the plan's ObjC-target path end to end; first adapter on per-engine context + prepared-state handoff | commit `87503a6`, converted `eb36f9d` |
+| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — prepare/commit over LC_DYSYMTAB imports, mutation-state-honest; native pointer write exercised against the smoke executable | current working tree; `device-smoke3-rebind` prints `HookKit3 rebind: PASS` on iPhone9,3; no physical arm64e claim |
+| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; catalog-wide main-image import rebind drives the engine end to end and produces report artifacts | current working tree; `device_smoke3_rebind_adapter` PASS on iPhone9,3 |
+| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | complete (host- and arm64 device-verified) — controlled byte patch with masked precondition + revalidation; native Apple write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke |
+| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | complete (host- and arm64 device-verified) — memory engine wired into the plan lifecycle with per-engine context and prepared-state handoff | current working tree; canonical iPhone9,3 smoke |
+| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | complete (host- and arm64 device-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | current working tree; ObjC wired suite and canonical iPhone9,3 smoke |
+| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | complete (host- and device-verified) — ObjC engine wired into the plan lifecycle; Darwin `libobjc` binding is registered by `hk_runtime_create`; original publication and real iOS dispatch pass | commit `87503a6`, current working tree; canonical iPhone9,3 facade smoke |
 | Engine-vtable context + prepared-state handoff (`HKEngineInternal.h`, `HKPlan.c`) | complete (host-verified) — additive `prepare_one_ctx`/`commit_one_ctx`/`release_prepared` + `hk_runtime_register_engine_with_context`; retires the file-scoped-environment and stash ceiling in all three adapters | commit `eb36f9d` — see below |
-| Swift engine | not started — surveyed; mechanism already exists in `native/hk_swift.c` (device code, host-tested), a Milestone 6 adapter is device-gated (note below) | survey, commit `e5fc3b2` |
+| Swift engine | complete for accepted scope (host, synthetic-device, real-arm64-device, and arm64e source/ABI review) — native PAC/layout engine split into prepare/commit, with a separate public Swift API; demangled lookup is backed by the resolved Swift demangler | `native/hk_swift.{h,c}`, `Sources/Engines/HKSwiftEngine.c`, `HookKitSwift.h`; `test-swift-engine`; beta cross-build; iPhone9,3 synthetic arm64 metadata smoke and 2026-08-22 real-class prepare/commit/restore PASS |
 
 **Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
 the first engine, and the point where every Milestone 5 resolver becomes an
@@ -1848,6 +1909,16 @@ buffer, exercising every decision the engine makes except the store itself.
 **Not device-verified**, and the arm64e re-signing in particular has no host
 analogue.
 
+The standalone arm64 device smoke closes the non-PAC write gap: it selects
+the loaded `MH_EXECUTE` image (jailbreak injection places `systemhook.dylib`
+at dyld index 0), prepares the executable's `puts` lazy-import slot, commits
+the native pointer write, observes the replacement call, and exits cleanly.
+The production catalog-wide adapter is separately exercised by
+`device_smoke3_rebind_adapter`: it resolves the main executable through the
+live catalog, prepares/commits through the public plan lifecycle, checks the
+artifact/result masks, and observes the replacement call. Neither run claims
+the arm64e PAC path.
+
 6 host tests (`test-rebind-engine`, clean under
 `-fsanitize=address,undefined`): prepare finds both sites for a symbol bound by
 two slots and leaves the image byte-for-byte unchanged; commit writes every
@@ -1870,33 +1941,27 @@ with a real one on the same registration path — the path
 `HKRuntimeInternal.h` already noted Milestone 6+ engines would populate for
 real.
 
-The wiring surfaced a genuine limitation of the minimal engine vtable, and how
-it was handled is the honest part: the vtable is **context-free** —
-`prepare_one(spec)` / `commit_one(spec, sink)` carry no per-engine environment
-and thread no prepared state from prepare to commit — yet a real engine needs
-both (the image and writer, and prepare's captured originals at commit, per
-invariant #5). Rather than widen that shared signature (which would touch
-every fake engine, and carries more conflict risk while another agent is
-active in the repo), the adapter supplies both through a **file-scoped
-environment** set before the plan runs, stashing prepare's plan keyed by
-`stable_hook_id`. Stated as a ceiling, not the finished design: one environment
-at a time, fixed-size stash. It is enough to prove the wiring host-side and it
-**preserves the two-phase invariant** — prepare genuinely runs first and
-captures, commit uses that. The proper fix (per-engine context + a per-hook
-state handoff in the vtable) is separate, wider work, deferred rather than
-faked.
+The first adapter exposed a limitation of the original context-free vtable;
+that ceiling is now retired. The runtime supplies a caller-owned engine
+context and the core hands the prepared per-hook bundle directly into commit,
+so multiple runtimes/images do not share a file-scoped environment or a
+stable-hook-id stash. The two-phase invariant remains explicit: prepare reads
+and captures, commit revalidates and writes.
 
-On device the environment is not a fixture: `image_base`/`slide` come from the
-image catalog (dyld populator, still unbuilt) and the writer is the
-VM-protection-changing, arm64e-re-signing store. **Not device-verified.**
+On device the context is not a fixture: image/slide data comes from the live
+dyld catalog and the writer is the VM-protection-changing, arm64e-re-signing
+store. `device_smoke3_rebind_adapter` verifies the catalog-wide main-image
+path on arm64; arm64e PAC handling is source/ABI-reviewed with no physical
+arm64e claim.
 
 3 host tests (`test-rebind-wired`, clean under `-fsanitize=address,undefined`):
 the full lifecycle rebinds both slots of a synthetic image and the report
 carries two real import-slot artifacts with the right original/replacement
 pointers and a `request_id` stamped to the hook; an absent symbol is routed by
 the capability-only router but refused at prepare (`FAILED_SAFE`, plan
-`FAILED`), with the image left untouched; and no environment set fails cleanly
-rather than crashing. `make test` and `./build.sh all` (all 4 lanes) clean.
+`FAILED`), with the image left untouched; and a registered engine with a NULL
+context fails cleanly rather than crashing. `make test` and `./build.sh all`
+(all 4 lanes) clean.
 
 **Memory-patch engine**, this iteration
 (`Sources/Engines/HKMemoryEngine.{h,c}`) — the second Milestone 6 engine,
@@ -1929,9 +1994,9 @@ for the seam, not reusable, since it is the store itself and carries none of
 the precondition/revalidation/artifact contract. On device it is exactly what
 backs the seam. Mutation state is `NONE`/`COMPLETE` for a single region; a
 device store that can write a region partially must report `PARTIAL`, noted at
-the seam. **Not device-verified.** Not yet wired into the runtime (the rebind
-adapter is the pattern; a memory adapter needs image-relative address
-resolution, which leans on the still-unbuilt image catalog).
+the seam. The canonical iPhone9,3 facade smoke verifies the arm64 write path;
+arm64e protection/PAC behavior is source/ABI-reviewed with no physical arm64e
+claim.
 
 6 host tests (`test-memory-engine`, clean under
 `-fsanitize=address,undefined`): prepare/commit round-trip with the artifact
@@ -1947,37 +2012,29 @@ point is generality: the same vtable-adapter pattern that carried the rebind
 engine also carries the memory engine and a *different* target kind
 (`HK_TARGET_MEMORY_PATCH`), driving the plan's memory-target path (the
 deep-copied `expected_bytes`/`replacement_bytes`/`mask`) end to end for the
-first time. Same file-scoped environment and stated ceiling as the rebind
-adapter; preserves the two-phase invariant. The environment supplies what the
-spec cannot: the writer, and for an image-relative target the image base (a
-stand-in for the unbuilt catalog's selector-to-base lookup; absolute targets
-need neither). 3 host tests (`test-memory-wired`, ASan+UBSan clean): an
+first time. The adapter uses a caller-owned context and prepared address,
+preserving the two-phase invariant. The environment supplies what the spec
+cannot: the writer, and for an image-relative target the image base. 3 host
+tests (`test-memory-wired`, ASan+UBSan clean): an
 absolute-address patch through the full lifecycle with the report carrying a
 real `HK_ARTIFACT_MEMORY_PATCH` (original bytes, request_id stamped to the
 hook); an image-relative patch resolving base+offset to the right region; and
 a precondition failure surfacing honestly at prepare (`FAILED_SAFE`, plan
 `FAILED`, region untouched).
 
-**Swift engine — survey finding (why it is not the clean win the others
-were).** The mission prioritized the Swift vtable engine; surveying first, as
-required, changed the plan. The Swift *mechanism already exists* in
-`native/hk_swift.c` — it parses class metadata, resolves a vtable slot by name
-(`hk_swift_find_slot` via `hk_swift_resolve`), and patches it with PAC handling
-— and it is already host-tested by `tests/test_swift_abi.c` against a
-hand-built metadata blob. But unlike the rebind/memory engines (pure
-arch-neutral C), `hk_swift.c` is `#if arm64` **device code**, host-runnable
-only through `test_swift_abi.c`'s bespoke harness (it `#include`s the `.c` and
-injects PAC-shim macros and a fake `hk_native_patch_memory`). It also fuses
-resolve+patch in one call (`hk_swift_hook_slot` captures the original as it
-patches), so a true two-phase adapter (prepare captures, commit writes, per
-invariants #3/#5) would need `hk_swift.c` to expose a slot-address/read
-primitive it does not, or a duplication of its slot logic. Forcing an adapter
-now would mean duplicating tricky device code, or editing arch-gated
-`hk_swift.c` while another agent is actively committing to `native/` — exactly
-what the survey-for-reuse and avoid-conflict rules steer away from. Recorded as
-deferred with a concrete unblock (a small `hk_swift_slot_address(cls, index)`
-primitive, best added in coordination) rather than faked or forced; the memory
-wiring above was taken as the clean adjacent Milestone 6 win instead.
+**Swift engine — two-phase adapter**, this iteration. The existing
+`native/hk_swift.c` metadata/PAC logic is now split into
+`hk_swift_prepare_slot` and `hk_swift_commit_slot`: preparation resolves and
+validates without writing, while commit rejects a changed slot before the
+single-copy-atomic publication. `Sources/Engines/HKSwiftEngine.c` exposes
+that contract as `hk_swift_prepare`/`hk_swift_commit` plus a one-shot helper.
+The beta cross-build links both arm64 slices and exports the five public Swift
+entry points. Exact mangled lookup is available; demangled substring lookup
+fails closed until a Swift demangler is resolved by the host application.
+The metadata write now passes against a real arm64 Swift class: prepare leaves
+dispatch unchanged, commit redirects the probe, and a fresh prepare/commit
+restores it. arm64e PAC signing is covered by source/ABI review with no
+physical arm64e claim.
 
 **ObjC method engine**, this iteration (`Sources/Engines/HKObjCEngine.{h,c}`) —
 the third Milestone 6 engine. It redirects a selector's dispatch by replacing
@@ -2045,11 +2102,11 @@ that fails if it is wrong (proven, see below):
 Availability is honored rather than flattened: `OPTIONAL_IF_PRESENT` on an
 absent class or selector returns `HK_OBJC_NOT_APPLICABLE` (a satisfied
 request, not a failure) where `REQUIRED_NOW` returns `CLASS_NOT_FOUND` /
-`METHOD_NOT_FOUND`. `DEFER_UNTIL_AVAILABLE` returns
-`HK_OBJC_UNSUPPORTED_POLICY` — deferral needs an image-load callback to retry
-from, which this codebase has not built, and silently downgrading it to
-"required now" would turn a caller's "whenever it appears" into a hard failure
-at a moment they did not choose.
+`METHOD_NOT_FOUND`. `DEFER_UNTIL_AVAILABLE` now returns
+`HK_OBJC_NOT_APPLICABLE` for an absent target; Milestone 12 queues it and
+retries through the same adapter path. Silently downgrading it to
+"required now" would turn a caller's "whenever it appears" into a hard
+failure at a moment they did not choose.
 
 **Tests proven to have teeth**, not just passing. Five naive implementations
 were swapped in and each was caught by the specific test written for it:
@@ -2219,12 +2276,12 @@ file will ever exist. The schema is unchanged and stays that way.
 Note: HookKit 2.x already has working, host-and-device-tested implementations of all four (`Backends/`, `native/hk_swift.c`) — this milestone is about conforming them to the new engine contract and ABI, not writing them from scratch.
 
 ## Milestone 7 — Native terminal inline
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
-| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | in progress (host-verified) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; write behind a device seam | commit `4e82bbe` — see below |
-| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | in progress (host-verified) — wired into the plan lifecycle; first engine to reach `HK_TARGET_FUNCTION_ADDRESS`, so it exercises the plan's address-target path end to end | commit `adb63bb` — see below |
+| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; native Apple write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke; no physical arm64e claim |
+| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle; terminal `HK_TARGET_FUNCTION_ADDRESS` route exercised with no original request | current working tree; canonical iPhone9,3 smoke |
 
 Note: the atomicity work committed at `3e6bbdb` (one-page-per-trampoline,
 atomic near-branch via inbound thunk) is a real head start on this milestone's
@@ -2318,11 +2375,10 @@ because the machinery they need does not exist yet:
   arm64e a function pointer may carry a signature in its high bits and
   stripping needs ptrauth intrinsics that exist only on device. The address is
   used as given.
-- `expected_image` / `expected_uuid` are **not checked**. Confirming an
-  address lies inside a particular image with a particular UUID is the image
-  catalog's job (dyld populator, unbuilt). This one is a genuine correctness
-  gap, not a design choice — without it a hook could land in the wrong image
-  after a slide change.
+- ~~`expected_image` / `expected_uuid` are not checked.~~ **Closed** — the
+  dyld-populated catalog plus `HKImageScope` verifies address containment and
+  UUID before either inline adapter reads or mutates a target; host and arm64
+  device catalog evidence cover that path.
 
 **Teeth-proofs: two of three caught, and the third is reported honestly rather
 than counted as a pass.** An adapter that hardcodes `HK_ORIGINAL_NONE` and one
@@ -2473,17 +2529,19 @@ umbrella: a C caller loses nothing by getting it. That claim is proved rather
 than asserted — the exercise runs in all four header-compile variants, and the
 C and C++ passes are what would fail if it had acquired an ObjC dependency.
 
-Status is honest about what this is: request types, not a working hook. The
-engine remains deferred on the device-gated `hk_swift_slot_address` primitive
-(Milestone 6). Declaring the request shape is what lets the rest of the ABI
-stop saying "pending"; it is not a claim that a Swift hook will install.
+Status is honest about what this is: a working two-phase slot adapter with a
+deliberately narrow target contract. The engine remains gated for real
+Swift-class certification on arm64e; exact mangled lookup works, while
+demangled lookup fails closed until a Swift demangler is resolved by the host
+application. Declaring the request shape is what lets the rest of the ABI stop
+saying "pending".
 
 ### `HookKitObjC.h` — the typed wrapper the targets header named
 
 `HookKitTargets.h` has said since it was written that `cls`/`sel` are `void *`
 "to keep this header importable from plain C without `<objc/runtime.h>`" and
-that "HookKitObjC.h (not yet written) is where a typed convenience wrapper
-belongs". Now written.
+that `HookKitObjC.h` is where a typed convenience wrapper belongs. That
+wrapper is now written.
 
 Constructors only, all `static inline`, allocating nothing: `hk_objc_target_make`
 (by pointer), `hk_objc_target_make_named` (by string, resolved at preparation
@@ -2545,12 +2603,11 @@ An entry with no UUID recorded cannot satisfy a UUID requirement — "unknown"
 is not the build that was asked for.
 
 **The policy holds as decided: a NULL or empty catalog is a SKIP, not a
-failure.** The dyld populator is unbuilt, so this is the live device path;
-failing closed would make every image-scoped hook fail, which protects nothing
-and breaks everything. The gap stays open on device but *visibly* — the status
-says so — and the check goes live when the populator lands with no other code
-changing. The wired test asserts both halves: with a catalog the wrong image is
-refused, without one the identical request prepares.
+failure.** Apple runtimes now populate their catalog from dyld; the skip
+remains for unavailable, host, and custom contexts so it never turns missing
+catalog data into a fabricated rejection. The wired test asserts both halves:
+with a catalog the wrong image is refused, without one the identical request
+prepares.
 
 Wired into `HKInlineVtable`, checked **before** the target's prologue is read
 (if the address is not in the expected image, reading it is already reading the
@@ -2616,12 +2673,12 @@ Both adapters' test ctx helpers were `memset` **before** the field was added,
 applying the lesson from the inline adapter rather than rediscovering it.
 
 ## Milestone 8 — Native relocating inline
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
-| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | in progress (host-verified) — trampoline built and sealed at prepare, entry patched at commit; two device seams (obtain page, seal R-W→R-X) | commit `1562b8a` — see below |
-| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | in progress (host-verified) — wired in alongside the terminal engine, with the router picking between them on original requirement | commit `df9f177` — see below |
+| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — trampoline built/sealed at prepare, entry patched at commit; native allocation/seal/write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke; no physical arm64e claim |
+| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — wired in alongside the terminal engine, router selects it for callable original requests | current working tree; canonical iPhone9,3 smoke |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2904,12 +2961,12 @@ here.
 verified green.
 
 ## Milestone 9 — Static continuation decision
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed).**
 
 | Task | State | Evidence |
 |---|---|---|
-| Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare `commit_effects`; a request forbidding an effect is routed away from any engine that produces it | commit `0c04328` — see below |
-| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | in progress (host-verified) — a fixed pool of load-time-executable slots; the request that used to get `NO_ROUTE` now routes and installs | commit `86639b9` — see below |
+| Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare preparation and commit effect bounds; a request forbidding an effect is routed away before the corresponding phase | current working tree; router and relocating/static wired suites |
+| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | complete (host- and arm64 device-verified) — a fixed pool of load-time-executable slots; constrained requests route, install, execute through the replacement and original continuation, and report static continuation state | current working tree; `test-static-continuation`; `make device-smoke3-static`; iPhone9,3 iOS 15.8.3 |
 
 **The gap this closes was that `hk_constraints_t` was never read.** Not
 partially honoured — `grep` across `Sources/` found zero readers. A caller
@@ -2920,8 +2977,9 @@ anyway, and `hk_continuation_policy_t` was consulted in exactly one place
 lets a caller express was silently ignored.
 
 Fixed with the same additive routing pattern the previous two criteria used:
-`hk_engine_capabilities_t` gains `commit_effects` (what the engine may produce),
-eligibility rejects an engine whose declared effects include a forbidden one,
+`hk_engine_capabilities_t` gains preparation and commit effect bounds (what the
+engine may produce in each phase), eligibility rejects an engine whose declared
+effects include a forbidden one,
 and zero still means "declares nothing" so no fake engine needed editing. All
 five real adapters now declare: rebind `IMPORT_MUTATION`, memory
 `MEMORY_MUTATION`, ObjC `OBJC_METADATA_MUTATION`, terminal inline
@@ -2949,10 +3007,9 @@ adding a forbid bit will see it.
 `HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY` is translated into the same
 forbid bit, because a caller who set only the policy meant it just as much as
 one who set the constraint. The visible consequence is the honest one: a
-request for a callable original under that policy now gets `NO_ROUTE`, since
-no engine can provide one without allocating. **That is precisely the static
-continuation mechanism this milestone is named for, and it does not exist
-yet** — the routing now says so instead of quietly handing back a dynamic one.
+request for a callable original under that policy routes to the static pool
+when one is registered, and otherwise returns `NO_ROUTE` rather than quietly
+handing back a dynamic continuation.
 
 Three teeth-proofs, all caught: constraints ignored entirely, the naive mask,
 and the continuation policy not translated.
@@ -2978,9 +3035,9 @@ implementation differs.
 
 So Milestone 9 is `HKStaticPool.{h,c}` plus a **second vtable over the same
 engine**, sharing `prepare_one_ctx_status`/`commit_one_ctx`/`release_prepared`
-verbatim. It declares
-`HK_EFFECT_TARGET_TEXT_MUTATION | HK_EFFECT_STATIC_CONTINUATION_USE` and
-notably **not** `HK_EFFECT_EXECUTABLE_ALLOCATION`, which is precisely what
+verbatim. It declares static-continuation use during preparation and
+`HK_EFFECT_TARGET_TEXT_MUTATION | HK_EFFECT_STATIC_CONTINUATION_USE` as its
+install bound, notably **not** `HK_EFFECT_EXECUTABLE_ALLOCATION`, which is precisely what
 makes it eligible for the request the dynamic one is now refused for. The
 previous commit made that request return `NO_ROUTE`; it now routes and
 installs.
@@ -3009,41 +3066,64 @@ test gaps, not equivalences**:
 `make test` (282 assertions, exit 0), the suite under ASan+UBSan (clean), and
 `./build.sh all` (all 4 lanes) verified green.
 
+The remaining device gate is now closed on the available arm64 device: the
+smoke used a page-aligned `__TEXT,__hookkit` section, verified it was executable
+before the hook, changed only that fixed pool slot R-X → R-W → R-X, and showed
+the replacement and saved original both execute. It recorded a static
+continuation artifact with no executable-allocation effect. This is arm64
+evidence; no physical arm64e device claim is made, and the arm64e source/ABI
+review is recorded under Milestone 15.
+
 ## Milestone 10 — Provider adapters
-**State: not started.** Note: 2.x already vendors and integrates ElleKit,
+**State: complete for the accepted arm64-device plus source/ABI-reviewed
+arm64e scope.** Note: 2.x already vendors and integrates ElleKit,
 Substrate, Substitute, Dobby, Frida/gum, litehook, fishhook (`vendor/`,
 `Backends/`) — this milestone is evidence + certification against the new
 contract, not new integration work.
 
+| Task | State | Evidence |
+|---|---|---|
+| Provider evidence record validator | complete (host-verified) | `Tools/provider-evidence/validate.py`, `test_validate.py`; `make test-provider-evidence` |
+| Dobby evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/dobby/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-dobby` on iPhone9,3; canonical arm64e emits the matching modern ABI slice |
+| Gum evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/gum/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-gum` on iPhone9,3; canonical arm64e emits the matching modern ABI slice |
+| ElleKit/libhooker/Substitute/Substrate records | complete for declared-ABI scope; no synthetic distinct-provider claim | 2026-08-22 iPhone9,3 has ElleKit 1.2 at `/var/jb/usr/lib/libellekit.dylib`; libhooker and CydiaSubstrate are aliases to it, while Substitute is absent. The ElleKit ABI is certified below. Genuine libhooker, Substitute, and Substrate remain excluded until their own overwrite bounds and activation/publication semantics are proved. |
+| ElleKit HK3 adapter | complete (host- and arm64-device-verified; arm64e source/ABI-reviewed) | `provider-ellekit` uses a HookKit-owned hybrid: prepare relocates the audited 16-byte maximum and publishes that inspected continuation before commit; commit calls `LHHookFunctions` with no old-pointer request, leaving ElleKit to patch only the target. The packaged `device_provider_lifecycle3` test verified replacement, callable original, continuation metadata, and artifacts. The installed 1.2 provider selected its 12-byte ADRP/MOVK/BR form; current ElleKit source also bounds the known AArch64 forms at 4, 12, or 16 bytes. No physical arm64e claim is made. |
+| Automatic provider routing certification | complete for accepted release scope — Dobby/Gum/ElleKit arm64; source/ABI-reviewed arm64e | `HKProviderVtable.c` declares arm64 and arm64e for the three adapters; runtime registration recognizes ElleKit only when both its `EKHookFunction` marker and `LHHookFunctions` ABI are present. The evidence validator reports `3` physically eligible arm64 records; private test registration remains the explicit bypass. |
+
+The validator is intentionally conservative: a syntactically valid record is
+not a certification claim, and only a `device_certified` record with known
+continuation, publication order, and mutation semantics can pass the automatic
+routing predicate. The three arm64 records pass that predicate after the
+packaged `tests/device_provider_lifecycle3.c` smoke selected each shipping
+binding and verified public analyze → prepare → commit behavior, replacement,
+callable original, and complete generic artifacts. Dobby and Gum return opaque
+provider-owned continuations. ElleKit instead uses the shared relocation engine
+to create a fully inspected HookKit continuation before activation, avoiding
+ElleKit's late old-pointer publication. For the accepted arm64e lane, the
+router relies on each provider's declared ABI plus the prior PAC/new-ABI source
+evidence; no physical arm64e device result is claimed.
+
+The prior-version evidence is concrete rather than a guess: HookKit's
+`a066270` fishhook work scans authenticated GOT sections and signs/strips
+pointers with the slot discriminator, while `d0cf698` documents the old
+arm64e Dobby exclusion and `1049c37` restores a matching new-ABI arm64e build.
+The canonical build now reproduces the modern ptrauth marker and export gates.
+
 ## Milestone 11 — Legacy facade
-**State: in progress.**
+**State: complete (host- and arm64-device-verified; arm64e source/ABI-reviewed
+with no physical arm64e claim).**
 
 | Task | State | Evidence |
 |---|---|---|
-| `HookKitLegacy.h` + the memory-precondition relaxation | complete (host-verified) | commit `39cba46` — see below |
-| Facade mapping 2.x's 21 `HKSubstitutor` methods onto 3.0 | not started — surveyed; 2 of the 5 hook-installing methods are blocked on the deferred Swift engine, and wiring the rest changes what ships (needs sign-off) | survey `39cba46` | Two 2.x facade robustness fixes landed here ahead of
-the milestone (device-reported from Shadow integration):
+| Memory-patch preconditions | complete (host-verified) | canonical facade captures its precondition and uses the normal HK3 plan API |
+| Facade mapping 2.x's 21 `HKSubstitutor` methods onto 3.0 | complete — all 5 hook-installing methods bridge to the 3.0 lifecycle; image/introspection behavior remains intentionally legacy-backed | current working tree; canonical iPhone9,3 facade smoke, real Swift slot/exact-mangled/demangled smoke (2026-08-22), and unrecompiled ABI fixture |
+| Unrecompiled v2.5 facade fixture | complete (device-verified) | `tests/device_legacy_abi.m` compiled against the actual `v2.5.0` header, then run against canonical 3.0 on iPhone9,3; introspection, image APIs, hooks, batching, and errno surface PASS |
 
-**Memory patches with no precondition**, the first concrete piece.
-`HookKitTargets.h` has always said `expected_bytes` is "required for a new-API
-request (spec 6.19); a legacy-compat-only path may capture these at preparation
-instead — see HookKitLegacy.h (pending)". Nothing enforced either half: a
-caller could omit the precondition and get a blind patch.
-
-Enforced now in `hk_plan_add_hook`, and rejected there rather than at prepare
-because a patch that does not say what it expects is a malformed *request*, not
-a runtime condition. A patch without one cannot be revalidated, so committing
-it means writing over whatever happens to be there — a different build, an
-already-patched region, or simply the wrong address.
-
-2.x's `hookMemory:withData:size:` has no parameter for it and never did, so
-`hk_plan_add_hook_legacy` permits omission and the engine captures the region
-at preparation instead. That is **strictly weaker** and the header says so: it
-catches a change during the invariant #3 window but cannot catch a wrong
-address to begin with. The weakening is exactly why it is a separate named
-door rather than a looser rule for everyone, and a test asserts the door
-relaxes *only* that rule — a contradictory original/continuation pair is still
-refused through both.
+**Memory patches require a precondition.** `hk_plan_add_hook` rejects a
+memory patch without `expected_bytes`, because otherwise it cannot revalidate
+the requested target before writing. The historical facade captures those
+bytes before constructing its ordinary HK3 request, so it needs no parallel
+legacy entry point or ownership bypass.
 
 One existing test had to change, and it is worth saying which kind of change
 it was: `test_memory_target_non_relative_base_image_zeroed` built a memory
@@ -3052,15 +3132,16 @@ silent about the precondition only because nothing enforced the rule — not
 because it was testing the omission. It now supplies one to reach its actual
 subject.
 
-**The facade itself is surveyed, not started.** 2.x's `HKSubstitutor` exposes
-21 methods; the five that install hooks map onto 3.0 as
+**The facade's five mutating methods now bridge to 3.0.** 2.x's
+`HKSubstitutor` exposes 21 methods; the five that install hooks map onto 3.0 as
 `hookMessageInClass:` → `HK_TARGET_OBJC_METHOD`, `hookFunction:` →
 `HK_TARGET_FUNCTION_ADDRESS`, `hookMemory:` → `HK_TARGET_MEMORY_PATCH`, and
-the two `hookSwift*` methods → the Swift surface. **Two of those five are
-blocked on the deferred Swift engine**, so a complete facade is not buildable
-today. Beyond that, wiring the facade onto 3.0 engines changes what actually
-ships to existing consumers, which is a decision for the user rather than
-something to land autonomously.
+the two `hookSwift*` methods → the Swift surface. The bridge is device-verified
+across all five routes: the real Swift probe covers slot routing, exact mangled
+lookup, and the `swift_demangle` substring route, with each test hook restored
+before the process exits. The unrecompiled fixture and ABI-baseline refresh are
+complete; the remaining facade boundary is the deliberate split where non-mutating
+image/introspection methods stay on their proven legacy implementation.
 
 Two 2.x facade robustness fixes landed here ahead of the milestone
 (device-reported from Shadow integration):
@@ -3085,21 +3166,17 @@ Two 2.x facade robustness fixes landed here ahead of the milestone
    only falls through to the backend walk for symbols no loaded image carries.
 
 ## Milestone 12 — Deferred lifecycle
-**State: not started — surveyed, and the design is settled enough to execute
-from.**
+**State: complete (host- and arm64-device-verified for caller-driven retry).**
 
 Three facts about where this starts, each verified rather than assumed:
 
-- **`HK_OUTCOME_PENDING` is currently unreachable.** `grep` across `Sources/`
-  and `Tests/` finds it produced nowhere and asserted nowhere. The enum value
-  exists for exactly this milestone and nothing has ever set it.
-- **`HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE` is consulted in one place**, the
-  ObjC engine, which *refuses* it (`HK_OBJC_UNSUPPORTED_POLICY`, "needs an
-  image-load callback, which is unbuilt"). Every other engine ignores it.
-- **`hk_runtime_drain_pending` already exists** and is a stub returning
-  `HK_STATUS_OK` with a NULL report. So the retry entry point needs no new
-  API — on device the dyld image-load callback calls it, on host a test does,
-  and only the queue behind it is missing.
+- **`HK_OUTCOME_PENDING` is now reachable** for absent deferred ObjC targets;
+  the host wired test and packaged arm64 smoke assert the queued result and
+  retry.
+- **`HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE` is handled by the ObjC engine** as
+  a conditional absence, and the plan/runtime own the pending retry.
+- **`hk_runtime_drain_pending` is real** and returns a report of the retry
+  batch; a future Darwin image-load callback can call it without a new API.
 
 **The trap, and it is why this cannot be sliced the obvious way.** The tempting
 first commit is "mark a deferred hook `PENDING` instead of failing" — small,
@@ -3128,24 +3205,84 @@ Sequenced for whoever picks it up: the ObjC engine's refusal becomes wrong the
 moment the plan can defer, so it changes in the same commit as the queue. It is
 not a separate cleanup.
 
+Implementation complete in the current working tree:
+
+| Task | State | Evidence |
+|---|---|---|
+| Deferred-hook ownership transfer from plan to runtime | complete (host-verified) | `HKPlan.c`, `HKRuntimeInternal.h`; `test_objc_wired` |
+| Pending retry through the original engine/context path | complete (host-verified) | `hk_runtime_drain_pending`; `test_deferred_target_survives_plan_and_retries` |
+| ObjC deferred availability | complete (host-verified) | `HKObjCEngine.c`, `HKObjCVtable.c`; `test_objc_engine` |
+| Pending/active reports and artifact identity | complete (host-verified) | `test_deferred_target_survives_plan_and_retries` |
+| Caller-driven deferred ObjC lifecycle | complete (arm64 device-verified) | 2026-08-22 iPhone9,3: packaged beta `3.0.0-1` queued an absent named class, retained `PENDING` across the first drain, then installed after class registration; dispatch changed 13 → 99 and the report contained one artifact. Beta package removed; legacy `2.5.1-1` reverified. |
+| Full host regression suite | complete (host-verified) | `make test` — exit 0 |
+
+Evidence is intentionally marked as the uncommitted working tree because this
+milestone began with user changes already present; no commit was created over
+those changes.
+
 
 ## Milestone 13 — Packaging beta
-**State: not started.**
+**State: complete (host- and device-verified for the public lifecycle).**
+
+| Task | State | Evidence |
+|---|---|---|
+| Opt-in `HookKit3.framework` identity | complete | `HOOKKIT_BETA_IDENTITY=1`; `Makefile`, beta `Info.plist` |
+| New C ABI export boundary | complete | `scripts/export-HookKit3.list`; `make check-exports` — 6/6 slices PASS |
+| Beta public headers exclude legacy facade | complete | `check_compat.sh beta`; `HookKitLegacy.h` absent from package |
+| Rootless beta package metadata and slices | complete | `build.sh beta`; package `me.jjolano.fmwk.hookkit3`, `3.0.0-1`, arm64/arm64e, iOS 15+ |
+| Full host regression suite during beta build | complete | `build.sh beta` — `make test` and package checks exit 0 |
+| Public lifecycle smoke beside legacy package | complete (device-verified) | iPhone9,3 iOS 15.8.3: beta co-installed with HookKit 2.5.1-1; `HookKit3 lifecycle: PASS`; beta removed and legacy reverified |
+| ObjC plan/commit smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3: real libobjc class setup, route, prepare, commit, and message dispatch; `HookKit3 ObjC smoke: PASS` |
+| Swift prepare/commit smoke | complete (synthetic device verification) | iPhone9,3 iOS 15.8.3: synthetic arm64 class metadata/vtable slot; prepare leaves slot unchanged and commit publishes replacement; `HookKit3 Swift smoke: PASS (synthetic arm64 metadata)`; not real Swift-class certification |
+
+The beta remains intentionally opt-in. Its public lifecycle and compiled-in
+Apple engine registration are device-verified on arm64; its arm64e build and
+ABI markers are source/host-reviewed under the accepted release scope.
 
 ## Milestone 14 — Shadow migration
-**State: not started.** Requires explicit user sign-off before any commit in
-`shadow/` — see boundary note at top of this file.
+**State: complete (source/build- and current-device-verified).**
+
+User sign-off was recorded on 2026-08-22. The migration is deliberately a
+small compatibility boundary: modern Shadow controls depend on
+`me.jjolano.fmwk.hookkit (>= 3.0.0)`, `build-deps.sh` pins the canonical
+HookKit commit while allowing a local canonical package override, and
+`HookCoordinator.h` asserts the canonical ABI at compile time. Existing
+Shadow source still uses its old `HKSubstitutor` spellings through the new
+packaged `HookKitLegacyAPI.h`; the linked binary is the canonical 3.0 facade,
+so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
+
+| Task | State | Evidence |
+|---|---|---|
+| Shadow source/package migration | complete (source-verified) | modern rootless controls, canonical dependency, ABI guard, and compatibility-header boundary in the signed-off Shadow checkout |
+| Shadow rootless build | complete (host-verified) | rebuilt `me.jjolano.shadow` 4.0.0 package plus ShadowHarness; Mach-O/package checks pass |
+| Current-device smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3 installed canonical HookKit 3.0.0-1 + rebuilt Shadow 4.0.0, launched ShadowHarness without a new ShadowHarness crash, then restored exact prior HookKit 2.5.1-1 / Shadow 4.0.0 state |
+| Shadow performance baseline | deferred (accepted) | source-level and current-device validation is the accepted release bar |
 
 ## Milestone 15 — Canonical release candidate
-**State: not started.**
+**State: complete (accepted release scope).**
+
+| Task | State | Evidence |
+|---|---|---|
+| Canonical legacy identity/package | complete (host-verified) | `build.sh canonical`; `me.jjolano.fmwk.hookkit` 3.0.0-1, arm64/arm64e, iOS 15+ |
+| Canonical export/compatibility gates | complete (host-verified) | `check_exports.sh`, `check_compat.sh canonical` |
+| Canonical legacy facade device smoke | complete (device-verified) | 2026-08-21 iPhone9,3 iOS 15.8.3: canonical facade batching, rebind adapter, unrecompiled v2.5 ABI fixture, and live loaded-image resolver all PASS after legacy-memory ownership compatibility fix; device restored to exact 2.5.1-1 |
+| Canonical real Swift vtable smoke | complete (arm64 device-verified) | 2026-08-22 iPhone9,3: a real Swift class compiled with the iPhoneOS Swift runtime; prepare is non-mutating, commit redirects `target()` 7 → 42, and a fresh plan restores 7; device restored to exact legacy `2.5.1-1` |
+| Canonical provider lifecycle after toolchain repair | complete (arm64 device-verified) | 2026-08-22 iPhone9,3 iOS 15.8.3: freshly built canonical `3.0.0-1` package runs `device-provider-lifecycle3`; both packaged HK3 Dobby and Gum lifecycles PASS; device restored to exact legacy `2.5.1-1`. |
+| arm64e standalone smoke and package build gate | complete (host/source/ABI-reviewed; no physical-device claim) | `Makefile` selects the verified modern toolchain for every arm64e device-smoke target; the Linux Swift 5.8 probe is emitted as assembly and reassembled with that toolchain. `build.sh` selects matching `libroot.a`, while `check_compat.sh` asserts the final arm64e subtype for every framework/HKGum slice (`0x80` modern, intentional `0x00` legacy). The 2026-08-22 split matrix built 15 smoke executables plus all 3 Swift/C objects; every canonical arm64e output and package slice carried the new ptrauth ABI marker. Prior HookKit 2.x PAC-aware fishhook/native arm64e work (`a066270`, `d0cf698`, `1049c37`) supplies the source precedent. |
+| Release-candidate closure | complete (accepted release scope) | canonical build, host regression suite, historical ABI comparisons, export/compatibility checks, HookKit 2.5 performance baseline, static continuation, resolver/rebind, facade/ABI/Swift, Dobby/Gum device lifecycles, signed-off Shadow source/package/device smoke, and arm64e source/ABI gates all pass; device restored to exact legacy HookKit 2.5.1-1 / Shadow 4.0.0 |
 
 ---
 
 ## Open deviations from the spec (running list)
 
-1. Performance baselines (Milestone 0) deferred pending device access — see
-   above.
-2. `V1_MODULE_COMPATIBILITY_AUDIT.md` conclusion is provisional — the
-   public-source-search leg of spec §2.3's audit isn't done yet. Must close
-   before Milestone 3's ABI freeze, not before Milestone 1's own exit gate
-   (which only needs the concept named, which it now is).
+1. Shadow performance baseline is deferred by accepted decision: source-level
+   validation plus testing on the current arm64 device is sufficient for this
+   release; no performance claim is made.
+2. The v1 audit found an archived public binary dependency on Modulous but no
+   public v1 module-class API use. HookKit 3.0 deliberately keeps the
+   installable 2.5 package and retained `HKSubstitutor` facade; the full v1
+   module ABI remains out of scope by recorded user decision.
+3. No physical arm64e device is available in this run. Canonical arm64e is
+   accepted from prior PAC-aware implementation evidence, matching modern ABI
+   markers, exports, and source-level provider declarations; arm64e evidence
+   records remain conservative rather than being fabricated as device runs.

@@ -15,7 +15,7 @@
 // The context supplies what the SPEC cannot: how to write, and -- for an
 // image-relative target -- where the image is mapped. Absolute-address targets
 // need only the writer. On device the writer is hk_native_patch_memory and the
-// image base comes from the image catalog (dyld populator, unbuilt); resolving
+// image base comes from the image catalog (dyld populator); resolving
 // a base_image *selector* to a base is the catalog's job and is NOT done here
 // -- the context hands the base in directly, a stand-in for that lookup.
 

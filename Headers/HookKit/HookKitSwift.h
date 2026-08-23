@@ -30,17 +30,16 @@
 //     the Swift runtime's demangler is unavailable, substring lookup cannot
 //     work and only exact-mangled and slot-index forms remain.
 //
-// STATUS: request types only. The engine behind this is DEFERRED -- the
-// mechanism exists in native/hk_swift.c but is arm64-gated device code that
-// fuses resolution and patching, so a two-phase engine needs a slot-address
-// primitive it does not expose. See docs/3.0/IMPLEMENTATION_STATUS.md,
-// Milestone 6. Declaring the request shape now is what lets the rest of the
-// ABI stop saying "pending"; it is not a claim that a hook will install.
+// STATUS: request types and the two-phase C API are stable. The device engine
+// remains gated by supported Swift metadata layouts and an arm64/arm64e
+// runtime check; declaring this shape does not claim every Swift class can
+// install.
 
 #ifndef HOOKKIT3_SWIFT_H
 #define HOOKKIT3_SWIFT_H
 
 #include "HookKitBase.h"
+#include "HookKitTargets.h"
 #include "HookKitResults.h"
 
 #ifdef __cplusplus
@@ -115,6 +114,26 @@ static inline hk_swift_target_t hk_swift_target_init(void) {
     t.availability = HK_AVAILABILITY_REQUIRED_NOW;
     return t;
 }
+
+// Two-phase Swift vtable hook. Preparation resolves and validates the class
+// metadata and slot without writing; commit revalidates the captured slot and
+// performs one atomic pointer publication. `replacement` is the Swift method
+// function pointer with the platform calling convention documented above.
+typedef struct hk_swift_plan hk_swift_plan_t;
+
+hk_status_t hk_swift_prepare(const hk_swift_target_t *target,
+                             hk_swift_plan_t **out_plan);
+hk_status_t hk_swift_commit(hk_swift_plan_t *plan, void *replacement,
+                            void **out_original);
+void hk_swift_plan_release(hk_swift_plan_t *plan);
+
+// Convenience for callers that do not need to retain a prepared plan.
+hk_status_t hk_swift_hook(const hk_swift_target_t *target, void *replacement,
+                          void **out_original);
+
+// Negative native Swift error from the most recent failed operation. Read it
+// immediately after the call that failed; it is process-wide by design.
+int hk_swift_last_error_code(void);
 
 #ifdef __cplusplus
 }

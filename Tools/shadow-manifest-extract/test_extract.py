@@ -7,6 +7,9 @@ covers NULL vs identifier prefKey, line-number accuracy, and the
 malformed-row-count error path.
 """
 
+import os
+import tempfile
+
 from extract import (
     parse_install_units_from_text,
     unit_to_manifest_target,
@@ -17,6 +20,13 @@ from extract import (
     parse_group_mask_expr,
     parse_libc_descriptor_table,
     libc_row_to_manifest_target,
+    find_delegated_functions,
+    find_coordinator_installers_source,
+    resolve_shadow_commit,
+    find_logos_init_groups,
+    extract_logos_targets,
+    parse_devicecheck_descriptor_table,
+    devicecheck_rows_to_manifest_targets,
 )
 
 FIXTURE = '''#import <Shadow/HookConfiguration.h>
@@ -125,6 +135,38 @@ def test_reused_variable_resolves_to_nearest_preceding_assignment():
         assert t["original_requirement"] == "direct_predecessor"  # all three pass outOldPtr:
 
 
+LIBSYSTEM_RESOLVER_FIXTURE = '''
+void shadowhook_sandbox(HKSubstitutor* hooks) {
+    void* sym_signal = shdw_resolve_libsystem("_signal");
+    if(sym_signal) [hooks hookFunction:sym_signal withReplacement:replaced_signal outOldPtr:(void **) &original_signal];
+    sym_signal = shdw_resolve_libsystem("_bsd_signal");
+    if(sym_signal) [hooks hookFunction:sym_signal withReplacement:replaced_bsd_signal outOldPtr:(void **) &original_bsd_signal];
+}
+'''
+
+
+def test_libsystem_resolver_uses_nearest_assignment():
+    clean = strip_comments_preserve_lines(LIBSYSTEM_RESOLVER_FIXTURE)
+    calls = find_hook_function_calls(clean, 1)
+    assert [resolve_symbol_variable(clean, "sym_signal", c["body_offset"])
+            for c in calls] == ["_signal", "_bsd_signal"]
+
+
+def test_hook_function_scan_accepts_category_specific_receiver():
+    clean = strip_comments_preserve_lines('''
+void shadowhook_syscall(HKSubstitutor* hooks) {
+    HKSubstitutor* rebindOnly = [HKSubstitutor substitutorWithCategory:HK_CAT_FUNCTION_REBIND];
+    [rebindOnly hookFunction:syscall withReplacement:replaced_syscall outOldPtr:(void **) &original_syscall];
+}
+''')
+    calls = find_hook_function_calls(clean, 1)
+    assert len(calls) == 1
+    assert calls[0]["receiver"] == "rebindOnly"
+    target = hook_call_to_manifest_target(
+        calls[0], "Hook_Syscall", "phase_tier1", "syscall.x", clean)
+    assert target["stable_hook_id"] == "Hook_Syscall::syscall"
+
+
 LIBC_TABLE_FIXTURE = '''
 static const shdw_hook_desc_t shdw_libc_hooks[] = {
     { "access",  (void*)&replaced_access, (void**)&original_access, LIBC,       LIBC },
@@ -185,6 +227,100 @@ def test_missing_table_rejected():
         assert "kSHDWInstallUnits" in str(e)
     else:
         raise AssertionError("expected RuntimeError when the table isn't present")
+
+
+def test_one_level_delegate_scan_is_deduplicated_and_receiver_specific():
+    body = """
+    shadowhook_dyld_symlookup(hooks, one);
+    shadowhook_dyld_symlookup(hooks, duplicate);
+    shdw_coord_other(other, value);
+    """
+    assert find_delegated_functions(body) == [
+        "shadowhook_dyld_symlookup"
+    ]
+
+
+def test_coordinator_source_layout_fallback():
+    with tempfile.TemporaryDirectory() as root:
+        core = os.path.join(root, "ShadowCore.dylib")
+        os.makedirs(core)
+        current = os.path.join(core, "shadowcore.x")
+        with open(current, "w", encoding="utf-8") as f:
+            f.write("// current coordinator source\n")
+
+        assert find_coordinator_installers_source(root) == current
+
+        historical = os.path.join(core, "dylib.x")
+        with open(historical, "w", encoding="utf-8") as f:
+            f.write("// historical coordinator source\n")
+        assert find_coordinator_installers_source(root) == historical
+
+
+def test_snapshot_provenance_is_explicit_or_omitted():
+    with tempfile.TemporaryDirectory() as root:
+        # A git archive has no .git directory. It must not turn into a JSON
+        # null for the optional string-valued schema field.
+        assert resolve_shadow_commit(root) is None
+        assert resolve_shadow_commit(root, "6ad67ba") == "6ad67ba"
+
+
+def test_logos_groups_inherit_their_coordinator_unit():
+    with tempfile.TemporaryDirectory() as root:
+        source_dir = os.path.join(root, "ShadowCore.dylib", "hooks")
+        os.makedirs(source_dir)
+        source = os.path.join(source_dir, "fixture.x")
+        with open(source, "w", encoding="utf-8") as f:
+            f.write("""%group shadowhook_Fixture
+%hook Fixture
+- (id)value { return %orig; }
+%end
+%end
+""")
+
+        unit = {
+            "role": "optional",
+            "commit_domain": "phase_tier1",
+            "availability": "defer_until_available",
+        }
+        targets = extract_logos_targets(
+            root, {"shadowhook_Fixture": {"Hook_Fixture"}},
+            {"Hook_Fixture": unit})
+        assert len(targets) == 1
+        target = targets[0]
+        assert target["parent_install_unit"] == "Hook_Fixture"
+        assert target["stable_hook_id"] == "Hook_Fixture::Fixture::instance:value"
+        assert target["role"] == "optional"
+        assert target["commit_domain"] == "phase_tier1"
+        assert target["availability"] == "defer_until_available"
+
+
+def test_logos_init_groups_are_deduplicated():
+    body = "%init(shadowhook_A); %init(shadowhook_A); %init(shadowhook_B);"
+    assert find_logos_init_groups(body) == ["shadowhook_A", "shadowhook_B"]
+
+
+DEVICECHECK_TABLE_FIXTURE = '''
+const DCHDescriptor shdw_devicecheck_descriptors[] = {
+    { "Probe", "isRooted", DCHMethodInstance, 'B', 0, DCHPolicyFalse },
+    { "Probe", "isRooted", DCHMethodInstance, '@', 0, DCHPolicyFalse },
+    { "Probe", "isTrusted", DCHMethodClass, 'B', 0, DCHPolicyTrue },
+    { NULL, NULL, 0, 0, 0, 0 }
+};
+'''
+
+
+def test_devicecheck_descriptor_table_collapses_encoding_variants():
+    rows = parse_devicecheck_descriptor_table(DEVICECHECK_TABLE_FIXTURE, "fixture")
+    assert len(rows) == 3
+    parent = {"role": "optional", "commit_domain": "phase_tier1"}
+    targets = devicecheck_rows_to_manifest_targets(
+        rows, "Hook_DeviceCheck", parent, "DeviceCheckHooks.m")
+    assert len(targets) == 2
+    rooted = next(t for t in targets if t["target_selector"] == "isRooted")
+    assert rooted["stable_hook_id"] == "Hook_DeviceCheck::Probe::instance:isRooted"
+    assert rooted["original_requirement"] == "none"
+    assert rooted["availability"] == "optional_if_present"
+    assert "@, B" in rooted["known_compatibility_risks"][0]
 
 
 if __name__ == "__main__":
