@@ -7,35 +7,35 @@
 typedef int hookkit_status_t;
 enum { HK_OK = 0 };
 
-static int hk3_value_original(id self, SEL selector) {
+static int hk_value_original(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 7;
 }
 
-static int hk3_value_replacement(id self, SEL selector) {
+static int hk_value_replacement(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 42;
 }
 
-__attribute__((noinline)) static int hk3_function_original(void) {
+__attribute__((noinline)) static int hk_function_original(void) {
     return 11;
 }
 
-__attribute__((noinline)) static int hk3_function_replacement(void) {
+__attribute__((noinline)) static int hk_function_replacement(void) {
     return 99;
 }
 
-__attribute__((noinline)) static int hk3_terminal_original(void) {
+__attribute__((noinline)) static int hk_terminal_original(void) {
     return 17;
 }
 
-__attribute__((noinline)) static int hk3_terminal_replacement(void) {
+__attribute__((noinline)) static int hk_terminal_replacement(void) {
     return 71;
 }
 
-static volatile int hk3_memory_value = 3;
+static volatile int hk_memory_value = 3;
 
 static int fail(const char *message) {
     fprintf(stderr, "HookKit canonical facade: FAIL: %s\n", message);
@@ -44,10 +44,10 @@ static int fail(const char *message) {
 
 int main(void) {
     Class super_class = objc_getClass("NSObject");
-    SEL selector = sel_registerName("hk3_value");
-    Class smoke_class = objc_allocateClassPair(super_class, "HK3LegacyFacadeObject", 0);
+    SEL selector = sel_registerName("hk_value");
+    Class smoke_class = objc_allocateClassPair(super_class, "HKLegacyFacadeObject", 0);
     if (!super_class || !selector || !smoke_class ||
-        !class_addMethod(smoke_class, selector, (IMP)hk3_value_original, "i@:")) {
+        !class_addMethod(smoke_class, selector, (IMP)hk_value_original, "i@:")) {
         return fail("class setup");
     }
     objc_registerClassPair(smoke_class);
@@ -74,9 +74,9 @@ int main(void) {
     void *old_message = NULL;
     if (send_message_hook(substitutor,
                           sel_registerName("hookMessageInClass:withSelector:withReplacement:outOldPtr:"),
-                          smoke_class, selector, (void *)hk3_value_replacement,
+                          smoke_class, selector, (void *)hk_value_replacement,
                           &old_message) != HK_OK ||
-        old_message != (void *)hk3_value_original ||
+        old_message != (void *)hk_value_original ||
         send_value(object, selector) != 42) {
         return fail("3.0 ObjC bridge");
     }
@@ -84,29 +84,29 @@ int main(void) {
     void *old_function = NULL;
     if (send_function_hook(substitutor,
                            sel_registerName("hookFunction:withReplacement:outOldPtr:"),
-                           (void *)hk3_function_original,
-                           (void *)hk3_function_replacement,
+                           (void *)hk_function_original,
+                           (void *)hk_function_replacement,
                            &old_function) != HK_OK ||
-        !old_function || hk3_function_original() != 99 ||
+        !old_function || hk_function_original() != 99 ||
         ((int (*)(void))old_function)() != 11) {
         return fail("3.0 relocating function bridge");
     }
 
     if (send_function_hook(substitutor,
                            sel_registerName("hookFunction:withReplacement:outOldPtr:"),
-                           (void *)hk3_terminal_original,
-                           (void *)hk3_terminal_replacement,
+                           (void *)hk_terminal_original,
+                           (void *)hk_terminal_replacement,
                            NULL) != HK_OK ||
-        hk3_terminal_original() != 71) {
+        hk_terminal_original() != 71) {
         return fail("3.0 terminal function bridge");
     }
 
     int replacement = 8;
     if (send_memory_hook(substitutor,
                          sel_registerName("hookMemory:withData:size:"),
-                         (void *)&hk3_memory_value, &replacement,
+                         (void *)&hk_memory_value, &replacement,
                          sizeof(replacement)) != HK_OK ||
-        hk3_memory_value != replacement) {
+        hk_memory_value != replacement) {
         return fail("3.0 memory bridge");
     }
 
@@ -118,11 +118,11 @@ int main(void) {
     int second_replacement = 13;
     if (send_memory_hook(batched,
                          sel_registerName("hookMemory:withData:size:"),
-                         (void *)&hk3_memory_value, &second_replacement,
+                         (void *)&hk_memory_value, &second_replacement,
                          sizeof(second_replacement)) != HK_OK ||
-        hk3_memory_value != replacement ||
+        hk_memory_value != replacement ||
         execute_hooks(batched, sel_registerName("executeHooks")) != HK_OK ||
-        hk3_memory_value != second_replacement) {
+        hk_memory_value != second_replacement) {
         return fail("3.0 legacy batching");
     }
 

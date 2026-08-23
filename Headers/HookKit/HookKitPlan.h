@@ -2,8 +2,8 @@
 // drive a plan through analyze/prepare/commit. See
 // docs/3.0/PUBLIC_C_ABI.md and docs/3.0/PLAN_LIFECYCLE.md (pending).
 
-#ifndef HOOKKIT3_PLAN_H
-#define HOOKKIT3_PLAN_H
+#ifndef HOOKKIT_PLAN_H
+#define HOOKKIT_PLAN_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -162,4 +162,4 @@ hk_status_t hk_installed_hook_copy_result(
 }
 #endif
 
-#endif // HOOKKIT3_PLAN_H
+#endif // HOOKKIT_PLAN_H

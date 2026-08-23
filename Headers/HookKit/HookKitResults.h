@@ -4,8 +4,8 @@
 // (pending) for the honesty rules governing achieved_reach/effects, not
 // just their bit layout.
 
-#ifndef HOOKKIT3_RESULTS_H
-#define HOOKKIT3_RESULTS_H
+#ifndef HOOKKIT_RESULTS_H
+#define HOOKKIT_RESULTS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -244,4 +244,4 @@ typedef struct {
 }
 #endif
 
-#endif // HOOKKIT3_RESULTS_H
+#endif // HOOKKIT_RESULTS_H

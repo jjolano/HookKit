@@ -5,8 +5,8 @@
 //
 // Canonical HookKit packages this C-only umbrella at <HookKit/HookKit.h>.
 
-#ifndef HOOKKIT3_H
-#define HOOKKIT3_H
+#ifndef HOOKKIT_H
+#define HOOKKIT_H
 
 #include "HookKitBase.h"
 #include "HookKitRuntime.h"
@@ -27,4 +27,4 @@
 // only -- the engine is device-gated by its supported Swift layouts (see the
 // header).
 //
-#endif // HOOKKIT3_H
+#endif // HOOKKIT_H

@@ -5,8 +5,8 @@
 // Packaged by canonical HookKit beneath <HookKit/>, alongside the retained
 // Objective-C compatibility facade at <HookKit.h>.
 
-#ifndef HOOKKIT3_BASE_H
-#define HOOKKIT3_BASE_H
+#ifndef HOOKKIT_BASE_H
+#define HOOKKIT_BASE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -75,4 +75,4 @@ typedef struct {
 }
 #endif
 
-#endif // HOOKKIT3_BASE_H
+#endif // HOOKKIT_BASE_H

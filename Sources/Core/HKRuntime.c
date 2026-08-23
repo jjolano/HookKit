@@ -847,7 +847,7 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
     }
 #if defined(HOOKKIT_CANONICAL_3)
     // Older devices rely on the installed provider's relocator. This remains
-    // an HK3 engine lifecycle, not a re-entry into the retired 2.x router.
+    // an HookKit engine lifecycle, not a re-entry into the retired 2.x router.
     memset(&runtime->substitute_provider, 0,
            sizeof(runtime->substitute_provider));
     runtime->substitute_provider.kind = HK_PROVIDER_SUBSTITUTE;

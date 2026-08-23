@@ -13,7 +13,7 @@ static int replacement_puts(const char *message) {
 }
 
 static int fail(const char *message) {
-    const char prefix[] = "HookKit3 rebind adapter: FAIL (";
+    const char prefix[] = "HookKit rebind adapter: FAIL (";
     const char suffix[] = ")\n";
     write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
     write(STDERR_FILENO, message, strlen(message));
@@ -97,8 +97,8 @@ int main(void) {
         return fail("result");
     }
 
-    puts("HookKit3 rebind adapter trigger");
-    const char pass[] = "HookKit3 rebind adapter: PASS\n";
+    puts("HookKit rebind adapter trigger");
+    const char pass[] = "HookKit rebind adapter: PASS\n";
     int status = (g_hits == 1) ? 0 : fail("replacement");
     if (status == 0) {
         write(STDOUT_FILENO, pass, sizeof(pass) - 1);

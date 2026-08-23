@@ -41,6 +41,6 @@ int main(void) {
     hk_artifact_snapshot_release(snapshot);
     hk_plan_release(plan);
     hk_runtime_release(runtime);
-    puts("HookKit3 lifecycle: PASS");
+    puts("HookKit lifecycle: PASS");
     return 0;
 }

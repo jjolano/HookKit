@@ -5,9 +5,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
-extern void *hk3_swift_probe_metadata(void);
-extern int64_t hk3_swift_probe_call_target(void);
-extern void *hk3_swift_probe_replacement(void);
+extern void *hk_swift_probe_metadata(void);
+extern int64_t hk_swift_probe_call_target(void);
+extern void *hk_swift_probe_replacement(void);
 
 static int fail(const char *message) {
     fprintf(stderr, "HookKit canonical Swift facade smoke: FAIL: %s\n", message);
@@ -34,20 +34,20 @@ static bool hook_name_and_restore(HKSubstitutor *substitutor, Class metadata,
         !original || original == replacement) {
         return false;
     }
-    bool changed = hk3_swift_probe_call_target() == 42;
+    bool changed = hk_swift_probe_call_target() == 42;
     return restore_slot(substitutor, metadata, index, original) &&
-           changed && hk3_swift_probe_call_target() == 7;
+           changed && hk_swift_probe_call_target() == 7;
 }
 
 int main(void) {
     @autoreleasepool {
-        Class metadata = (__bridge Class)hk3_swift_probe_metadata();
-        void *replacement = hk3_swift_probe_replacement();
+        Class metadata = (__bridge Class)hk_swift_probe_metadata();
+        void *replacement = hk_swift_probe_replacement();
         HKSubstitutor *substitutor = [HKSubstitutor defaultSubstitutor];
         if (!metadata || !replacement || !substitutor) {
             return fail("probe setup");
         }
-        if (hk3_swift_probe_call_target() != 7) {
+        if (hk_swift_probe_call_target() != 7) {
             return fail("baseline dispatch");
         }
 
@@ -63,9 +63,9 @@ int main(void) {
             if (!original || original == replacement) {
                 return fail("slot original");
             }
-            bool changed = hk3_swift_probe_call_target() == 42;
+            bool changed = hk_swift_probe_call_target() == 42;
             if (!restore_slot(substitutor, metadata, index, original) ||
-                hk3_swift_probe_call_target() != 7) {
+                hk_swift_probe_call_target() != 7) {
                 return fail("slot restore");
             }
             if (changed) {
@@ -79,12 +79,12 @@ int main(void) {
 
         // This is the stable mangled name emitted by the fixed probe module.
         if (!hook_name_and_restore(substitutor, metadata, target_index,
-                                   @"$s13HK3SwiftProbeAAC6targetSiyF",
+                                   @"$s12HKSwiftProbeAAC6targetSiyF",
                                    replacement)) {
             return fail("exact mangled lookup");
         }
         if (!hook_name_and_restore(substitutor, metadata, target_index,
-                                   @"HK3SwiftProbe.target", replacement)) {
+                                   @"HKSwiftProbe.target", replacement)) {
             return fail("demangled lookup");
         }
 

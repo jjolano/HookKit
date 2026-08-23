@@ -4,12 +4,12 @@
 #include <stdint.h>
 #include <stdio.h>
 
-extern void *hk3_swift_probe_metadata(void);
-extern int64_t hk3_swift_probe_call_target(void);
-extern void *hk3_swift_probe_replacement(void);
+extern void *hk_swift_probe_metadata(void);
+extern int64_t hk_swift_probe_call_target(void);
+extern void *hk_swift_probe_replacement(void);
 
 static int fail(const char *message) {
-    fprintf(stderr, "HookKit3 real Swift smoke: FAIL: %s\n", message);
+    fprintf(stderr, "HookKit real Swift smoke: FAIL: %s\n", message);
     return 1;
 }
 
@@ -23,12 +23,12 @@ static bool restore_target(const hk_swift_target_t *target, void *original) {
 }
 
 int main(void) {
-    void *metadata = hk3_swift_probe_metadata();
-    void *replacement = hk3_swift_probe_replacement();
+    void *metadata = hk_swift_probe_metadata();
+    void *replacement = hk_swift_probe_replacement();
     if (!metadata || !replacement) {
         return fail("probe metadata");
     }
-    if (hk3_swift_probe_call_target() != 7) {
+    if (hk_swift_probe_call_target() != 7) {
         return fail("baseline dispatch");
     }
 
@@ -48,7 +48,7 @@ int main(void) {
             hk_swift_plan_release(plan);
             continue;
         }
-        if (hk3_swift_probe_call_target() != 7) {
+        if (hk_swift_probe_call_target() != 7) {
             hk_swift_plan_release(plan);
             return fail("prepare changed dispatch");
         }
@@ -61,22 +61,22 @@ int main(void) {
         }
         hk_swift_plan_release(plan);
 
-        bool target_changed = hk3_swift_probe_call_target() == 42;
+        bool target_changed = hk_swift_probe_call_target() == 42;
         if (!restore_target(&target, original)) {
             return fail("restore");
         }
-        if (hk3_swift_probe_call_target() != 7) {
+        if (hk_swift_probe_call_target() != 7) {
             return fail("restored dispatch");
         }
         if (target_changed) {
-            puts("HookKit3 real Swift smoke: PASS");
+            puts("HookKit real Swift smoke: PASS");
             return 0;
         }
     }
 
     const uintptr_t *words = metadata;
     fprintf(stderr,
-            "HookKit3 real Swift smoke: native error %d metadata=%p data=%#llx flags=%#llx desc=%#llx\n",
+            "HookKit real Swift smoke: native error %d metadata=%p data=%#llx flags=%#llx desc=%#llx\n",
             last_swift_error,
             metadata,
             (unsigned long long)words[4],

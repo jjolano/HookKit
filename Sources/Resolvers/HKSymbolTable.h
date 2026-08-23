@@ -18,7 +18,7 @@
 // mmap/dlsym/PAC/slide and a single hardcoded name rule, so none of it can
 // run on this host and none of it implements the convention/visibility model
 // below. The 2.x path stays as-is during migration; the eventual device-side
-// HK3.0 image reader will supply a view here instead of re-walking.
+// HookKit.0 image reader will supply a view here instead of re-walking.
 //
 // Robustness is a requirement, not a nicety: a symbol table can be malformed
 // (a truncated string table, an unterminated final string, an out-of-range

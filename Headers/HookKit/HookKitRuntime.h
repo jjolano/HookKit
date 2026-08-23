@@ -9,8 +9,8 @@
 // oversights on this file's part: filled in here (hk_diagnostic_callback_fn)
 // and in HookKitPlan.h (hk_plan_config_t), each noted where it happens.
 
-#ifndef HOOKKIT3_RUNTIME_H
-#define HOOKKIT3_RUNTIME_H
+#ifndef HOOKKIT_RUNTIME_H
+#define HOOKKIT_RUNTIME_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -93,4 +93,4 @@ void hk_report_release(hk_report_t *report);
 }
 #endif
 
-#endif // HOOKKIT3_RUNTIME_H
+#endif // HOOKKIT_RUNTIME_H

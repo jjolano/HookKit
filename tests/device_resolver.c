@@ -17,13 +17,13 @@ int main(void) {
         }
     }
     if (!libobjc || !libdyld) {
-        puts("HookKit3 resolver: FAIL (required image not loaded)");
+        puts("HookKit resolver: FAIL (required image not loaded)");
         return 1;
     }
 
     hk_runtime_t *runtime = NULL;
     if (hk_runtime_create(NULL, &runtime) != HK_STATUS_OK || !runtime) {
-        puts("HookKit3 resolver: FAIL (runtime)");
+        puts("HookKit resolver: FAIL (runtime)");
         return 1;
     }
 
@@ -33,7 +33,7 @@ int main(void) {
         runtime, libobjc, "objc_msgSend", &exported);
     hk_status_t private_status = hk_runtime_find_symbol(
         runtime, libdyld, "dyld_image_get_installname", &private_symbol);
-    printf("HookKit3 resolver: %s (%s, export=%s, private=%s)\n",
+    printf("HookKit resolver: %s (%s, export=%s, private=%s)\n",
            exported_status == HK_STATUS_OK && private_status == HK_STATUS_OK
                ? "PASS" : "FAIL",
            libobjc, exported ? "ok" : "missing",

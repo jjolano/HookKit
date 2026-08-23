@@ -199,6 +199,6 @@ int main(void) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(runtime);
-    puts("HookKit3 static continuation: PASS");
+    puts("HookKit static continuation: PASS");
     return 0;
 }

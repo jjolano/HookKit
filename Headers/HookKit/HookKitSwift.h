@@ -35,8 +35,8 @@
 // runtime check; declaring this shape does not claim every Swift class can
 // install.
 
-#ifndef HOOKKIT3_SWIFT_H
-#define HOOKKIT3_SWIFT_H
+#ifndef HOOKKIT_SWIFT_H
+#define HOOKKIT_SWIFT_H
 
 #include "HookKitBase.h"
 #include "HookKitTargets.h"
@@ -139,4 +139,4 @@ int hk_swift_last_error_code(void);
 }
 #endif
 
-#endif // HOOKKIT3_SWIFT_H
+#endif // HOOKKIT_SWIFT_H

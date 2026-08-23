@@ -230,7 +230,7 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 // Always HKStrategyDefault in the canonical 3.0 compatibility facade.
 @property (readonly, nonatomic) HKStrategy activeStrategy;
 
-// Compatibility no-op. HK3 runtime creation happens only for an operation.
+// Compatibility no-op. HookKit runtime creation happens only for an operation.
 - (void)initLibraries;
 
 // Always HK_LIB_NONE; legacy provider discovery is retired.

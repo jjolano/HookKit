@@ -3,32 +3,32 @@
 #include <objc/message.h>
 #include <stdio.h>
 
-static int hk3_original(id self, SEL selector) {
+static int hk_original(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 7;
 }
 
-static int hk3_replacement(id self, SEL selector) {
+static int hk_replacement(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 42;
 }
 
-static int hk3_deferred_original(id self, SEL selector) {
+static int hk_deferred_original(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 13;
 }
 
-static int hk3_deferred_replacement(id self, SEL selector) {
+static int hk_deferred_replacement(id self, SEL selector) {
     (void)self;
     (void)selector;
     return 99;
 }
 
 static int fail(const char *message) {
-    fprintf(stderr, "HookKit3 ObjC smoke: FAIL: %s\n", message);
+    fprintf(stderr, "HookKit ObjC smoke: FAIL: %s\n", message);
     return 1;
 }
 
@@ -54,12 +54,12 @@ static int run_deferred_lifecycle_smoke(void) {
     }
 
     hk_objc_target_t target = hk_objc_target_make_named(
-        "HK3DeferredDeviceSmokeObject", "hk3_deferred_value",
+        "HKDeferredDeviceSmokeObject", "hk_deferred_value",
         HK_OBJC_INSTANCE_METHOD);
     target.availability = HK_AVAILABILITY_DEFER_UNTIL_AVAILABLE;
     hk_hook_spec_t spec;
     hk_objc_spec_init(&spec, "device-objc-deferred", target,
-                      (void *)hk3_deferred_replacement);
+                      (void *)hk_deferred_replacement);
 
     hk_hook_t *hook = NULL;
     if (hk_plan_add_hook(plan, &spec, &hook) != HK_STATUS_OK ||
@@ -87,12 +87,12 @@ static int run_deferred_lifecycle_smoke(void) {
     report = NULL;
 
     Class super_class = objc_getClass("NSObject");
-    deferred_selector = sel_registerName("hk3_deferred_value");
+    deferred_selector = sel_registerName("hk_deferred_value");
     deferred_class = objc_allocateClassPair(
-        super_class, "HK3DeferredDeviceSmokeObject", 0);
+        super_class, "HKDeferredDeviceSmokeObject", 0);
     if (!super_class || !deferred_class || !deferred_selector ||
         !class_addMethod(deferred_class, deferred_selector,
-                         (IMP)hk3_deferred_original, "i@:")) {
+                         (IMP)hk_deferred_original, "i@:")) {
         failure = "deferred class setup";
         goto done;
     }
@@ -111,7 +111,7 @@ static int run_deferred_lifecycle_smoke(void) {
 done:
     if (installed) {
         class_replaceMethod(deferred_class, deferred_selector,
-                            (IMP)hk3_deferred_original, "i@:");
+                            (IMP)hk_deferred_original, "i@:");
     }
     hk_artifact_snapshot_release(snapshot);
     hk_report_release(report);
@@ -125,10 +125,10 @@ int main(void) {
     if (!super_class) {
         return fail("NSObject lookup");
     }
-    Class smoke_class = objc_allocateClassPair(super_class, "HK3DeviceSmokeObject", 0);
-    SEL selector = sel_registerName("hk3_value");
+    Class smoke_class = objc_allocateClassPair(super_class, "HKDeviceSmokeObject", 0);
+    SEL selector = sel_registerName("hk_value");
     if (!smoke_class || !selector ||
-        !class_addMethod(smoke_class, selector, (IMP)hk3_original, "i@:")) {
+        !class_addMethod(smoke_class, selector, (IMP)hk_original, "i@:")) {
         return fail("class setup");
     }
     objc_registerClassPair(smoke_class);
@@ -152,7 +152,7 @@ int main(void) {
     hk_hook_spec_t spec;
     hk_objc_spec_init(&spec, "device-objc", hk_objc_instance_method(
         smoke_class, selector),
-        (void *)hk3_replacement);
+        (void *)hk_replacement);
 
     hk_hook_t *hook = NULL;
     if (hk_plan_add_hook(plan, &spec, &hook) != HK_STATUS_OK) {
@@ -206,6 +206,6 @@ int main(void) {
     if (run_deferred_lifecycle_smoke() != 0) {
         return 1;
     }
-    printf("HookKit3 ObjC smoke: PASS\n");
+    printf("HookKit ObjC smoke: PASS\n");
     return 0;
 }

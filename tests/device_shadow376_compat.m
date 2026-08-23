@@ -48,7 +48,7 @@ int main(void) {
         Class super_class = objc_getClass("NSObject");
         SEL selector = sel_registerName("shadow376_value");
         Class profile_class = objc_allocateClassPair(super_class,
-                                                      "HK3Shadow376ProfileObject", 0);
+                                                      "HKShadow376ProfileObject", 0);
         if (!super_class || !selector || !profile_class ||
             !class_addMethod(profile_class, selector, (IMP)shadow376_message_original,
                              "i@:")) {

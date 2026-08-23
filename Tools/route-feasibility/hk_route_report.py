@@ -91,7 +91,7 @@ def classify_target(target):
             "requires_dynamic_continuation": False,
             "requires_static_continuation": False,
             "blocking_reason": (
-                "resolved via runtime private-symbol lookup; which certified HK3 "
+                "resolved via runtime private-symbol lookup; which certified HookKit "
                 "engine serves this (native inline / ElleKit private-symbol path / "
                 "Dobby / litehook) is undetermined until Milestone 6/7/10 engine "
                 "certification exists -- modeled pass does not guess a specific one"
@@ -173,7 +173,7 @@ def render_markdown(report, manifest):
         "",
         "**Historical model, not current routing evidence**: this retained M2 "
         "baseline classifies each target against HookKit 2.x (see "
-        "`docs/3.0/ENGINE_CONTRACT.md`), not current HK3 descriptors or a real "
+        "`docs/3.0/ENGINE_CONTRACT.md`), not current HookKit descriptors or a real "
         "router decision. Reported under a single lane-agnostic `\"all\"` entry (schema "
         "`shadow-route-report.schema.json`) rather than 4 duplicated copies of "
         "the same data — no real per-lane provider-availability data exists yet "
@@ -218,7 +218,7 @@ def render_markdown(report, manifest):
         "Shadow install-unit records in this manifest; the aggregate unit rows "
         "are retained as provenance alongside their source-extracted children.",
         "- \"Routable\" here means \"a HookKit 2.x engine already does this today\", "
-        "not \"a certified HK3 engine has been proven to do this\". Do not cite "
+        "not \"a certified HookKit engine has been proven to do this\". Do not cite "
         "this retained initial report alone as satisfying the ABI-freeze gate "
         "in spec section 18.5.",
     ]

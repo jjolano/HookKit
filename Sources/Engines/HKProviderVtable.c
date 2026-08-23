@@ -1,5 +1,5 @@
 // Provider inline adapter. See HKProviderVtable.h for the intentionally small
-// seam between the common HK3 lifecycle and audited vendor call shapes.
+// seam between the common HookKit lifecycle and audited vendor call shapes.
 
 #include "HKProviderVtable.h"
 

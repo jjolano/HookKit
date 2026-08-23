@@ -2,7 +2,7 @@
 // avoids Foundation so this probe only depends on the Swift runtime shipped on
 // the test device.
 
-open class HK3SwiftProbe {
+open class HKSwiftProbe {
     public init() {}
 
     @inline(never) open func target() -> Int { 7 }
@@ -10,26 +10,26 @@ open class HK3SwiftProbe {
 }
 
 @inline(never)
-private func callThroughVTable(_ object: HK3SwiftProbe) -> Int {
+private func callThroughVTable(_ object: HKSwiftProbe) -> Int {
     object.target()
 }
 
-@_cdecl("hk3_swift_probe_metadata")
-public func hk3_swift_probe_metadata() -> UnsafeRawPointer {
-    unsafeBitCast(HK3SwiftProbe.self, to: UnsafeRawPointer.self)
+@_cdecl("hk_swift_probe_metadata")
+public func hk_swift_probe_metadata() -> UnsafeRawPointer {
+    unsafeBitCast(HKSwiftProbe.self, to: UnsafeRawPointer.self)
 }
 
-@_cdecl("hk3_swift_probe_call_target")
-public func hk3_swift_probe_call_target() -> Int64 {
-    Int64(callThroughVTable(HK3SwiftProbe()))
+@_cdecl("hk_swift_probe_call_target")
+public func hk_swift_probe_call_target() -> Int64 {
+    Int64(callThroughVTable(HKSwiftProbe()))
 }
 
 // The probe declares exactly two ordinary instance methods, target then
 // replacement. Return the latter's live vtable entry so the C smoke swaps
 // like-for-like Swift calling conventions instead of using a C ABI shim.
-@_cdecl("hk3_swift_probe_replacement")
-public func hk3_swift_probe_replacement() -> UnsafeRawPointer? {
-    let metadata = unsafeBitCast(HK3SwiftProbe.self, to: UnsafeRawPointer.self)
+@_cdecl("hk_swift_probe_replacement")
+public func hk_swift_probe_replacement() -> UnsafeRawPointer? {
+    let metadata = unsafeBitCast(HKSwiftProbe.self, to: UnsafeRawPointer.self)
     guard let descriptor = metadata.load(fromByteOffset: 0x40,
                                          as: UnsafeRawPointer?.self) else {
         return nil

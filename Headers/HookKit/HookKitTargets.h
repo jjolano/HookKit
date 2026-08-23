@@ -27,8 +27,8 @@
 //     at struct-design granularity: a field's meaning should never depend
 //     on silently inferring intent from another field's contents.
 
-#ifndef HOOKKIT3_TARGETS_H
-#define HOOKKIT3_TARGETS_H
+#ifndef HOOKKIT_TARGETS_H
+#define HOOKKIT_TARGETS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -197,4 +197,4 @@ typedef union {
 }
 #endif
 
-#endif // HOOKKIT3_TARGETS_H
+#endif // HOOKKIT_TARGETS_H

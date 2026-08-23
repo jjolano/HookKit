@@ -1,4 +1,4 @@
-// Packaged-framework arm64 gate for the HK3 provider adapters. It selects
+// Packaged-framework arm64 gate for the HK provider adapters. It selects
 // each already-registered provider binding without adding a production test
 // SPI, then drives only the public plan lifecycle.
 
@@ -43,7 +43,7 @@ __attribute__((noinline)) static int ellekit_replacement(int value) {
 typedef int (*int_function_t)(int);
 
 static int fail(const char *provider, const char *stage) {
-    fprintf(stderr, "HookKit HK3 provider %s: FAIL: %s\n", provider, stage);
+    fprintf(stderr, "HookKit HK provider %s: FAIL: %s\n", provider, stage);
     return 1;
 }
 
@@ -179,7 +179,7 @@ static int test_provider(const char *engine_id, int_function_t target,
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(runtime);
-    printf("HookKit HK3 provider %s: PASS\n", engine_id);
+    printf("HookKit HK provider %s: PASS\n", engine_id);
     return 0;
 }
 

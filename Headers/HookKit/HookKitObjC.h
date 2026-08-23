@@ -16,8 +16,8 @@
 // behavior to get wrong, which is the point -- the value is that the compiler
 // checks the Class/SEL types instead of a `void *` accepting anything.
 
-#ifndef HOOKKIT3_OBJC_H
-#define HOOKKIT3_OBJC_H
+#ifndef HOOKKIT_OBJC_H
+#define HOOKKIT_OBJC_H
 
 #if !defined(__OBJC__)
 #error "HookKitObjC.h requires Objective-C. Plain C callers should use HookKitTargets.h and its void*-typed cls/sel fields directly."
@@ -131,4 +131,4 @@ static inline void hk_objc_spec_init(hk_hook_spec_t *out_spec,
 }
 #endif
 
-#endif // HOOKKIT3_OBJC_H
+#endif // HOOKKIT_OBJC_H

@@ -1,4 +1,4 @@
-// HK3 provider adapter conformance through the real plan lifecycle. Vendor
+// HookKit provider adapter conformance through the real plan lifecycle. Vendor
 // calls are seams here; the device smoke supplies Dobby/Gum themselves.
 
 #include <assert.h>

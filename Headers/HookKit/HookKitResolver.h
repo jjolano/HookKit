@@ -1,7 +1,7 @@
 // Minimal loaded-image symbol lookup for native HookKit 3 consumers.
 
-#ifndef HOOKKIT3_RESOLVER_H
-#define HOOKKIT3_RESOLVER_H
+#ifndef HOOKKIT_RESOLVER_H
+#define HOOKKIT_RESOLVER_H
 
 #include "HookKitBase.h"
 #include "HookKitRuntime.h"
@@ -25,4 +25,4 @@ hk_status_t hk_runtime_find_symbol(
 }
 #endif
 
-#endif // HOOKKIT3_RESOLVER_H
+#endif // HOOKKIT_RESOLVER_H

@@ -37,7 +37,7 @@ int main(void) {
         }
     }
     if (!header || header->magic != MH_MAGIC_64) {
-        puts("HookKit3 rebind: FAIL (main image)");
+        puts("HookKit rebind: FAIL (main image)");
         return 1;
     }
 
@@ -48,7 +48,7 @@ int main(void) {
     if (hk_macho_image_span_for_loaded_image(header, commands,
                                              (uintptr_t)slide, &start, &end) != HK_MACHO_OK ||
         (uintptr_t)header < start || end <= (uintptr_t)header) {
-        puts("HookKit3 rebind: FAIL (image span)");
+        puts("HookKit rebind: FAIL (image span)");
         return 1;
     }
 
@@ -63,33 +63,33 @@ int main(void) {
     hk_rebind_status_t prepare = hk_rebind_prepare(
         &target, "puts", HK_SYMBOL_NAME_C, &plan);
     if (prepare != HK_REBIND_OK || plan.count == 0 || !plan.originals_agree) {
-        printf("HookKit3 rebind: FAIL (prepare=%d sites=%u)\n",
+        printf("HookKit rebind: FAIL (prepare=%d sites=%u)\n",
                prepare, plan.count);
         return 1;
     }
 
     g_original_puts = (int (*)(const char *))(uintptr_t)plan.original;
     if (!g_original_puts) {
-        puts("HookKit3 rebind: FAIL (missing original)");
+        puts("HookKit rebind: FAIL (missing original)");
         return 1;
     }
 
-    puts("HookKit3 rebind before");
+    puts("HookKit rebind before");
     uint32_t written = 0;
     hk_mutation_state_t state = hk_rebind_commit(
         &target, &plan, (uint64_t)(uintptr_t)replacement_puts,
         NULL, &written);
     if (state != HK_MUTATION_COMPLETE || written != plan.count) {
-        printf("HookKit3 rebind: FAIL (commit=%d written=%u sites=%u)\n",
+        printf("HookKit rebind: FAIL (commit=%d written=%u sites=%u)\n",
                state, written, plan.count);
         return 1;
     }
 
-    puts("HookKit3 rebind after");
+    puts("HookKit rebind after");
     if (g_replacement_hits != 1) {
-        g_original_puts("HookKit3 rebind: FAIL (replacement not called)");
+        g_original_puts("HookKit rebind: FAIL (replacement not called)");
         return 1;
     }
-    g_original_puts("HookKit3 rebind: PASS");
+    g_original_puts("HookKit rebind: PASS");
     return 0;
 }

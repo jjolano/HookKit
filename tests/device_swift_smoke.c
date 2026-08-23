@@ -8,7 +8,7 @@ static void original_method(void) {}
 static void replacement_method(void) {}
 
 static int fail(const char *message) {
-    fprintf(stderr, "HookKit3 Swift smoke: FAIL: %s\n", message);
+    fprintf(stderr, "HookKit Swift smoke: FAIL: %s\n", message);
     return 1;
 }
 
@@ -61,6 +61,6 @@ int main(void) {
     hk_swift_plan_release(plan);
     free(metadata);
     free(descriptor);
-    puts("HookKit3 Swift smoke: PASS (synthetic arm64 metadata)");
+    puts("HookKit Swift smoke: PASS (synthetic arm64 metadata)");
     return 0;
 }

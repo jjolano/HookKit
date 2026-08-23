@@ -11,8 +11,8 @@
 // no artifact ledger could produce anything of this shape -- closed here
 // before Milestone 4's ledger work continues on top of it.
 
-#ifndef HOOKKIT3_ARTIFACTS_H
-#define HOOKKIT3_ARTIFACTS_H
+#ifndef HOOKKIT_ARTIFACTS_H
+#define HOOKKIT_ARTIFACTS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -203,4 +203,4 @@ void hk_artifact_snapshot_release(hk_artifact_snapshot_t *snapshot);
 }
 #endif
 
-#endif // HOOKKIT3_ARTIFACTS_H
+#endif // HOOKKIT_ARTIFACTS_H
