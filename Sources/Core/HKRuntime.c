@@ -88,8 +88,24 @@ static int hk_platform_dobby_hook(void *ctx, void *target, void *replacement,
 
 static bool hk_platform_gum_discover(void *ctx) {
     (void)ctx;
-    return dlopen_preflight("/var/jb/usr/lib/HKGum.dylib") ||
-           dlopen_preflight("/usr/lib/HKGum.dylib");
+    // dlopen_preflight validates code signatures and costs ~0.3 ms per call
+    // on iPhone9,3 (M16 profiling). These paths are static files: their
+    // preflight verdict cannot change while the process runs, so memoize.
+    // Without this, every hook re-pays discovery for every provider engine
+    // during plan analysis (~470 us/hook combined across providers).
+    static int cached = -1; // -1 unknown, 0 unavailable, 1 available
+    static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+    if (cached < 0) {
+        pthread_mutex_lock(&cache_lock);
+        if (cached < 0) {
+            cached = (dlopen_preflight("/var/jb/usr/lib/HKGum.dylib") ||
+                      dlopen_preflight("/usr/lib/HKGum.dylib"))
+                         ? 1
+                         : 0;
+        }
+        pthread_mutex_unlock(&cache_lock);
+    }
+    return cached != 0;
 }
 
 static bool hk_platform_gum_validate(void *ctx, const hk_hook_spec_t *spec,
@@ -173,18 +189,31 @@ static int hk_platform_gum_hook(void *ctx, void *target, void *replacement,
 
 static bool hk_platform_ellekit_discover(void *ctx) {
     (void)ctx;
-    static const char *const paths[] = {
-        "/var/jb/usr/lib/libellekit.dylib",
-        "/usr/lib/libellekit.dylib",
-        "/var/jb/usr/lib/libhooker.dylib",
-        "/usr/lib/libhooker.dylib",
-    };
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        if (dlopen_preflight(paths[i])) {
-            return true;
+    // Memoized for the same reason as hk_platform_gum_discover: four
+    // dlopen_preflight signature validations per call dominate plan analysis
+    // if repeated per hook.
+    static int cached = -1; // -1 unknown, 0 unavailable, 1 available
+    static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+    if (cached < 0) {
+        pthread_mutex_lock(&cache_lock);
+        if (cached < 0) {
+            static const char *const paths[] = {
+                "/var/jb/usr/lib/libellekit.dylib",
+                "/usr/lib/libellekit.dylib",
+                "/var/jb/usr/lib/libhooker.dylib",
+                "/usr/lib/libhooker.dylib",
+            };
+            cached = 0;
+            for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+                if (dlopen_preflight(paths[i])) {
+                    cached = 1;
+                    break;
+                }
+            }
         }
+        pthread_mutex_unlock(&cache_lock);
     }
-    return false;
+    return cached != 0;
 }
 
 static bool hk_platform_ellekit_validate(void *ctx,
@@ -342,10 +371,27 @@ static bool hk_platform_substitute_discover(void *ctx) {
     if (loaded) {
         return true;
     }
-    return dlsym(RTLD_DEFAULT, "MSHookFunction") != NULL ||
-           dlsym(RTLD_DEFAULT, "SubHookFunction") != NULL ||
-           dlopen_preflight("/usr/lib/libsubstitute.0.dylib") ||
-           dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate");
+    if (dlsym(RTLD_DEFAULT, "MSHookFunction") != NULL ||
+        dlsym(RTLD_DEFAULT, "SubHookFunction") != NULL) {
+        return true;
+    }
+    // The preflight pair is memoized (see hk_platform_gum_discover): the
+    // files are static, so their verdict cannot change mid-process. The
+    // dlsym checks above stay live on purpose -- a late dlopen of Substitute
+    // must still flip discovery to available.
+    static int cached = -1; // -1 unknown, 0 unavailable, 1 available
+    static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+    if (cached < 0) {
+        pthread_mutex_lock(&cache_lock);
+        if (cached < 0) {
+            cached = (dlopen_preflight("/usr/lib/libsubstitute.0.dylib") ||
+                      dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate"))
+                         ? 1
+                         : 0;
+        }
+        pthread_mutex_unlock(&cache_lock);
+    }
+    return cached != 0;
 }
 
 static bool hk_platform_substitute_prepare(void *ctx,

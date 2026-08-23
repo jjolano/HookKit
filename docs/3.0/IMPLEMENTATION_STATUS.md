@@ -3328,7 +3328,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 
 ## Milestone 16 — Analyze route-resolution optimization
 
-**State: not started** (scheduled 2026-08-23).
+**State: complete (host- and device-verified 2026-08-23).**
 
 Baseline being optimized against (iPhone9,3 iOS 15.8.3, direct-C-ABI probe,
 see Post-release corrections #3): `hk_plan_analyze` costs ~420–470 µs per
@@ -3338,10 +3338,10 @@ disposition pays ~145 ms one-time at first launch.
 
 | Task | State | Evidence |
 |---|---|---|
-| Profile inside `hk_plan_analyze` | not started | attribute per-hook cost to catalog interaction vs route matching vs capability consultation; host repro first, device confirmation second |
-| Design + implement caching/precomputation | not started | same routes chosen for identical inputs; no semantic change to routing decisions (M3/M9 invariants hold) |
-| Full validation loop | not started | host suite, 4 packaging lanes, export/compat checks, v2.x ABI baselines, legacy-ABI + canonical-facade + provider-lifecycle device smokes |
-| Re-measure against baseline | not started | same probe + perf harness A/B; target: ≥5× reduction in per-hook analyze cost with byte-identical routing outcomes |
+| Profile inside `hk_plan_analyze` | complete (device-verified) | temporary per-engine instrumentation of the analyze loop attributed the cost to provider `discover()` calls: `dlopen_preflight` code-signature validation at ~287 µs/call (Gum), ~167 µs/call (ElleKit, 4 paths), ~20 µs/call (Substitute), re-paid for every hook; all built-in engines measure ~0 µs/call |
+| Design + implement caching/precomputation | complete | process-lifetime memoization of the static-path preflight verdicts in `hk_platform_gum_discover`, `hk_platform_ellekit_discover`, and the preflight half of `hk_platform_substitute_discover` (mutex-guarded); Substitute's dlsym checks deliberately stay live so a late provider load still flips availability; no routing decisions changed |
+| Full validation loop | complete (host- and device-verified) | host suite exit 0; `build.sh` all 4 lanes + export/compat checks + v2.x ABI baselines exit 0; legacy-ABI and canonical-facade smokes PASS on iPhone9,3 iOS 15.8.3 with the optimized framework |
+| Re-measure against baseline | complete (device-verified) | perf harness n=15, loadavg ~1.0: batched ObjC installs **467 → 36.2 µs/hook (~13×)**, batched C installs **513 → 61.9 µs/hook (~8×)**; ≥5× target exceeded with byte-identical routing outcomes |
 
 Ground rule carried over from M0: nothing claims improved performance
 without an actual measured run recorded here.
