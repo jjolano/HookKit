@@ -3284,7 +3284,9 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
    target) — a latent master regression, because device smokes were not re-run
    after that commit. Fix: declare `HK_TARGET_MEMORY_PATCH` chainable in
    `memory_describe()` (the engine's own expected-bytes precondition enforces
-   chain soundness). Both smokes PASS again on iPhone9,3 iOS 15.8.3.
+   chain soundness). Both smokes PASS again on iPhone9,3 iOS 15.8.3, re-run
+   once more after the canonical naming consolidation so the renamed tree
+   carries its own device evidence.
 2. **Facade batching now uses one shared plan lifecycle.** The legacy facade's
    `executeHooks` previously created a full runtime+plan lifecycle per queued
    operation; it now applies all queued ObjC/function specs through one shared
