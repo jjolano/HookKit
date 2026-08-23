@@ -3293,6 +3293,14 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
    and memory ops still executed individually (expected-byte capture must
    happen at execute time). Measured effect in the table above; single-call
    paths are refactored onto the same spec builders with no behavior change.
+3. **Stage decomposition identifies `hk_plan_analyze` as the remaining cost.**
+   A direct-C-ABI probe on iPhone9,3 iOS 15.8.3 timed each plan stage for
+   batched installs: add_hook ≈ 1–2 µs/hook, prepare ≈ 1–2 µs/hook,
+   commit ≈ 0–50 µs/hook, but **analyze ≈ 420–470 µs/hook** regardless of
+   target kind or prior plan history. The actual mutation is three orders of
+   magnitude cheaper than its route analysis. Any future performance work
+   should start inside analyze's per-hook route/reachability resolution;
+   nothing else in the install path is material.
 
 ---
 
