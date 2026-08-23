@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { HK_LEGACY_IMAGE_MAGIC = 0x484B3349u };  // "HK3I"
+enum { HK_LEGACY_IMAGE_MAGIC = 0x484B3349u };  // canonical image wrapper magic
 
 // Keep the private selector ABI from the old facade without importing its
 // backend router. NS_ENUM(uint8_t, ...) intentionally encodes an out pointer

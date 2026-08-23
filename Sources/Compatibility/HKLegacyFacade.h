@@ -47,7 +47,7 @@ int hk_legacy_build_function_spec(void *function, void *replacement,
 // originals[i] is the caller's out_old_ptr slot (may be NULL); it is written
 // exactly like the single-call path (early publication at prepare where the
 // engine supports it, final value after commit, cleared on failure).
-// out_results[i] receives an HK3_* status per op. Returns the aggregate:
+// out_results[i] receives an HK_LEGACY_* status per op. Returns the aggregate:
 // HK_LEGACY_OK if all succeeded, HK_LEGACY_ERR_PARTIAL if some, HK_LEGACY_ERR otherwise.
 int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
                            void **const *originals,
