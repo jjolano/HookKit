@@ -297,6 +297,7 @@ static int hk_platform_ellekit_hook(void *ctx, void *target,
 }
 #endif
 
+#if defined(HOOKKIT_CANONICAL_3)
 typedef struct {
     pthread_mutex_t lock;
     void *handle;
@@ -484,6 +485,7 @@ static int hk_platform_substitute_hook(void *ctx, void *target,
     ms_hook(target, replacement, output);
     return errno == 0 && *output ? 0 : -1;
 }
+#endif
 
 static void *hk_platform_get_class(void *ctx, const char *name) {
     (void)ctx;
