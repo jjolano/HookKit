@@ -7,6 +7,7 @@ import struct
 from extract_abi import (_chained_rebase_map, _complete_objc_arches,
                          _decode_chained_entry, _macho_segments_and_fixups,
                          _parse_objc_arch, _read_cstring,
+                         _resolve_chained_selectors,
                          parse_enum_values, sha256_file)
 import hashlib
 import tempfile
@@ -188,6 +189,22 @@ def test_chained_fixups_end_to_end_resolves_a_synthetic_selref():
     rebase_map = _chained_rebase_map(bytes(data), segments, fixups)
     assert rebase_map == {image_base: string_vmaddr}
     assert _read_cstring(bytes(data), segments, string_vmaddr) == "hello"
+
+    # Apple lipo refuses to overwrite an existing output file. The resolver
+    # must therefore supply a fresh path rather than NamedTemporaryFile's.
+    with tempfile.TemporaryDirectory() as directory:
+        binary = os.path.join(directory, "binary")
+        lipo = os.path.join(directory, "lipo")
+        with open(binary, "wb") as stream:
+            stream.write(data)
+        with open(lipo, "w", encoding="utf-8") as stream:
+            stream.write('#!/bin/sh\n[ ! -e "$5" ] || exit 1\ncp "$3" "$5"\n')
+        os.chmod(lipo, 0o755)
+        parsed = {"HKSubstitutor": {"instance_methods": [{
+            "selector": None, "_unresolved_vmaddr": image_base
+        }]}}
+        _resolve_chained_selectors(parsed, lipo, binary, "arm64e")
+    assert parsed["HKSubstitutor"]["instance_methods"][0]["selector"] == "hello"
 
 
 def test_objc_metadata_fallback_can_fill_unresolved_slice():

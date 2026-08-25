@@ -472,12 +472,14 @@ def _resolve_chained_selectors(parsed, lipo, binary, arch):
     if not pending:
         return
     try:
-        with tempfile.NamedTemporaryFile(suffix=".thin") as thin:
-            result = subprocess.run([lipo, "-thin", arch, binary, "-output", thin.name],
+        with tempfile.TemporaryDirectory() as directory:
+            thin = os.path.join(directory, f"{arch}.thin")
+            result = subprocess.run([lipo, "-thin", arch, binary, "-output", thin],
                                     capture_output=True)
             if result.returncode != 0:
                 return
-            data = thin.read()
+            with open(thin, "rb") as stream:
+                data = stream.read()
         segments, fixups = _macho_segments_and_fixups(data)
         rebase_map = _chained_rebase_map(data, segments, fixups)
         for method in pending:
