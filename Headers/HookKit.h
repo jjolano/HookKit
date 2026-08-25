@@ -214,9 +214,8 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
  *
  * Per-backend caveats — fishhook symbol-only rebinding; native/Dobby/Frida
  * codesigning, arch and load-time constraints; Swift vtable scope and calling
- * convention — live in the "Semantics" section of README.md, which is the
- * canonical copy:
- * https://github.com/jjolano/HookKit#semantics
+ * convention — live in the "Semantics" section of README.md, the canonical
+ * copy.
  */
 
 @interface HKSubstitutor : NSObject

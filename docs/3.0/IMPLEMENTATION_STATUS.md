@@ -46,7 +46,7 @@ milestone:
 | Clean host build/test | complete (host-verified) | `make test` — 5 suites, exit 0 |
 | Clean builds, all 4 packaging lanes | complete (host-verified, cross-build) | `./build.sh all` — rootful-legacy, rootful-modern, rootless, roothide all exit 0; `check-exports`/`check-compat` 64/64 PASS. Re-run 2026-08-22 after the modern toolchain repair: rootful-modern, rootless, and roothide arm64e payloads carry ptrauth ABI marker `0x80`; rootful-legacy intentionally remains old ABI (`0x00`). |
 | Historical tags archived/referenced | complete | all 11 tags present locally: v1.0.1, v2.1.1, v2.2.0–v2.2.5, v2.3.0, v2.4.0, v2.5.0 |
-| HookKit 2.5 performance baseline | complete (device-verified) | `make device-smoke-performance`; five iPhone9,3 iOS 15.8.3 samples: startup CPU 24,329–25,707 µs, startup RSS 2,703,360–2,752,512 B, startup VM regions 61–62, hook install 107–138 µs; device restored unchanged |
+| HookKit 2.5 performance baseline | complete (device-verified) | `make device-smoke-performance`; five samples from a physical arm64 rootless test device: startup CPU 24,329–25,707 µs, startup RSS 2,703,360–2,752,512 B, startup VM regions 61–62, hook install 107–138 µs; device restored unchanged |
 | Shadow performance baseline | deferred (accepted) | user accepted source-level validation plus current-device package/smoke validation; no separate performance gate requested |
 | Reverse-dependency audit (v1 module API) | complete | `V1_MODULE_COMPATIBILITY_AUDIT.md`; local plus public-source pass closed; retained facade and legacy 2.5 package, no v1 module ABI |
 | This ledger | complete | — |
@@ -253,7 +253,7 @@ Boundary note: the initial extraction pass was read-only against `shadow/`
 (source reads + `git rev-parse HEAD` plus an immutable `git archive` candidate
 for clean provenance). After the explicit 2026-08-22 sign-off, the current
 Shadow checkout was built against canonical HookKit, its source/package smoke
-was run on iPhone9,3, and the refreshed artifact now records that signed-off
+was run on a physical arm64 test device, and the refreshed artifact now records that signed-off
 source. The modeled route report remains modeled; it is not being presented as
 runtime routing evidence.
 
@@ -530,7 +530,7 @@ Full `make test` and `./build.sh all` re-run clean after these changes.
 | Task | State | Evidence |
 |---|---|---|
 | IDs (`Sources/Core/HKIDs.{h,c}`) | complete | commit `c2a185e` |
-| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | complete (host- and arm64 device-verified) — create/shutdown/release/owner_id/drain_pending, owning-runtime artifact accumulation, live catalog population, and compiled-in Apple engine registration | current working tree; host lifecycle/wired suites; canonical iPhone9,3 facade and rebind-adapter smokes |
+| Runtime lifecycle (`Sources/Core/HKRuntime.c`, `HKRuntimeInternal.h`) | complete (host- and arm64 device-verified) — create/shutdown/release/owner_id/drain_pending, owning-runtime artifact accumulation, live catalog population, and compiled-in Apple engine registration | current working tree; host lifecycle/wired suites; canonical arm64 test-device facade and rebind-adapter smokes |
 | Plan lifecycle (`Sources/Core/HKPlan.c`) | **complete** — full `DRAFT → ANALYZED → PREPARING/PREPARED → COMMITTING/COMMITTED` path now real (`create`/`release`/`state`/`add_hook`/`analyze`/`prepare`/`commit`) | commit `ecb8990` — see below |
 | Domains (`hk_plan_define_domain`, `HKPlanInternal.h`) | complete | commit `0b13100` |
 | Router | complete — `hk_plan_analyze` consults registered engines, ranks preferred reach then explicit request-specific route rank, and enforces target kind, reach, target-specific exact image scope with a populated catalog, restricted symbol defining-image scope, original requirement, install context, declared preparation/commit effects, and production architecture/deployment-floor/certification masks; preparation and commit domains/orders plus `commit_after` dependencies are deterministic, with gated domains refusing/rolling back prepared siblings after a mandatory preparation failure and a no-write preflight for stale/unprepared mandatory members; commit-time ownership chaining is active for certified chainable target kinds | current working tree; engine-registry/wired suites, explicit-rank + platform-certification probes, exact-image catalog probes, defining-image scope probe, `test-domain-gate`, `test-plan-commit`, and `test-ownership` |
@@ -1179,7 +1179,7 @@ arm64e lane is source/ABI-reviewed in Milestones 8/10/15.
 | Task | State | Evidence |
 |---|---|---|
 | Image catalog structure + selector matching (`Sources/Core/HKImageCatalog.{h,c}`) | complete (host-verified) | commit `e8b3eb4` — see below |
-| dyld population (`hk_image_catalog_populate_from_dyld`) | complete (host- and device-verified) | `Sources/Core/HKImageCatalog.c`; Darwin dyld walk cross-built and exercised on iPhone9,3: `HookKit3 image catalog: PASS (100 images)` |
+| dyld population (`hk_image_catalog_populate_from_dyld`) | complete (host- and device-verified) | `Sources/Core/HKImageCatalog.c`; Darwin dyld walk cross-built and exercised on a physical arm64 test device: `HookKit3 image catalog: PASS (100 images)` |
 | Symbol table (nlist) search (`Sources/Resolvers/HKSymbolTable.{h,c}`) | complete (host-verified) | commit `5c3efe7` |
 | Mach-O container parsing (`Sources/Resolvers/HKMachO.{h,c}`) | complete (host-verified) — header validation, bounded load-command iteration, LC_SYMTAB → symbol table view, `LC_SEGMENT_64` segments and sections | commit `0a8f09f` + commit `04aff50` |
 | Loaded-image (`__LINKEDIT`) offset translation | complete (host-verified) — `hk_macho_symtab_view_for_loaded_image`; lifts the file-image-only limitation | commit `04aff50` — see below |
@@ -1190,7 +1190,7 @@ arm64e lane is source/ABI-reviewed in Milestones 8/10/15.
 | Import slot resolution (`Sources/Resolvers/HKImportSlots.{h,c}`) | complete (host-verified) — maps symbol-pointer slots to bound symbols via LC_DYSYMTAB indirect symbols, file and loaded layouts | commit `520019b` — see below |
 | Private-symbol resolver | complete (host- and device-verified) — loaded-image `__LINKEDIT` translation resolves symbol-table entries from live images | current working tree; `device_smoke3_resolver` resolves `dyld_image_get_installname` in `/usr/lib/system/libdyld.dylib` |
 | Shared-cache resolver | complete (host- and device-verified) — exact loaded shared-cache image binding reuses the Mach-O symbol-table path | current working tree; the same smoke reports `private=/usr/lib/system/libdyld.dylib` |
-| ObjC / Swift resolvers | complete — ObjC class/selector resolution is implemented inside the seam-backed ObjC engine (to avoid a second resolver that could drift); Swift metadata/vtable resolution is implemented in `native/hk_swift.c` and host/synthetic/real-arm64-device verified; arm64e pointer handling is source/ABI-reviewed without a physical arm64e claim | current working tree; ObjC wired/device smoke, Swift ABI/engine tests, synthetic smoke, and `device_swift_real_smoke` PASS on iPhone9,3 (2026-08-22) |
+| ObjC / Swift resolvers | complete — ObjC class/selector resolution is implemented inside the seam-backed ObjC engine (to avoid a second resolver that could drift); Swift metadata/vtable resolution is implemented in `native/hk_swift.c` and host/synthetic/real-arm64-device verified; arm64e pointer handling is source/ABI-reviewed without a physical arm64e claim | current working tree; ObjC wired/device smoke, Swift ABI/engine tests, synthetic smoke, and `device_swift_real_smoke` PASS on a physical arm64 test device (2026-08-22) |
 
 **Image catalog — structure + selector matching**, this iteration
 (`Sources/Core/HKImageCatalog.{h,c}`). The deliberate host/device split is
@@ -1199,7 +1199,7 @@ host-tested; live-process population is Darwin-only and now implemented
 behind `hk_image_catalog_populate_from_dyld`. The beta arm64/arm64e
 cross-build compiles that path, and a standalone signed device smoke
 exercised the same Darwin implementation against the live dyld image list on
-iPhone9,3 (100 images). Host tests populate synthetic entries via
+a physical arm64 test device (100 images). Host tests populate synthetic entries via
 `hk_image_catalog_add_entry`.
 
 Matching handles all six `hk_image_selector_kind_t` cases. It's written as
@@ -1731,8 +1731,8 @@ Everything above this line was verified against synthetic fixtures only. This
 section is the first work in the HK3.0 rewrite verified against binaries
 nobody here constructed, and against an independent tool.
 
-**Device**: iPhone 7 (`iPhone9,3`, T8010), iOS 15.8.3 build 19H386, Darwin
-21.6.0, reached over SSH. **arm64, not arm64e** — which bounds what this run
+**Test environment**: a physical arm64 test device reached over SSH. **arm64,
+not arm64e** — which bounds what this run
 can claim (see the gaps below). The device was touched **read-only**: four
 binaries were copied off it, nothing was installed, modified, or removed.
 
@@ -1771,9 +1771,9 @@ library correctly refuses them with `HK_MACHO_FAT_UNSUPPORTED` while the tool
 selects a slice. That division was a design choice made against fixtures; a
 real framework confirms it is the right one.
 
-**Gaps this particular iPhone 7 run did NOT close, stated because the device
+**Gaps this physical-device run did NOT close, stated because the device
 bounds them:**
-- **arm64e was unverified by this run.** An iPhone 7 is arm64. The `ARM64E`,
+- **arm64e was unverified by this run.** The physical arm64 test device is arm64. The `ARM64E`,
   `ARM64E_USERLAND` and `ARM64E_USERLAND24` chained-pointer formats were
   therefore never exercised by real data, nor was PAC signing. Those need an
   A12-or-later device.
@@ -1856,14 +1856,14 @@ physical arm64e run is claimed.
 
 | Task | State | Evidence |
 |---|---|---|
-| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — prepare/commit over LC_DYSYMTAB imports, mutation-state-honest; native pointer write exercised against the smoke executable | current working tree; `device-smoke3-rebind` prints `HookKit3 rebind: PASS` on iPhone9,3; no physical arm64e claim |
-| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; catalog-wide main-image import rebind drives the engine end to end and produces report artifacts | current working tree; `device_smoke3_rebind_adapter` PASS on iPhone9,3 |
-| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | complete (host- and arm64 device-verified) — controlled byte patch with masked precondition + revalidation; native Apple write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke |
-| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | complete (host- and arm64 device-verified) — memory engine wired into the plan lifecycle with per-engine context and prepared-state handoff | current working tree; canonical iPhone9,3 smoke |
-| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | complete (host- and arm64 device-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | current working tree; ObjC wired suite and canonical iPhone9,3 smoke |
-| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | complete (host- and device-verified) — ObjC engine wired into the plan lifecycle; Darwin `libobjc` binding is registered by `hk_runtime_create`; original publication and real iOS dispatch pass | commit `87503a6`, current working tree; canonical iPhone9,3 facade smoke |
+| Rebind engine (`Sources/Engines/HKRebindEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — prepare/commit over LC_DYSYMTAB imports, mutation-state-honest; native pointer write exercised against the smoke executable | current working tree; `device-smoke3-rebind` prints `HookKit3 rebind: PASS` on a physical arm64 test device; no physical arm64e claim |
+| Rebind runtime adapter (`Sources/Engines/HKRebindVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle as a real `hk_engine_vtable_t`; catalog-wide main-image import rebind drives the engine end to end and produces report artifacts | current working tree; `device_smoke3_rebind_adapter` PASS on a physical arm64 test device |
+| Memory-patch engine (`Sources/Engines/HKMemoryEngine.{h,c}`) | complete (host- and arm64 device-verified) — controlled byte patch with masked precondition + revalidation; native Apple write exercised through the canonical facade | current working tree; canonical arm64 test-device smoke |
+| Memory adapter (`Sources/Engines/HKMemoryVtable.{h,c}`) | complete (host- and arm64 device-verified) — memory engine wired into the plan lifecycle with per-engine context and prepared-state handoff | current working tree; canonical arm64 test-device smoke |
+| ObjC method engine (`Sources/Engines/HKObjCEngine.{h,c}`) | complete (host- and arm64 device-verified) — resolve/capture/replace with the whole ObjC runtime behind a seam; metaclass, inheritance policy, availability, revalidation and publish-ordering all host-observable | current working tree; ObjC wired suite and canonical arm64 test-device smoke |
+| ObjC runtime adapter (`Sources/Engines/HKObjCVtable.{h,c}`) | complete (host- and device-verified) — ObjC engine wired into the plan lifecycle; Darwin `libobjc` binding is registered by `hk_runtime_create`; original publication and real iOS dispatch pass | commit `87503a6`, current working tree; canonical arm64 test-device facade smoke |
 | Engine-vtable context + prepared-state handoff (`HKEngineInternal.h`, `HKPlan.c`) | complete (host-verified) — additive `prepare_one_ctx`/`commit_one_ctx`/`release_prepared` + `hk_runtime_register_engine_with_context`; retires the file-scoped-environment and stash ceiling in all three adapters | commit `eb36f9d` — see below |
-| Swift engine | complete for accepted scope (host, synthetic-device, real-arm64-device, and arm64e source/ABI review) — native PAC/layout engine split into prepare/commit, with a separate public Swift API; demangled lookup is backed by the resolved Swift demangler | `native/hk_swift.{h,c}`, `Sources/Engines/HKSwiftEngine.c`, `HookKitSwift.h`; `test-swift-engine`; beta cross-build; iPhone9,3 synthetic arm64 metadata smoke and 2026-08-22 real-class prepare/commit/restore PASS |
+| Swift engine | complete for accepted scope (host, synthetic-device, real-arm64-device, and arm64e source/ABI review) — native PAC/layout engine split into prepare/commit, with a separate public Swift API; demangled lookup is backed by the resolved Swift demangler | `native/hk_swift.{h,c}`, `Sources/Engines/HKSwiftEngine.c`, `HookKitSwift.h`; `test-swift-engine`; beta cross-build; synthetic arm64-metadata smoke on a physical test device and 2026-08-22 real-class prepare/commit/restore PASS |
 
 **Rebind engine**, this iteration (`Sources/Engines/HKRebindEngine.{h,c}`) —
 the first engine, and the point where every Milestone 5 resolver becomes an
@@ -1994,7 +1994,7 @@ for the seam, not reusable, since it is the store itself and carries none of
 the precondition/revalidation/artifact contract. On device it is exactly what
 backs the seam. Mutation state is `NONE`/`COMPLETE` for a single region; a
 device store that can write a region partially must report `PARTIAL`, noted at
-the seam. The canonical iPhone9,3 facade smoke verifies the arm64 write path;
+the seam. The canonical arm64 test-device facade smoke verifies the arm64 write path;
 arm64e protection/PAC behavior is source/ABI-reviewed with no physical arm64e
 claim.
 
@@ -2280,8 +2280,8 @@ Note: HookKit 2.x already has working, host-and-device-tested implementations of
 
 | Task | State | Evidence |
 |---|---|---|
-| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; native Apple write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke; no physical arm64e claim |
-| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle; terminal `HK_TARGET_FUNCTION_ADDRESS` route exercised with no original request | current working tree; canonical iPhone9,3 smoke |
+| Terminal inline engine (`Sources/Engines/HKInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — entry-point branch patch with zero relocation, zero trampoline, zero executable allocation; native Apple write exercised through the canonical facade | current working tree; canonical arm64 test-device smoke; no physical arm64e claim |
+| Runtime adapter (`Sources/Engines/HKInlineVtable.{h,c}`) | complete (host- and arm64 device-verified) — wired into the plan lifecycle; terminal `HK_TARGET_FUNCTION_ADDRESS` route exercised with no original request | current working tree; canonical arm64 test-device smoke |
 
 Note: the atomicity work committed at `3e6bbdb` (one-page-per-trampoline,
 atomic near-branch via inbound thunk) is a real head start on this milestone's
@@ -2677,8 +2677,8 @@ applying the lesson from the inline adapter rather than rediscovering it.
 
 | Task | State | Evidence |
 |---|---|---|
-| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — trampoline built/sealed at prepare, entry patched at commit; native allocation/seal/write exercised through the canonical facade | current working tree; canonical iPhone9,3 smoke; no physical arm64e claim |
-| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — wired in alongside the terminal engine, router selects it for callable original requests | current working tree; canonical iPhone9,3 smoke |
+| Relocating inline engine (`Sources/Engines/HKRelocInlineEngine.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — trampoline built/sealed at prepare, entry patched at commit; native allocation/seal/write exercised through the canonical facade | current working tree; canonical arm64 test-device smoke; no physical arm64e claim |
+| Runtime adapter (`Sources/Engines/HKRelocInlineVtable.{h,c}`) | complete (host and arm64 device; arm64e source/ABI review) — wired in alongside the terminal engine, router selects it for callable original requests | current working tree; canonical arm64 test-device smoke |
 
 `native/hk_arm64.c`'s relocator already exists and is host-tested
 (`make test-reloc`), so this milestone ports and hardens rather than builds
@@ -2966,7 +2966,7 @@ verified green.
 | Task | State | Evidence |
 |---|---|---|
 | Constraint + continuation-policy enforcement in routing | complete (host-verified) — engines declare preparation and commit effect bounds; a request forbidding an effect is routed away before the corresponding phase | current working tree; router and relocating/static wired suites |
-| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | complete (host- and arm64 device-verified) — a fixed pool of load-time-executable slots; constrained requests route, install, execute through the replacement and original continuation, and report static continuation state | current working tree; `test-static-continuation`; `make device-smoke3-static`; iPhone9,3 iOS 15.8.3 |
+| Static continuation mechanism (`Sources/Engines/HKStaticPool.{h,c}` + a second vtable over the relocating engine) | complete (host- and arm64 device-verified) — a fixed pool of load-time-executable slots; constrained requests route, install, execute through the replacement and original continuation, and report static continuation state | current working tree; `test-static-continuation`; `make device-smoke3-static`; tested on a physical arm64 rootless device |
 
 **The gap this closes was that `hk_constraints_t` was never read.** Not
 partially honoured — `grep` across `Sources/` found zero readers. A caller
@@ -3084,9 +3084,9 @@ contract, not new integration work.
 | Task | State | Evidence |
 |---|---|---|
 | Provider evidence record validator | complete (host-verified) | `Tools/provider-evidence/validate.py`, `test_validate.py`; `make test-provider-evidence` |
-| Dobby evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/dobby/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-dobby` on iPhone9,3; canonical arm64e emits the matching modern ABI slice |
-| Gum evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/gum/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-gum` on iPhone9,3; canonical arm64e emits the matching modern ABI slice |
-| ElleKit/libhooker/Substitute/Substrate records | complete for declared-ABI scope; no synthetic distinct-provider claim | 2026-08-22 iPhone9,3 has ElleKit 1.2 at `/var/jb/usr/lib/libellekit.dylib`; libhooker and CydiaSubstrate are aliases to it, while Substitute is absent. The ElleKit ABI is certified below. Genuine libhooker, Substitute, and Substrate remain excluded until their own overwrite bounds and activation/publication semantics are proved. |
+| Dobby evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/dobby/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-dobby` on a physical arm64 test device; canonical arm64e emits the matching modern ABI slice |
+| Gum evidence records | arm64 rootless device-certified; arm64e source/ABI-reviewed (physical record intentionally conservative) | `ProviderEvidence/gum/{arm64,arm64e}.json`; 2026-08-22 packaged `device_provider_lifecycle3` drove public analyze → prepare → commit, original, continuation, and artifacts through `provider-gum` on a physical arm64 test device; canonical arm64e emits the matching modern ABI slice |
+| ElleKit/libhooker/Substitute/Substrate records | complete for declared-ABI scope; no synthetic distinct-provider claim | 2026-08-22: a physical arm64 test device had ElleKit 1.2 at `/var/jb/usr/lib/libellekit.dylib`; libhooker and CydiaSubstrate were aliases to it, while Substitute was absent. The ElleKit ABI is certified below. Genuine libhooker, Substitute, and Substrate remain excluded until their own overwrite bounds and activation/publication semantics are proved. |
 | ElleKit HK3 adapter | complete (host- and arm64-device-verified; arm64e source/ABI-reviewed) | `provider-ellekit` uses a HookKit-owned hybrid: prepare relocates the audited 16-byte maximum and publishes that inspected continuation before commit; commit calls `LHHookFunctions` with no old-pointer request, leaving ElleKit to patch only the target. The packaged `device_provider_lifecycle3` test verified replacement, callable original, continuation metadata, and artifacts. The installed 1.2 provider selected its 12-byte ADRP/MOVK/BR form; current ElleKit source also bounds the known AArch64 forms at 4, 12, or 16 bytes. No physical arm64e claim is made. |
 | Automatic provider routing certification | complete for accepted release scope — Dobby/Gum/ElleKit arm64; source/ABI-reviewed arm64e | `HKProviderVtable.c` declares arm64 and arm64e for the three adapters; runtime registration recognizes ElleKit only when both its `EKHookFunction` marker and `LHHookFunctions` ABI are present. The evidence validator reports `3` physically eligible arm64 records; private test registration remains the explicit bypass. |
 
@@ -3116,8 +3116,8 @@ with no physical arm64e claim).**
 | Task | State | Evidence |
 |---|---|---|
 | Memory-patch preconditions | complete (host-verified) | canonical facade captures its precondition and uses the normal HK3 plan API |
-| Facade mapping 2.x's 21 `HKSubstitutor` methods onto 3.0 | complete — all 5 hook-installing methods bridge to the 3.0 lifecycle; image/introspection behavior remains intentionally legacy-backed | current working tree; canonical iPhone9,3 facade smoke, real Swift slot/exact-mangled/demangled smoke (2026-08-22), and unrecompiled ABI fixture |
-| Unrecompiled v2.5 facade fixture | complete (device-verified) | `tests/device_legacy_abi.m` compiled against the actual `v2.5.0` header, then run against canonical 3.0 on iPhone9,3; introspection, image APIs, hooks, batching, and errno surface PASS |
+| Facade mapping 2.x's 21 `HKSubstitutor` methods onto 3.0 | complete — all 5 hook-installing methods bridge to the 3.0 lifecycle; image/introspection behavior remains intentionally legacy-backed | current working tree; canonical arm64 test-device facade smoke, real Swift slot/exact-mangled/demangled smoke (2026-08-22), and unrecompiled ABI fixture |
+| Unrecompiled v2.5 facade fixture | complete (device-verified) | `tests/device_legacy_abi.m` compiled against the actual `v2.5.0` header, then run against canonical 3.0 on a physical arm64 test device; introspection, image APIs, hooks, batching, and errno surface PASS |
 
 **Memory patches require a precondition.** `hk_plan_add_hook` rejects a
 memory patch without `expected_bytes`, because otherwise it cannot revalidate
@@ -3213,7 +3213,7 @@ Implementation complete in the current working tree:
 | Pending retry through the original engine/context path | complete (host-verified) | `hk_runtime_drain_pending`; `test_deferred_target_survives_plan_and_retries` |
 | ObjC deferred availability | complete (host-verified) | `HKObjCEngine.c`, `HKObjCVtable.c`; `test_objc_engine` |
 | Pending/active reports and artifact identity | complete (host-verified) | `test_deferred_target_survives_plan_and_retries` |
-| Caller-driven deferred ObjC lifecycle | complete (arm64 device-verified) | 2026-08-22 iPhone9,3: packaged beta `3.0.0-1` queued an absent named class, retained `PENDING` across the first drain, then installed after class registration; dispatch changed 13 → 99 and the report contained one artifact. Beta package removed; legacy `2.5.1-1` reverified. |
+| Caller-driven deferred ObjC lifecycle | complete (arm64 device-verified) | 2026-08-22: a physical arm64 test device ran packaged beta `3.0.0-1`, queued an absent named class, retained `PENDING` across the first drain, then installed after class registration; dispatch changed 13 → 99 and the report contained one artifact. Beta package removed; legacy `2.5.1-1` reverified. |
 | Full host regression suite | complete (host-verified) | `make test` — exit 0 |
 
 Evidence is intentionally marked as the uncommitted working tree because this
@@ -3231,9 +3231,9 @@ those changes.
 | Beta public headers exclude legacy facade | complete | `check_compat.sh beta`; `HookKitLegacy.h` absent from package |
 | Rootless beta package metadata and slices | complete | `build.sh beta`; package `me.jjolano.fmwk.hookkit3`, `3.0.0-1`, arm64/arm64e, iOS 15+ |
 | Full host regression suite during beta build | complete | `build.sh beta` — `make test` and package checks exit 0 |
-| Public lifecycle smoke beside legacy package | complete (device-verified) | iPhone9,3 iOS 15.8.3: beta co-installed with HookKit 2.5.1-1; `HookKit3 lifecycle: PASS`; beta removed and legacy reverified |
-| ObjC plan/commit smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3: real libobjc class setup, route, prepare, commit, and message dispatch; `HookKit3 ObjC smoke: PASS` |
-| Swift prepare/commit smoke | complete (synthetic device verification) | iPhone9,3 iOS 15.8.3: synthetic arm64 class metadata/vtable slot; prepare leaves slot unchanged and commit publishes replacement; `HookKit3 Swift smoke: PASS (synthetic arm64 metadata)`; not real Swift-class certification |
+| Public lifecycle smoke beside legacy package | complete (device-verified) | a physical arm64 rootless test device: beta co-installed with HookKit 2.5.1-1; `HookKit3 lifecycle: PASS`; beta removed and legacy reverified |
+| ObjC plan/commit smoke | complete (device-verified) | a physical arm64 rootless test device: real libobjc class setup, route, prepare, commit, and message dispatch; `HookKit3 ObjC smoke: PASS` |
+| Swift prepare/commit smoke | complete (synthetic device verification) | a physical arm64 rootless test device: synthetic arm64 class metadata/vtable slot; prepare leaves slot unchanged and commit publishes replacement; `HookKit3 Swift smoke: PASS (synthetic arm64 metadata)`; not real Swift-class certification |
 
 The beta remains intentionally opt-in. Its public lifecycle and compiled-in
 Apple engine registration are device-verified on arm64; its arm64e build and
@@ -3255,8 +3255,8 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 |---|---|---|
 | Shadow source/package migration | complete (source-verified) | modern rootless controls, canonical dependency, ABI guard, and compatibility-header boundary in the signed-off Shadow checkout |
 | Shadow rootless build | complete (host-verified) | rebuilt `me.jjolano.shadow` 4.0.0 package plus ShadowHarness; Mach-O/package checks pass |
-| Current-device smoke | complete (device-verified) | iPhone9,3 iOS 15.8.3 installed canonical HookKit 3.0.0-1 + rebuilt Shadow 4.0.0, launched ShadowHarness without a new ShadowHarness crash, then restored exact prior HookKit 2.5.1-1 / Shadow 4.0.0 state |
-| Shadow performance baseline | complete (device-verified 2026-08-23, interleaved A/B, re-measured after the batching + chaining fixes) | instrumented harness (`tests/device_performance.m`) + `scripts/device-perf-ab.sh`; 3 interleaved 2.5.1↔3.0.0-1 package-swap rounds on iPhone9,3 iOS 15.8.3, n=30 per arm, all phases PASS both arms; post-fix HK3 arm n=15. Medians (2.5 vs HK3 pre-batching vs HK3 post-batching): single C hook 126 µs / 1,688 µs / 1,394 µs; batched ObjC installs 2.2 / 674 / **467 µs per hook**; batched C installs 151 / 713 / **513 µs per hook**; startup RSS 3.00 MB / 3.00 MB / **2.82 MB** (shared-plan batching removed the per-hook runtime/plan churn). The remaining ~470 µs/hook is per-hook engine work inside prepare/commit, not plan overhead — further reduction would trade against the per-hook artifact/audit trail and is not pursued for this release. Device restored to canonical 3.0.0-1. |
+| Current-device smoke | complete (device-verified) | a physical arm64 rootless test device installed canonical HookKit 3.0.0-1 + rebuilt Shadow 4.0.0, launched ShadowHarness without a new ShadowHarness crash, then restored exact prior HookKit 2.5.1-1 / Shadow 4.0.0 state |
+| Shadow performance baseline | complete (device-verified 2026-08-23, interleaved A/B, re-measured after the batching + chaining fixes) | instrumented harness (`tests/device_performance.m`) + `scripts/device-perf-ab.sh`; 3 interleaved 2.5.1↔3.0.0-1 package-swap rounds on a physical arm64 rootless test device, n=30 per arm, all phases PASS both arms; post-fix HK3 arm n=15. Medians (2.5 vs HK3 pre-batching vs HK3 post-batching): single C hook 126 µs / 1,688 µs / 1,394 µs; batched ObjC installs 2.2 / 674 / **467 µs per hook**; batched C installs 151 / 713 / **513 µs per hook**; startup RSS 3.00 MB / 3.00 MB / **2.82 MB** (shared-plan batching removed the per-hook runtime/plan churn). The remaining ~470 µs/hook is per-hook engine work inside prepare/commit, not plan overhead — further reduction would trade against the per-hook artifact/audit trail and is not pursued for this release. Device restored to canonical 3.0.0-1. |
 
 ## Milestone 15 — Canonical release candidate
 **State: complete (accepted release scope).**
@@ -3265,9 +3265,9 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 |---|---|---|
 | Canonical legacy identity/package | complete (host-verified) | `build.sh canonical`; `me.jjolano.fmwk.hookkit` 3.0.0-1, arm64/arm64e, iOS 15+ |
 | Canonical export/compatibility gates | complete (host-verified) | `check_exports.sh`, `check_compat.sh canonical` |
-| Canonical legacy facade device smoke | complete (device-verified) | 2026-08-21 iPhone9,3 iOS 15.8.3: canonical facade batching, rebind adapter, unrecompiled v2.5 ABI fixture, and live loaded-image resolver all PASS after legacy-memory ownership compatibility fix; device restored to exact 2.5.1-1 |
-| Canonical real Swift vtable smoke | complete (arm64 device-verified) | 2026-08-22 iPhone9,3: a real Swift class compiled with the iPhoneOS Swift runtime; prepare is non-mutating, commit redirects `target()` 7 → 42, and a fresh plan restores 7; device restored to exact legacy `2.5.1-1` |
-| Canonical provider lifecycle after toolchain repair | complete (arm64 device-verified) | 2026-08-22 iPhone9,3 iOS 15.8.3: freshly built canonical `3.0.0-1` package runs `device-provider-lifecycle3`; both packaged HK3 Dobby and Gum lifecycles PASS; device restored to exact legacy `2.5.1-1`. |
+| Canonical legacy facade device smoke | complete (device-verified) | 2026-08-21: a physical arm64 rootless test device ran canonical facade batching, the rebind adapter, the unrecompiled v2.5 ABI fixture, and the live loaded-image resolver; all PASS after the legacy-memory ownership compatibility fix. The device was restored to exact 2.5.1-1. |
+| Canonical real Swift vtable smoke | complete (arm64 device-verified) | 2026-08-22: a physical arm64 test device ran a real Swift class compiled with the iPhoneOS Swift runtime; prepare was non-mutating, commit redirected `target()` 7 → 42, and a fresh plan restored 7. The device was restored to exact legacy `2.5.1-1`. |
+| Canonical provider lifecycle after toolchain repair | complete (arm64 device-verified) | 2026-08-22: a physical arm64 rootless test device ran freshly built canonical `3.0.0-1` package `device-provider-lifecycle3`; both packaged HK3 Dobby and Gum lifecycles PASS. The device was restored to exact legacy `2.5.1-1`. |
 | arm64e standalone smoke and package build gate | complete (host/source/ABI-reviewed; no physical-device claim) | `Makefile` selects the verified modern toolchain for every arm64e device-smoke target; the Linux Swift 5.8 probe is emitted as assembly and reassembled with that toolchain. `build.sh` selects matching `libroot.a`, while `check_compat.sh` asserts the final arm64e subtype for every framework/HKGum slice (`0x80` modern, intentional `0x00` legacy). The 2026-08-22 split matrix built 15 smoke executables plus all 3 Swift/C objects; every canonical arm64e output and package slice carried the new ptrauth ABI marker. Prior HookKit 2.x PAC-aware fishhook/native arm64e work (`a066270`, `d0cf698`, `1049c37`) supplies the source precedent. |
 | Release-candidate closure | complete (accepted release scope) | canonical build, host regression suite, historical ABI comparisons, export/compatibility checks, HookKit 2.5 performance baseline, static continuation, resolver/rebind, facade/ABI/Swift, Dobby/Gum device lifecycles, signed-off Shadow source/package/device smoke, and arm64e source/ABI gates all pass; device restored to exact legacy HookKit 2.5.1-1 / Shadow 4.0.0 |
 
@@ -3284,7 +3284,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
    target) — a latent master regression, because device smokes were not re-run
    after that commit. Fix: declare `HK_TARGET_MEMORY_PATCH` chainable in
    `memory_describe()` (the engine's own expected-bytes precondition enforces
-   chain soundness). Both smokes PASS again on iPhone9,3 iOS 15.8.3, re-run
+   chain soundness). Both smokes PASS again on a physical arm64 rootless test device, re-run
    once more after the canonical naming consolidation so the renamed tree
    carries its own device evidence.
 2. **Facade batching now uses one shared plan lifecycle.** The legacy facade's
@@ -3296,7 +3296,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
    happen at execute time). Measured effect in the table above; single-call
    paths are refactored onto the same spec builders with no behavior change.
 3. **Stage decomposition identifies `hk_plan_analyze` as the remaining cost.**
-   A direct-C-ABI probe on iPhone9,3 iOS 15.8.3 timed each plan stage for
+   A direct-C-ABI probe on a physical arm64 rootless test device timed each plan stage for
    batched installs: add_hook ≈ 1–2 µs/hook, prepare ≈ 1–2 µs/hook,
    commit ≈ 0–50 µs/hook, but **analyze ≈ 420–470 µs/hook** regardless of
    target kind or prior plan history. The actual mutation is three orders of
@@ -3330,7 +3330,7 @@ so the old mutating calls enter the HK3 plan lifecycle without a mass rewrite.
 
 **State: complete (host- and device-verified 2026-08-23).**
 
-Baseline being optimized against (iPhone9,3 iOS 15.8.3, direct-C-ABI probe,
+Baseline being optimized against (a physical arm64 rootless test device, direct-C-ABI probe,
 see Post-release corrections #3): `hk_plan_analyze` costs ~420–470 µs per
 hook across target kinds; prepare and commit are microseconds. Batched
 16-hook ObjC installs pay ~7.5 ms in analyze alone; Shadow's ~316-method
@@ -3340,7 +3340,7 @@ disposition pays ~145 ms one-time at first launch.
 |---|---|---|
 | Profile inside `hk_plan_analyze` | complete (device-verified) | temporary per-engine instrumentation of the analyze loop attributed the cost to provider `discover()` calls: `dlopen_preflight` code-signature validation at ~287 µs/call (Gum), ~167 µs/call (ElleKit, 4 paths), ~20 µs/call (Substitute), re-paid for every hook; all built-in engines measure ~0 µs/call |
 | Design + implement caching/precomputation | complete | process-lifetime memoization of the static-path preflight verdicts in `hk_platform_gum_discover`, `hk_platform_ellekit_discover`, and the preflight half of `hk_platform_substitute_discover` (mutex-guarded); Substitute's dlsym checks deliberately stay live so a late provider load still flips availability; no routing decisions changed |
-| Full validation loop | complete (host- and device-verified) | host suite exit 0; `build.sh` all 4 lanes + export/compat checks + v2.x ABI baselines exit 0; legacy-ABI and canonical-facade smokes PASS on iPhone9,3 iOS 15.8.3 with the optimized framework |
+| Full validation loop | complete (host- and device-verified) | host suite exit 0; `build.sh` all 4 lanes + export/compat checks + v2.x ABI baselines exit 0; legacy-ABI and canonical-facade smokes PASS on a physical arm64 rootless test device with the optimized framework |
 | Re-measure against baseline | complete (device-verified) | perf harness n=15, loadavg ~1.0: batched ObjC installs **467 → 36.2 µs/hook (~13×)**, batched C installs **513 → 61.9 µs/hook (~8×)**; ≥5× target exceeded with byte-identical routing outcomes |
 
 Ground rule carried over from M0: nothing claims improved performance

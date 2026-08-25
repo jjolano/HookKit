@@ -24,7 +24,7 @@
     {
       "test_id": "provider-ellekit-alias-smoke",
       "verification_level": "device_verified",
-      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "device_row": "physical arm64 rootless test device",
       "result": "pass",
       "evidence_run_id": "2026-08-22-device-provider-alias3-arm64",
       "date": "2026-08-22"
@@ -32,7 +32,7 @@
     {
       "test_id": "hk3-provider-ellekit-hybrid-lifecycle",
       "verification_level": "device_verified",
-      "device_row": "iPhone9,3 iOS 15.8.3 arm64 rootless",
+      "device_row": "physical arm64 rootless test device",
       "result": "pass",
       "evidence_run_id": "2026-08-22-device-provider-lifecycle3-ellekit-hybrid-arm64",
       "date": "2026-08-22"

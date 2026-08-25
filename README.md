@@ -200,7 +200,7 @@ Provider signatures, return conventions, and original-publication order are sour
 Advantages:
 
 - Improved performance through use of batch hooking (if available).
-- Ability to utilize different hooking libraries from your tweak. [Shadow](https://github.com/jjolano/shadow) is the primary consumer and provides this functionality.
+- Ability to utilize different hooking libraries from your tweak. Shadow is the primary consumer and provides this functionality.
 
 Disadvantages:
 

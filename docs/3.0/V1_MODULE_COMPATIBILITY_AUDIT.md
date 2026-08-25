@@ -15,8 +15,8 @@ just the v1 `HKSubstitutor` subset (§2.3 policy).
 
 ## Method so far
 
-Repo-wide grep for the six class names plus "Modulous" across every local
-sibling repo under `/home/coder/projects/ios/`: `shadow`, `AltList`,
+Repo-wide grep for the six class names plus "Modulous" across local sibling
+repositories: `shadow`, `AltList`,
 `libSandy`, `RootBridge`, `hksmoke`, `prebuilt`, `ios-repo`, `coder-connect`,
 `Modulous` itself. Also checked `ios-repo`'s package metadata
 (`.stage/releases.ndjson`, `.stage/changelog.json`,
@@ -34,8 +34,8 @@ consumer using the retained facade, and an archived Enmity crash report whose
 loaded-image list includes both HookKit and Modulous, but no public source
 references to `HookKitCore`, `HookKitModule`, or the other five v1 module
 classes. The Enmity result is a binary/package dependency observation, not
-evidence that it uses the v1 module ABI. Sources: [Shadow's current
-consumer](https://github.com/jjolano/shadow/blob/master/Shadow.dylib/dylib.x),
+evidence that it uses the v1 module ABI. Sources: the current signed-off
+Shadow consumer checkout,
 [Enmity's archived dependency report](https://github.com/enmity-mod/enmity/issues/82).
 
 ## Findings

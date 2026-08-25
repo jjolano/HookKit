@@ -17,14 +17,12 @@
 //   make conformance IMAGE=/path/to/libfoo.dylib SYMBOLS="malloc free"
 //
 // Obtaining a specimen (the run recorded in IMPLEMENTATION_STATUS.md used a
-// jailbroken iPhone 7 on iOS 15.8.3, read-only -- nothing was installed or
+// jailbroken physical arm64 test device, read-only -- nothing was installed or
 // changed on it). Shared-cache dylibs are NOT files on disk and cannot be
 // pulled this way; use bootstrap libraries, app binaries, or an installed
 // framework:
 //
-//   SSHOPTS="-o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
-//            -o PreferredAuthentications=password -o PubkeyAuthentication=no"
-//   sshpass -p <pass> scp $SSHOPTS <user>@<host>:/var/jb/usr/lib/liblz4.1.dylib .
+//   scp <ssh-config-alias>:/var/jb/usr/lib/liblz4.1.dylib .
 //
 // Pick specimens that differ: a dylib, a PIE executable, and a fat framework
 // exercise different paths. For the [loaded] mode to prove anything the image

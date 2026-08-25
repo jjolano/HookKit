@@ -89,7 +89,7 @@ static int hk_platform_dobby_hook(void *ctx, void *target, void *replacement,
 static bool hk_platform_gum_discover(void *ctx) {
     (void)ctx;
     // dlopen_preflight validates code signatures and costs ~0.3 ms per call
-    // on iPhone9,3 (M16 profiling). These paths are static files: their
+    // on an arm64 test device during profiling. These paths are static files: their
     // preflight verdict cannot change while the process runs, so memoize.
     // Without this, every hook re-pays discovery for every provider engine
     // during plan analysis (~470 us/hook combined across providers).
