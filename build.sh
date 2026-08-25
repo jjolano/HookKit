@@ -191,16 +191,24 @@ check_legacy_abi() {
     # committing to that: llvm-objdump is a different codebase, already in
     # this project's own tool fallback chain elsewhere, and untested here.
     OBJDUMP_BIN=$(command -v llvm-objdump 2>/dev/null) || OBJDUMP_BIN=$(xcrun --find llvm-objdump 2>/dev/null) || true
+    echo "=== DIAG: llvm-objdump binary: '${OBJDUMP_BIN:-<not found>}' ==="
     if [ -n "${OBJDUMP_BIN:-}" ]; then
-        echo "=== DIAG: llvm-objdump --macho --objc-meta-data -arch arm64e (HKSubstitutor block) ==="
-        "$OBJDUMP_BIN" --macho --objc-meta-data -arch arm64e "$binary" 2>&1 | awk '
+        objdump_diag=$(mktemp)
+        objdump_status=0
+        "$OBJDUMP_BIN" --macho --objc-meta-data -arch arm64e "$binary" >"$objdump_diag" 2>&1 || objdump_status=$?
+        echo "=== DIAG: llvm-objdump exit status: $objdump_status ==="
+        echo "=== DIAG: llvm-objdump output (HKSubstitutor block, or first 60 lines if not found) ==="
+        (awk '
             /HKSubstitutor/ && !seen { p=1; seen=1 }
             p { print; n++ }
             p && n>200 { exit }
-        '
+        ' "$objdump_diag" | grep -q . && awk '
+            /HKSubstitutor/ && !seen { p=1; seen=1 }
+            p { print; n++ }
+            p && n>200 { exit }
+        ' "$objdump_diag") || head -60 "$objdump_diag"
+        rm -f "$objdump_diag"
         echo "=== DIAG: end llvm-objdump dump ==="
-    else
-        echo "=== DIAG: llvm-objdump not found on this runner ==="
     fi
     if [ -n "$expected_install_name" ]; then
         bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
