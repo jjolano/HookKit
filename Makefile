@@ -442,7 +442,7 @@ test-plan-model:
 # also catch OOM-path leaks; here it catches crashes and the state invariant.
 .PHONY: test-fault-injection
 test-fault-injection:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc -o $(THEOS_OBJ_DIR)/test_fault_injection Tests/Host/test_fault_injection.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_fault_injection$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 $(if $(filter Linux,$(HOST_OS)),-Wl$(comma)--wrap=malloc$(comma)--wrap=calloc$(comma)--wrap=realloc) -o $(THEOS_OBJ_DIR)/test_fault_injection Tests/Host/test_fault_injection.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_fault_injection$(ECHO_END)
 
 # HookKit 3.0 image catalog test (Milestone 5). The platform-agnostic half:
 # selector matching (all 6 hk_image_selector_kind_t cases + EXPLICIT_SET
@@ -546,6 +546,10 @@ SWIFT_DEVICE_RESOURCE_DIR ?= $(THEOS)/toolchain/linux/iphone/lib/swift
 # execute. The bundled Linux Swift 5.8 driver also needs its arm64e assembly
 # reassembled below; C/ObjC companion objects use the same modern wrapper.
 HOST_OS ?= $(shell uname -s)
+
+# A literal comma, for embedding one inside a $(if ...)/$(filter ...) call's
+# own comma-delimited arguments (e.g. an -Wl,opt1,opt2 flag list below).
+comma := ,
 
 # hk_runtime_register_platform_engines (Sources/Core/HKRuntime.c, __APPLE__-only)
 # unconditionally wires up every native engine plus the ObjC runtime shims,

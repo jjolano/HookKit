@@ -26,14 +26,18 @@
 #include "fake_engines.h"
 
 // ---- allocation interceptor (linked with -Wl,--wrap=malloc,calloc,realloc) --
+// GNU ld only -- Apple's linker has no --wrap equivalent. On any other host
+// this degrades to running the lifecycle once, uninstrumented (see main()).
 
+static int g_fi_fired;    // set when an injection actually fired
+
+#if defined(__linux__)
 extern void *__real_malloc(size_t);
 extern void *__real_calloc(size_t, size_t);
 extern void *__real_realloc(void *, size_t);
 
 static int g_fi_target;   // fail this (1-based) allocation while armed; 0 = disabled
 static int g_fi_count;    // allocations seen since arm
-static int g_fi_fired;    // set when an injection actually fired
 
 static void fi_arm(int nth) { g_fi_target = nth; g_fi_count = 0; g_fi_fired = 0; }
 static void fi_disarm(void) { g_fi_target = 0; }
@@ -58,6 +62,13 @@ void *__wrap_realloc(void *p, size_t n) {
     if (fi_should_fail()) return NULL;
     return __real_realloc(p, n);
 }
+#else
+// ponytail: no interceptor, so g_fi_fired can never fire -- main()'s loop
+// runs the lifecycle once and stops. Upgrade path is a real macOS allocator
+// interposer (malloc zone or DYLD_INTERPOSE) if this coverage gap matters.
+static void fi_arm(int nth) { (void)nth; g_fi_fired = 0; }
+static void fi_disarm(void) { }
+#endif
 
 // ---- the lifecycle under test -------------------------------------------
 
@@ -156,7 +167,12 @@ int main(void) {
         assert(n < 1000);  // safety: the lifecycle allocates far fewer than this
     }
 
+#if defined(__linux__)
     printf("all fault-injection tests passed (%d allocation sites swept, "
            "each failed once)\n", n - 1);
+#else
+    printf("fault-injection sweep skipped (no malloc interceptor on this "
+           "platform; lifecycle ran once, uninstrumented)\n");
+#endif
     return 0;
 }
