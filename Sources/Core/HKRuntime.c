@@ -488,6 +488,10 @@ static int hk_platform_substitute_hook(void *ctx, void *target,
 }
 #endif
 
+// Every function from here to the matching #endif below is called only
+// from hk_runtime_register_platform_engines's TARGET_OS_IOS-gated section
+// (this same file) -- see the comment there for why.
+#if TARGET_OS_IOS
 static void *hk_platform_get_class(void *ctx, const char *name) {
     (void)ctx;
     return (void *)objc_getClass(name);
@@ -529,9 +533,6 @@ static void *hk_platform_replace_method(void *ctx, void *cls, void *sel,
     return (void *)class_replaceMethod((Class)cls, (SEL)sel, (IMP)imp, types);
 }
 
-// Only called from the TARGET_OS_IOS-gated engines below -- narrower than
-// the objc helpers just above, which stay live on any __APPLE__ build.
-#if TARGET_OS_IOS
 static bool hk_platform_write_memory(void *ctx, uintptr_t address,
                                      const uint8_t *data, size_t size) {
     (void)ctx;
@@ -811,6 +812,15 @@ bool hk_runtime_register_engine_for_testing(
 
 static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
 #if defined(__APPLE__)
+    // Every engine registered below assumes it is patching/introspecting a
+    // live iOS process. __APPLE__ is also true when this file is compiled
+    // as a plain macOS host binary (e.g. Tests/Host/*.c, which run on this
+    // very function) -- TARGET_OS_IOS distinguishes that case, where none
+    // of these engines have a real target and must not auto-claim one out
+    // from under a test's own fakes (Tests/Host/fake_engines.h) registered
+    // right after hk_runtime_create returns. Only dyld catalog population
+    // just below is genuinely platform-neutral and stays unconditional.
+#if TARGET_OS_IOS
     runtime->objc_engine.runtime.get_class = hk_platform_get_class;
     runtime->objc_engine.runtime.get_metaclass = hk_platform_get_metaclass;
     runtime->objc_engine.runtime.get_superclass = hk_platform_get_superclass;
@@ -823,15 +833,10 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
     (void)hk_runtime_register_engine_with_context(runtime,
                                                    hk_objc_vtable(),
                                                    &runtime->objc_engine);
+#endif
 
     (void)hk_image_catalog_populate_from_dyld(runtime->catalog);
 
-    // Native/rebind/reloc-inline and the HOOKKIT_CANONICAL_3 hooking
-    // backends below all patch a live iOS process (import tables, code
-    // pages, ObjC state belonging to the app being hooked). __APPLE__ is
-    // also true when this file is compiled as a plain macOS host binary
-    // (e.g. Tests/Host/*.c) -- TARGET_OS_IOS distinguishes that case, where
-    // none of these engines have a real target and must not claim one.
 #if TARGET_OS_IOS
     if (hk_native_supported()) {
         runtime->rebind_engine.image_base = NULL;
