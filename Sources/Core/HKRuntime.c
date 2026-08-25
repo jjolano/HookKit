@@ -26,6 +26,7 @@
 #include <mach/mach.h>
 #include <pthread.h>
 #include <sys/sysctl.h>
+#include <TargetConditionals.h>
 
 #include "../../vendor/substitute/substitute.h"
 #if defined(HOOKKIT_CANONICAL_3) && \
@@ -811,6 +812,13 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
 
     (void)hk_image_catalog_populate_from_dyld(runtime->catalog);
 
+    // Native/rebind/reloc-inline and the HOOKKIT_CANONICAL_3 hooking
+    // backends below all patch a live iOS process (import tables, code
+    // pages, ObjC state belonging to the app being hooked). __APPLE__ is
+    // also true when this file is compiled as a plain macOS host binary
+    // (e.g. Tests/Host/*.c) -- TARGET_OS_IOS distinguishes that case, where
+    // none of these engines have a real target and must not claim one.
+#if TARGET_OS_IOS
     if (hk_native_supported()) {
         runtime->rebind_engine.image_base = NULL;
         runtime->rebind_engine.image_size = 0;
@@ -893,6 +901,7 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
                                                        hk_reloc_inline_vtable(),
                                                        &runtime->reloc_engine);
     }
+#endif
 #if defined(HOOKKIT_CANONICAL_3)
     // Older devices rely on the installed provider's relocator. This remains
     // an HookKit engine lifecycle, not a re-entry into the retired 2.x router.
