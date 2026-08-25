@@ -565,6 +565,13 @@ static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
 static void hk_runtime_register_platform_engines(hk_runtime_t *runtime);
 
 static hk_engine_architecture_mask_t hk_runtime_platform_architecture(void) {
+    // hk_engine_supports_platform (HKEngineInternal.h) treats architecture
+    // == 0 as "host test build" and waives certification for it. Apple
+    // clang defines __arm64__ for a native macOS-on-Apple-Silicon compile
+    // (these host tests) exactly as it does for a real iOS target, so
+    // that alone can't tell the two apart -- TARGET_OS_IOS can, same as
+    // hk_runtime_register_platform_engines above.
+#if defined(__APPLE__) && TARGET_OS_IOS
 #if defined(__arm64e__)
     return HK_ENGINE_ARCHITECTURE_ARM64E;
 #elif defined(__arm64__)
@@ -573,6 +580,9 @@ static hk_engine_architecture_mask_t hk_runtime_platform_architecture(void) {
     return HK_ENGINE_ARCHITECTURE_ARMV7S;
 #elif defined(__arm__)
     return HK_ENGINE_ARCHITECTURE_ARMV7;
+#else
+    return 0;
+#endif
 #else
     return 0;
 #endif
