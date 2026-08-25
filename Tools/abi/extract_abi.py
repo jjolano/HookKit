@@ -24,8 +24,10 @@ import hashlib
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 ARCHS = ["armv7", "armv7s", "arm64", "arm64e"]
@@ -169,6 +171,14 @@ def _parse_objc_arch(text, arch, exported_classes):
                     selector = parts[-1]
                     if selector.startswith("("):
                         current_method = {"selector": None, "type_encoding": {}}
+                        vmaddr_match = re.match(r"\(0x([0-9a-fA-F]+)\)$", selector)
+                        if vmaddr_match:
+                            # This otool can't resolve a selref pointer that
+                            # needs chained-fixups decoding (arm64e; see
+                            # _resolve_chained_selectors), but it does compute
+                            # and print the slot's own vmaddr -- keep it so
+                            # that resolver has something to look up.
+                            current_method["_unresolved_vmaddr"] = int(vmaddr_match.group(1), 16)
                         methods.append(current_method)
                     else:
                         _merge_method(methods, selector, arch, None)
@@ -185,12 +195,22 @@ def _parse_objc_arch(text, arch, exported_classes):
                     selector_match = re.search(r"(?:\+|-)\[[^ ]+\s+(.+)\]$", line)
                     if selector_match:
                         current_method["selector"] = selector_match.group(1)
+                        # Resolved without needing the chained-fixups fallback.
+                        current_method.pop("_unresolved_vmaddr", None)
             elif section == "properties" and len(parts) >= 3 and parts[0] == "name":
                 if not any(prop["name"] == parts[-1] for prop in properties):
                     properties.append({"name": parts[-1]})
 
-        instance_methods[:] = [method for method in instance_methods if method["selector"]]
-        class_methods[:] = [method for method in class_methods if method["selector"]]
+        # Keep an unresolved-but-addressed entry a little longer: the caller
+        # attempts chained-fixups resolution before the real, final filter.
+        instance_methods[:] = [
+            method for method in instance_methods
+            if method["selector"] or "_unresolved_vmaddr" in method
+        ]
+        class_methods[:] = [
+            method for method in class_methods
+            if method["selector"] or "_unresolved_vmaddr" in method
+        ]
 
         instance_by_selector = {
             method["selector"]: method.get("type_encoding", {}).get(arch)
@@ -240,7 +260,245 @@ def _complete_objc_arches(merged, archs):
                             arch, source_encoding)
 
 
-def get_objc_metadata(otool, binary, archs, exported):
+# ---- chained-fixups selector resolution ----------------------------------
+#
+# otool -ov's relative-method-list "name" field can require chasing a
+# pointer through __objc_selrefs to the actual C string. On an arm64e slice
+# (this project's otool build, confirmed against real macOS CI logs) that
+# pointer is chained-fixups-encoded, and otool prints the slot's own vmaddr
+# ("name 0x.. (0xADDR)") without dereferencing it -- every method on the
+# class silently vanishes from the baseline instead of comparing correctly.
+#
+# The bit layout below mirrors decode_pointer()/format_stride() in
+# Sources/Resolvers/HKChainedFixups.c (validated there by test-chained-
+# fixups), extended to extract a REBASE entry's target field, which that
+# file doesn't need -- it only visits binds. Apple's format is documented
+# in mach-o/fixup-chains.h; nothing here is reverse-engineered.
+
+_MH_MAGIC_64 = 0xFEEDFACF
+_LC_SEGMENT_64 = 0x19
+_LC_DYLD_CHAINED_FIXUPS = 0x80000034
+
+_DYLD_CHAINED_PTR_ARM64E = 1
+_DYLD_CHAINED_PTR_64 = 2
+_DYLD_CHAINED_PTR_ARM64E_USERLAND = 9
+_DYLD_CHAINED_PTR_ARM64E_USERLAND24 = 12
+
+_DYLD_CHAINED_PTR_START_NONE = 0xFFFF
+_DYLD_CHAINED_PTR_START_MULTI = 0x8000
+_DYLD_CHAINED_PTR_START_LAST = 0x8000
+
+
+def _macho_segments_and_fixups(data):
+    """Returns ([(vmaddr, vmsize, fileoff, filesize), ...], (dataoff, datasize)|None)
+    for a single (thin) 64-bit Mach-O image."""
+    if len(data) < 32 or struct.unpack_from("<I", data, 0)[0] != _MH_MAGIC_64:
+        return [], None
+    ncmds = struct.unpack_from("<I", data, 16)[0]
+    sizeofcmds = struct.unpack_from("<I", data, 20)[0]
+    segments = []
+    fixups = None
+    off = 32
+    end = min(32 + sizeofcmds, len(data))
+    while off + 8 <= end:
+        cmd, cmdsize = struct.unpack_from("<II", data, off)
+        if cmdsize < 8 or off + cmdsize > len(data):
+            break
+        if cmd == _LC_SEGMENT_64 and cmdsize >= 56:
+            vmaddr, vmsize, fileoff, filesize = struct.unpack_from("<QQQQ", data, off + 24)
+            segments.append((vmaddr, vmsize, fileoff, filesize))
+        elif cmd == _LC_DYLD_CHAINED_FIXUPS and cmdsize >= 16:
+            dataoff, datasize = struct.unpack_from("<II", data, off + 8)
+            fixups = (dataoff, datasize)
+        off += cmdsize
+    return segments, fixups
+
+
+def _vmaddr_to_fileoff(segments, vmaddr):
+    for seg_vmaddr, vmsize, fileoff, _filesize in segments:
+        if seg_vmaddr <= vmaddr < seg_vmaddr + vmsize:
+            return fileoff + (vmaddr - seg_vmaddr)
+    return None
+
+
+def _chained_ptr_format_stride(pointer_format):
+    if pointer_format in (_DYLD_CHAINED_PTR_ARM64E, _DYLD_CHAINED_PTR_ARM64E_USERLAND,
+                           _DYLD_CHAINED_PTR_ARM64E_USERLAND24):
+        return 8
+    if pointer_format == _DYLD_CHAINED_PTR_64:
+        return 4
+    if pointer_format == 6:  # DYLD_CHAINED_PTR_64_OFFSET
+        return 4
+    return 0
+
+
+def _decode_chained_entry(raw, pointer_format):
+    """Returns (is_bind, next_delta, rebase_target_or_None). Bit positions
+    for is_bind/next are shared between bind and rebase encodings within a
+    format family; only rebase's target field is decoded (bind isn't
+    needed here -- selrefs point within the same image)."""
+    is_arm64e = pointer_format in (_DYLD_CHAINED_PTR_ARM64E,
+                                   _DYLD_CHAINED_PTR_ARM64E_USERLAND,
+                                   _DYLD_CHAINED_PTR_ARM64E_USERLAND24)
+    if is_arm64e:
+        is_auth = ((raw >> 63) & 1) != 0
+        is_bind = ((raw >> 62) & 1) != 0
+        next_delta = (raw >> 51) & 0x7FF
+        if is_bind:
+            return True, next_delta, None
+        target = (raw & 0xFFFFFFFF) if is_auth else (raw & 0x7FFFFFFFFFF)
+        return False, next_delta, target
+    is_bind = ((raw >> 63) & 1) != 0
+    next_delta = (raw >> 51) & 0xFFF
+    if is_bind:
+        return True, next_delta, None
+    target = raw & 0xFFFFFFFFF  # 36 bits
+    # DYLD_CHAINED_PTR_64 (format 2): target is an absolute vmaddr.
+    # DYLD_CHAINED_PTR_64_OFFSET (format 6): target is an offset from the
+    # image's own base. Caller distinguishes by pointer_format.
+    return False, next_delta, target
+
+
+def _chained_rebase_map(data, segments, fixups):
+    """Returns {slot_vmaddr: resolved_target_vmaddr} for every rebase chain
+    entry in the image. Mirrors walk_segment/walk_chain's page-start and
+    START_MULTI overflow handling in HKChainedFixups.c."""
+    if fixups is None or not segments:
+        return {}
+    dataoff, datasize = fixups
+    if dataoff + datasize > len(data) or datasize < 8:
+        return {}
+    blob = data[dataoff:dataoff + datasize]
+    fixups_version, starts_offset = struct.unpack_from("<II", blob, 0)
+    if fixups_version != 0 or starts_offset + 4 > len(blob):
+        return {}
+
+    image_base_vmaddr = min(seg[0] for seg in segments)
+    by_fileoff = {}
+
+    seg_count = struct.unpack_from("<I", blob, starts_offset)[0]
+    for i in range(seg_count):
+        entry_off = starts_offset + 4 + i * 4
+        if entry_off + 4 > len(blob):
+            break
+        seg_info_offset = struct.unpack_from("<I", blob, entry_off)[0]
+        if seg_info_offset == 0:
+            continue
+        seg_base = starts_offset + seg_info_offset
+        if seg_base + 22 > len(blob):
+            continue
+        page_size = struct.unpack_from("<H", blob, seg_base + 4)[0]
+        pointer_format = struct.unpack_from("<H", blob, seg_base + 6)[0]
+        segment_offset = struct.unpack_from("<Q", blob, seg_base + 8)[0]
+        page_count = struct.unpack_from("<H", blob, seg_base + 20)[0]
+        stride = _chained_ptr_format_stride(pointer_format)
+        if stride == 0 or page_size == 0:
+            continue
+        page_start_table = seg_base + 22
+
+        def walk_chain(image_offset, _pointer_format=pointer_format, _stride=stride):
+            while 0 <= image_offset and image_offset + 8 <= len(data):
+                raw = struct.unpack_from("<Q", data, image_offset)[0]
+                is_bind, next_delta, target = _decode_chained_entry(raw, _pointer_format)
+                if not is_bind and target is not None:
+                    target_vmaddr = target if _pointer_format == _DYLD_CHAINED_PTR_64 \
+                        else image_base_vmaddr + target
+                    by_fileoff[image_offset] = target_vmaddr
+                if next_delta == 0:
+                    return
+                image_offset += next_delta * _stride
+
+        for page in range(page_count):
+            start_off = page_start_table + page * 2
+            if start_off + 2 > len(blob):
+                break
+            start = struct.unpack_from("<H", blob, start_off)[0]
+            if start == _DYLD_CHAINED_PTR_START_NONE:
+                continue
+            page_base_vmaddr = image_base_vmaddr + segment_offset + page * page_size
+            page_base_fileoff = _vmaddr_to_fileoff(segments, page_base_vmaddr)
+            if page_base_fileoff is None:
+                continue
+            if (start & _DYLD_CHAINED_PTR_START_MULTI) != 0:
+                index = start & ~_DYLD_CHAINED_PTR_START_MULTI
+                while True:
+                    idx_off = page_start_table + index * 2
+                    if idx_off + 2 > len(blob):
+                        break
+                    entry = struct.unpack_from("<H", blob, idx_off)[0]
+                    walk_chain(page_base_fileoff + (entry & ~_DYLD_CHAINED_PTR_START_LAST))
+                    if (entry & _DYLD_CHAINED_PTR_START_LAST) != 0:
+                        break
+                    index += 1
+            else:
+                walk_chain(page_base_fileoff + start)
+
+    # Re-key by the slot's vmaddr -- what otool's "(0xADDR)" prints.
+    by_vmaddr = {}
+    for fileoff, target_vmaddr in by_fileoff.items():
+        for seg_vmaddr, _vmsize, seg_fileoff, filesize in segments:
+            if seg_fileoff <= fileoff < seg_fileoff + filesize:
+                by_vmaddr[seg_vmaddr + (fileoff - seg_fileoff)] = target_vmaddr
+                break
+    return by_vmaddr
+
+
+def _read_cstring(data, segments, vmaddr):
+    fileoff = _vmaddr_to_fileoff(segments, vmaddr)
+    if fileoff is None or fileoff >= len(data):
+        return None
+    end = data.find(b"\x00", fileoff)
+    if end < 0:
+        return None
+    try:
+        return data[fileoff:end].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _resolve_chained_selectors(parsed, lipo, binary, arch):
+    """Best-effort: fills in method["selector"] for entries otool's text
+    dump left unresolved, using a from-scratch chained-fixups decode of the
+    same binary. Never raises -- a decoding surprise on some future Mach-O
+    shape should leave selectors unresolved (today's behavior), not crash
+    the whole ABI extraction."""
+    pending = [
+        method
+        for item in parsed.values()
+        for key in ("instance_methods", "class_methods")
+        for method in item.get(key, [])
+        if method["selector"] is None and "_unresolved_vmaddr" in method
+    ]
+    if not pending:
+        return
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".thin") as thin:
+            result = subprocess.run([lipo, "-thin", arch, binary, "-output", thin.name],
+                                    capture_output=True)
+            if result.returncode != 0:
+                return
+            data = thin.read()
+        segments, fixups = _macho_segments_and_fixups(data)
+        rebase_map = _chained_rebase_map(data, segments, fixups)
+        for method in pending:
+            target = rebase_map.get(method["_unresolved_vmaddr"])
+            if target is None:
+                continue
+            name = _read_cstring(data, segments, target)
+            if name:
+                method["selector"] = name
+    except Exception:
+        # Best-effort: an unresolved selector today is the pre-existing
+        # behavior this is layered on top of. A decoding surprise on some
+        # future Mach-O shape should leave it unresolved too, not take down
+        # the whole ABI extraction over one class's method list.
+        return
+    finally:
+        for method in pending:
+            method.pop("_unresolved_vmaddr", None)
+
+
+def get_objc_metadata(otool, binary, archs, exported, lipo=None):
     exported_classes = {
         symbol[len("_OBJC_CLASS_$_"):]
         for symbols in exported.values()
@@ -256,10 +514,15 @@ def get_objc_metadata(otool, binary, archs, exported):
                               capture_output=True, text=True)
         if out.returncode != 0:
             continue
-        for name, item in _parse_objc_arch(out.stdout, arch, exported_classes).items():
+        parsed = _parse_objc_arch(out.stdout, arch, exported_classes)
+        if lipo:
+            _resolve_chained_selectors(parsed, lipo, binary, arch)
+        for name, item in parsed.items():
             current = merged.setdefault(name, {"name": name})
             for key in ("instance_methods", "class_methods"):
                 for method in item.get(key, []):
+                    if method["selector"] is None:
+                        continue  # still unresolved even after chained-fixups
                     methods = current.setdefault(key, [])
                     _merge_method(methods, method["selector"], arch,
                                   method.get("type_encoding", {}).get(arch))
@@ -425,7 +688,7 @@ def extract(binary, tag, header_paths, repo_root, enum_header_paths=None):
     if compat_version:
         baseline["compatibility_version"] = compat_version
     if otool:
-        objc = get_objc_metadata(otool, binary, archs, exported)
+        objc = get_objc_metadata(otool, binary, archs, exported, lipo)
         if objc:
             baseline["objc"] = {"classes": objc}
     enum_values = parse_enum_values(enum_header_paths or [])
