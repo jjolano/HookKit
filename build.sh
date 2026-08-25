@@ -195,6 +195,13 @@ check_legacy_abi() {
             p { print }
         ' | head -200
         echo "=== DIAG: end otool dump ==="
+        echo "=== DIAG: otool -ov -arch arm64e (__objc_selrefs section, first 40 lines) ==="
+        "$OTOOL_BIN" -ov -arch arm64e "$binary" 2>&1 | awk '
+            /^Contents of \(__DATA,__objc_selrefs\) section$/ { p=1; print; next }
+            p && /^Contents of / { exit }
+            p { print }
+        ' | head -40
+        echo "=== DIAG: end selrefs dump ==="
     fi
     if [ -n "$expected_install_name" ]; then
         bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
