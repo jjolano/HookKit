@@ -388,6 +388,14 @@ static hk_hook_spec_t exact_address_spec(const char *id) {
 static void test_exact_image_scope_requires_catalog(void) {
     hk_runtime_t *rt = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    // This proves the core requires a populated catalog, not that one
+    // happens to be absent: on a host build with a real dyld image list
+    // (e.g. these tests running on macOS), hk_runtime_create leaves a
+    // non-empty catalog behind. Force the empty case deliberately, the
+    // same way test_exact_image_scope_routes_with_catalog below forces
+    // the populated one.
+    hk_image_catalog_destroy(rt->catalog);
+    rt->catalog = NULL;
     assert(hk_runtime_register_engine_for_testing(rt, &fake_exact_address_engine));
 
     hk_plan_t *plan = NULL;
