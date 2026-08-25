@@ -529,6 +529,9 @@ static void *hk_platform_replace_method(void *ctx, void *cls, void *sel,
     return (void *)class_replaceMethod((Class)cls, (SEL)sel, (IMP)imp, types);
 }
 
+// Only called from the TARGET_OS_IOS-gated engines below -- narrower than
+// the objc helpers just above, which stay live on any __APPLE__ build.
+#if TARGET_OS_IOS
 static bool hk_platform_write_memory(void *ctx, uintptr_t address,
                                      const uint8_t *data, size_t size) {
     (void)ctx;
@@ -556,6 +559,7 @@ static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
     (void)ctx;
     hk_native_reloc_free(page, size);
 }
+#endif
 #endif
 
 static void hk_runtime_register_platform_engines(hk_runtime_t *runtime);
