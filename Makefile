@@ -303,7 +303,7 @@ test-swift-abi:
 
 .PHONY: test-swift-engine
 test-swift-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_swift_engine Tests/Host/test_swift_engine.c Sources/Engines/HKSwiftEngine.c native/hk_swift.c native/hk_native.c native/hk_arm64.c -ldl && $(THEOS_OBJ_DIR)/test_swift_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_swift_engine Tests/Host/test_swift_engine.c Sources/Engines/HKSwiftEngine.c native/hk_swift.c native/hk_native.c native/hk_arm64.c -ldl $(if $(filter Darwin,$(HOST_OS)),-lobjc) && $(THEOS_OBJ_DIR)/test_swift_engine$(ECHO_END)
 
 # HookKit 3.0 new-ABI header compile tests (spec section 21, Milestone 3):
 # the same Headers/HookKit/*.h compiled and run under all 4 language modes.
