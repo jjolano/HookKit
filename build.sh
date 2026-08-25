@@ -193,9 +193,12 @@ check_legacy_abi() {
     OBJDUMP_BIN=$(command -v llvm-objdump 2>/dev/null) || OBJDUMP_BIN=$(xcrun --find llvm-objdump 2>/dev/null) || true
     echo "=== DIAG: llvm-objdump binary: '${OBJDUMP_BIN:-<not found>}' ==="
     if [ -n "${OBJDUMP_BIN:-}" ]; then
+        echo "=== DIAG: llvm-objdump --help (objc/macho/arch lines) ==="
+        ("$OBJDUMP_BIN" --help 2>&1 | grep -i "objc\|macho\|arch") || true
+        echo "=== DIAG: end help ==="
         objdump_diag=$(mktemp)
         objdump_status=0
-        "$OBJDUMP_BIN" --macho --objc-meta-data -arch arm64e "$binary" >"$objdump_diag" 2>&1 || objdump_status=$?
+        "$OBJDUMP_BIN" --macho --objc-meta-data --arch=arm64e "$binary" >"$objdump_diag" 2>&1 || objdump_status=$?
         echo "=== DIAG: llvm-objdump exit status: $objdump_status ==="
         echo "=== DIAG: llvm-objdump output (HKSubstitutor block, or first 60 lines if not found) ==="
         (awk '
