@@ -98,6 +98,15 @@ legacy_make() {
     fi
 }
 
+# Remove a field line from a control file. grep instead of `sed -i`, whose
+# BSD form requires a backup-suffix argument (GNU accepts none) -- the
+# mismatch is what broke the macOS CI lanes.
+drop_field() {
+    local file=$1 field=$2
+    grep -v "^$field:" "$file" > "$file.tmp"
+    mv "$file.tmp" "$file"
+}
+
 write_control() {
     local profile=$1 package name floor arch ceiling conflicts replaces provides
     ceiling=
@@ -144,6 +153,10 @@ write_control() {
         *) echo "error: no control profile for $profile" >&2; return 1 ;;
     esac
 
+    # The shared template carries the legacy provider fields. Empty profile
+    # values mean the field must be absent, not silently inherited. Filtered
+    # via grep, not `sed -i`: BSD sed's -i demands a suffix argument and ate
+    # the script, breaking every macOS CI lane.
     sed -E \
         -e "s/^Package:.*/Package: $package/" \
         -e "s/^Name:.*/Name: $name/" \
@@ -155,17 +168,9 @@ write_control() {
         -e "s/^Version:.*/Version: 3.0.0-1/" \
         control > "build/control.$profile"
 
-    # The shared template carries the legacy provider fields. Empty profile
-    # values mean the field must be absent, not silently inherited.
-    if [ -z "$conflicts" ]; then
-        sed -i '/^Conflicts:/d' "build/control.$profile"
-    fi
-    if [ -z "$replaces" ]; then
-        sed -i '/^Replaces:/d' "build/control.$profile"
-    fi
-    if [ -z "$provides" ]; then
-        sed -i '/^Provides:/d' "build/control.$profile"
-    fi
+    if [ -z "$conflicts" ]; then drop_field "build/control.$profile" Conflicts; fi
+    if [ -z "$replaces" ]; then drop_field "build/control.$profile" Replaces; fi
+    if [ -z "$provides" ]; then drop_field "build/control.$profile" Provides; fi
 }
 
 check_legacy_abi() {
