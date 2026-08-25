@@ -182,6 +182,20 @@ check_legacy_abi() {
         echo "error: built HookKit framework binary not found" >&2
         return 1
     }
+    # TEMPORARY diagnostic, to be removed once the extract_abi.py false-positive
+    # on HKSubstitutor's class/instance methods is root-caused: dump what the
+    # real otool on this runner actually prints for the class, since it cannot
+    # be reproduced with a Linux cctools-port otool locally.
+    { command -v otool >/dev/null 2>&1 && OTOOL_BIN=otool; } || OTOOL_BIN=$(xcrun --find otool 2>/dev/null) || true
+    if [ -n "${OTOOL_BIN:-}" ]; then
+        echo "=== DIAG: otool -ov -arch arm64e (HKSubstitutor block) ==="
+        "$OTOOL_BIN" -ov -arch arm64e "$binary" 2>&1 | awk '
+            /_OBJC_CLASS_\$_HKSubstitutor$/ && !seen { p=1; seen=1; print; next }
+            p && /^[0-9a-fA-F]+[[:space:]]+0x[0-9a-fA-F]+[[:space:]]+_OBJC_CLASS_\$_/ { exit }
+            p { print }
+        ' | head -200
+        echo "=== DIAG: end otool dump ==="
+    fi
     if [ -n "$expected_install_name" ]; then
         bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
             --expected-install-name "$expected_install_name"
