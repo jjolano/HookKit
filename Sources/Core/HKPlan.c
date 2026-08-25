@@ -2406,6 +2406,14 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         if (!results) {
             return HK_STATUS_OUT_OF_MEMORY;
         }
+        // commit_order below only visits hooks that reached PREPARED --
+        // anything else (NO_ROUTE, FAILED_SAFE from an earlier stage, ...)
+        // is settled and never touched by that loop. Seed every slot from
+        // the hook's current result up front so those stay their honest
+        // pre-commit outcome instead of the malloc'd memory's leftovers.
+        for (size_t i = 0; i < plan->hook_count; i++) {
+            results[i] = plan->hooks[i]->result;
+        }
     }
 
     // The artifact ledger engines record into during this commit. Built now
