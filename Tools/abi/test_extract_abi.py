@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """Self-check for extract_abi.py. Run directly: python3 test_extract_abi.py"""
 
+import hashlib
+import os
 import re
 import struct
+import tempfile
 
 from extract_abi import (_chained_rebase_map, _complete_objc_arches,
                          _decode_chained_entry, _macho_segments_and_fixups,
                          _parse_objc_arch, _read_cstring,
                          _resolve_chained_selectors,
                          parse_enum_values, sha256_file)
-import hashlib
-import tempfile
-import os
 
-# Real otool -l output captured against the actual built HookKit binary
-# this session (roothide lane, before this test existed) -- not invented,
-# so the regex is proven against real tool output, not a guess at its shape.
+# Real otool -l output from a built roothide HookKit binary.
 REAL_OTOOL_SAMPLE = """Load command 4
           cmd LC_ID_DYLIB
       cmdsize 96
@@ -190,8 +188,7 @@ def test_chained_fixups_end_to_end_resolves_a_synthetic_selref():
     assert rebase_map == {image_base: string_vmaddr}
     assert _read_cstring(bytes(data), segments, string_vmaddr) == "hello"
 
-    # Apple lipo refuses to overwrite an existing output file. The resolver
-    # must therefore supply a fresh path rather than NamedTemporaryFile's.
+    # Apple lipo requires a fresh output path.
     with tempfile.TemporaryDirectory() as directory:
         binary = os.path.join(directory, "binary")
         lipo = os.path.join(directory, "lipo")

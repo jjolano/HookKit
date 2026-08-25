@@ -262,18 +262,9 @@ def _complete_objc_arches(merged, archs):
 
 # ---- chained-fixups selector resolution ----------------------------------
 #
-# otool -ov's relative-method-list "name" field can require chasing a
-# pointer through __objc_selrefs to the actual C string. On an arm64e slice
-# (this project's otool build, confirmed against real macOS CI logs) that
-# pointer is chained-fixups-encoded, and otool prints the slot's own vmaddr
-# ("name 0x.. (0xADDR)") without dereferencing it -- every method on the
-# class silently vanishes from the baseline instead of comparing correctly.
-#
-# The bit layout below mirrors decode_pointer()/format_stride() in
-# Sources/Resolvers/HKChainedFixups.c (validated there by test-chained-
-# fixups), extended to extract a REBASE entry's target field, which that
-# file doesn't need -- it only visits binds. Apple's format is documented
-# in mach-o/fixup-chains.h; nothing here is reverse-engineered.
+# Apple otool can leave an arm64e relative-method name as a chained selref
+# slot. Decode rebases from the thin Mach-O to recover the selector; an
+# unsupported layout retains the previous behavior of omitting it.
 
 _MH_MAGIC_64 = 0xFEEDFACF
 _LC_SEGMENT_64 = 0x19
@@ -294,7 +285,6 @@ def _macho_segments_and_fixups(data):
     for a single (thin) 64-bit Mach-O image."""
     if len(data) < 32 or struct.unpack_from("<I", data, 0)[0] != _MH_MAGIC_64:
         return [], None
-    ncmds = struct.unpack_from("<I", data, 16)[0]
     sizeofcmds = struct.unpack_from("<I", data, 20)[0]
     segments = []
     fixups = None
@@ -473,12 +463,12 @@ def _resolve_chained_selectors(parsed, lipo, binary, arch):
         return
     try:
         with tempfile.TemporaryDirectory() as directory:
-            thin = os.path.join(directory, f"{arch}.thin")
-            result = subprocess.run([lipo, "-thin", arch, binary, "-output", thin],
+            thin_path = os.path.join(directory, f"{arch}.thin")
+            result = subprocess.run([lipo, "-thin", arch, binary, "-output", thin_path],
                                     capture_output=True)
             if result.returncode != 0:
                 return
-            with open(thin, "rb") as stream:
+            with open(thin_path, "rb") as stream:
                 data = stream.read()
         segments, fixups = _macho_segments_and_fixups(data)
         rebase_map = _chained_rebase_map(data, segments, fixups)
@@ -490,10 +480,7 @@ def _resolve_chained_selectors(parsed, lipo, binary, arch):
             if name:
                 method["selector"] = name
     except Exception:
-        # Best-effort: an unresolved selector today is the pre-existing
-        # behavior this is layered on top of. A decoding surprise on some
-        # future Mach-O shape should leave it unresolved too, not take down
-        # the whole ABI extraction over one class's method list.
+        # Best effort: preserve the prior behavior of omitting unresolved selectors.
         return
     finally:
         for method in pending:
