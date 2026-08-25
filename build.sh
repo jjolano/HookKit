@@ -182,26 +182,25 @@ check_legacy_abi() {
         echo "error: built HookKit framework binary not found" >&2
         return 1
     }
-    # TEMPORARY diagnostic, to be removed once the extract_abi.py false-positive
-    # on HKSubstitutor's class/instance methods is root-caused: dump what the
-    # real otool on this runner actually prints for the class, since it cannot
-    # be reproduced with a Linux cctools-port otool locally.
-    { command -v otool >/dev/null 2>&1 && OTOOL_BIN=otool; } || OTOOL_BIN=$(xcrun --find otool 2>/dev/null) || true
-    if [ -n "${OTOOL_BIN:-}" ]; then
-        echo "=== DIAG: otool -ov -arch arm64e (HKSubstitutor block) ==="
-        "$OTOOL_BIN" -ov -arch arm64e "$binary" 2>&1 | awk '
-            /_OBJC_CLASS_\$_HKSubstitutor$/ && !seen { p=1; seen=1; print; next }
-            p && /^[0-9a-fA-F]+[[:space:]]+0x[0-9a-fA-F]+[[:space:]]+_OBJC_CLASS_\$_/ { exit }
-            p { print }
-        ' | head -200
-        echo "=== DIAG: end otool dump ==="
-        echo "=== DIAG: otool -ov -arch arm64e (__objc_selrefs section, first 40 lines) ==="
-        "$OTOOL_BIN" -ov -arch arm64e "$binary" 2>&1 | awk '
-            /^Contents of \(__DATA,__objc_selrefs\) section$/ { p=1; print; next }
-            p && /^Contents of / { exit }
-            p { print }
-        ' | head -40
-        echo "=== DIAG: end selrefs dump ==="
+    # TEMPORARY diagnostic, last round: otool -ov's per-class method-list "name"
+    # field can't resolve HKSubstitutor's selectors on this runner (confirmed:
+    # unresolved "0xHH (0xADDR)" pairs, no -[Class sel] on the imp line either),
+    # while "types" fields and the separate top-level __objc_selrefs dump DO
+    # resolve -- but in a different, non-directly-correlatable address space,
+    # so a same-tool fix needs real chained-fixup pointer decoding. Before
+    # committing to that: llvm-objdump is a different codebase, already in
+    # this project's own tool fallback chain elsewhere, and untested here.
+    OBJDUMP_BIN=$(command -v llvm-objdump 2>/dev/null) || OBJDUMP_BIN=$(xcrun --find llvm-objdump 2>/dev/null) || true
+    if [ -n "${OBJDUMP_BIN:-}" ]; then
+        echo "=== DIAG: llvm-objdump --macho --objc-meta-data -arch arm64e (HKSubstitutor block) ==="
+        "$OBJDUMP_BIN" --macho --objc-meta-data -arch arm64e "$binary" 2>&1 | awk '
+            /HKSubstitutor/ && !seen { p=1; seen=1 }
+            p { print; n++ }
+            p && n>200 { exit }
+        '
+        echo "=== DIAG: end llvm-objdump dump ==="
+    else
+        echo "=== DIAG: llvm-objdump not found on this runner ==="
     fi
     if [ -n "$expected_install_name" ]; then
         bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
