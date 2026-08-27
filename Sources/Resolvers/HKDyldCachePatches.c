@@ -3,6 +3,15 @@
 #include <limits.h>
 #include <string.h>
 
+#if defined(HK_CACHE_PATCH_DIAGNOSTICS)
+#include <stdio.h>
+static hk_cache_patch_status_t malformed_at(unsigned line) {
+    fprintf(stderr, "cache patch malformed at line %u\n", line);
+    return (hk_cache_patch_status_t)5;
+}
+#define HK_CACHE_PATCH_MALFORMED malformed_at(__LINE__)
+#endif
+
 #include "HKMachO.h"
 #include "HKSymbolResolve.h"
 
