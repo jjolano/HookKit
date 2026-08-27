@@ -197,9 +197,13 @@ int main(void) {
         build_cache(cache, version);
         hk_cache_patch_target_t target = target_for(cache, true);
         collected_t result = {0};
-        assert(hk_dyld_cache_iterate_symbol_uses(
-                   &target, "foo", HK_SYMBOL_NAME_C, collect, &result) ==
-               HK_CACHE_PATCH_OK);
+        hk_cache_patch_status_t status = hk_dyld_cache_iterate_symbol_uses(
+            &target, "foo", HK_SYMBOL_NAME_C, collect, &result);
+        if (status != HK_CACHE_PATCH_OK) {
+            fprintf(stderr, "cache patch v%u failed with status %d\n",
+                    version, status);
+        }
+        assert(status == HK_CACHE_PATCH_OK);
         size_t expected = version >= 3 ? 3 : 2;
         assert(result.count == expected);
         assert(result.sites[0].address == (uintptr_t)cache + SLOT0_OFF);

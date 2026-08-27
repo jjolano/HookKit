@@ -23,7 +23,7 @@ jobs:
           test "$(uname -m)" = arm64
           xcrun clang \
             -Wall -Wextra -Werror -std=c11 -O2 \
-            -arch arm64 -fptrauth-calls \
+            -arch arm64e \
             -DHK_EXPECT_NATIVE_PTRAUTH=1 \
             -o "$RUNNER_TEMP/test_pointer_auth" \
             Tests/Host/test_pointer_auth.c Sources/Core/HKOwnership.c \
