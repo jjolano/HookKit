@@ -3,15 +3,6 @@
 #include <limits.h>
 #include <string.h>
 
-#if defined(HK_CACHE_PATCH_DIAGNOSTICS)
-#include <stdio.h>
-static hk_cache_patch_status_t malformed_at(unsigned line) {
-    fprintf(stderr, "cache patch malformed at line %u\n", line);
-    return (hk_cache_patch_status_t)5;
-}
-#define HK_CACHE_PATCH_MALFORMED malformed_at(__LINE__)
-#endif
-
 #include "HKMachO.h"
 #include "HKSymbolResolve.h"
 
@@ -75,7 +66,6 @@ typedef struct {
     const uint8_t *base;
     size_t size;
     uint64_t unslid_base;
-    uintptr_t slide;
     const uint8_t *patch;
     size_t patch_size;
 } cache_view_t;
@@ -160,11 +150,16 @@ static bool writable_segment_contains(void *opaque, uint32_t index,
     (void)index;
     segment_contains_ctx_t *ctx = opaque;
     if (!(segment->initprot & 2u) || segment->vmsize == 0 ||
-        segment->vmaddr > UINTPTR_MAX - ctx->slide ||
-        segment->vmsize > UINTPTR_MAX - (segment->vmaddr + ctx->slide)) {
+        segment->vmsize > UINTPTR_MAX) {
         return true;
     }
+    // A dyld slide is signed conceptually, but HookKit's existing ABI stores
+    // it modulo uintptr_t. Unsigned addition performs the required translation
+    // for both positive and negative slides.
     uintptr_t start = (uintptr_t)segment->vmaddr + ctx->slide;
+    if ((uintptr_t)segment->vmsize > UINTPTR_MAX - start) {
+        return true;
+    }
     uintptr_t end = start + (uintptr_t)segment->vmsize;
     if (ctx->address >= start && ctx->address < end) {
         ctx->found = true;
@@ -478,7 +473,8 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
     }
     const uint8_t *base = target->cache_base;
     uintptr_t cache_start = (uintptr_t)base;
-    if ((uintptr_t)target->image_header < cache_start ||
+    if (target->cache_size > UINTPTR_MAX - cache_start ||
+        (uintptr_t)target->image_header < cache_start ||
         (uintptr_t)target->image_header - cache_start >= target->cache_size) {
         return HK_CACHE_PATCH_NOT_CACHE;
     }
@@ -491,9 +487,6 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
         return HK_CACHE_PATCH_MALFORMED;
     }
     uint64_t unslid_base = read_u64(mappings);
-    if (cache_start < unslid_base) {
-        return HK_CACHE_PATCH_MALFORMED;
-    }
     uintptr_t slide = cache_start - (uintptr_t)unslid_base;
     if (target->image_slide != slide) {
         return HK_CACHE_PATCH_MALFORMED;
@@ -517,8 +510,10 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
     for (uint32_t i = 0; i < images_count; i++) {
         const uint8_t *image = images + (size_t)i * DCH_IMAGE_INFO_SIZE;
         uint64_t address = read_u64(image);
-        if (address > UINTPTR_MAX - slide ||
-            (uintptr_t)address + slide != (uintptr_t)target->image_header) {
+        if (address < unslid_base ||
+            address - unslid_base >= target->cache_size ||
+            cache_start + (uintptr_t)(address - unslid_base) !=
+                (uintptr_t)target->image_header) {
             continue;
         }
         const char *path = bounded_string(base, target->cache_size,
@@ -580,7 +575,6 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
         .base = base,
         .size = target->cache_size,
         .unslid_base = unslid_base,
-        .slide = slide,
         .patch = base + (size_t)(patch_addr - unslid_base),
         .patch_size = (size_t)patch_size,
     };

@@ -279,7 +279,7 @@ test-pointer-auth:
 
 .PHONY: test-cache-patches
 test-cache-patches:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_CACHE_PATCH_DIAGNOSTICS=1 -o $(THEOS_OBJ_DIR)/test_cache_patches Tests/Host/test_cache_patches.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_cache_patches Tests/Host/test_cache_patches.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
 
 .PHONY: test-abi
 test-abi:

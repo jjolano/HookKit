@@ -7,7 +7,9 @@
 #include "../../Sources/Resolvers/HKMachO.h"
 
 #define CACHE_SIZE 0x3000u
-#define UNSLID UINT64_C(0x180000000)
+// Deliberately above ordinary host heap addresses: dyld slides are signed,
+// so this forces the negative-slide translation path on every CI host.
+#define UNSLID UINT64_C(0x0000700000000000)
 #define IMPORTER_OFF 0x800u
 #define SLOT0_OFF 0xA00u
 #define SLOT1_OFF 0xA08u
