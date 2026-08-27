@@ -161,7 +161,7 @@ test-rebind-engine:
 
 .PHONY: test-rebind-pac
 test-rebind-pac:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac Tests/Host/test_rebind_pac.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac Tests/Host/test_rebind_pac.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL memory-patch
 # engine through its runtime adapter (Milestone 6). Real analyze/prepare/commit,
