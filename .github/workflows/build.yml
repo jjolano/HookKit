@@ -70,6 +70,12 @@ jobs:
             native/hk_arm64.c native/hk_native.c native/hk_symbols.c
           "$out" "$targets"
 
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: hookkit-live-${{ matrix.arch }}
+          path: ${{ runner.temp }}/hookkit-live-${{ matrix.arch }}
+
   legacy:
     name: rootful-legacy
     runs-on: ubuntu-24.04
