@@ -4,8 +4,13 @@
 #include "HKRebindEngine.h"
 
 #include <string.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../Resolvers/HKChainedFixups.h"
+#include "../Resolvers/HKDyldCachePatches.h"
 #include "../Resolvers/HKMachO.h"
 #include "../Resolvers/HKSymbolResolve.h"
 
@@ -17,22 +22,79 @@ uint64_t hk_rebind_read_slot(uintptr_t address) {
 
 // ---- phase 1: prepare (mutates nothing) ---------------------------------
 
+typedef enum {
+    ADD_SITE_OK,
+    ADD_SITE_OVERFLOW,
+    ADD_SITE_MALFORMED,
+    ADD_SITE_PAC_MISMATCH,
+} add_site_status_t;
+
 typedef struct {
     const hk_symbol_candidates_t *candidates;
     uintptr_t slide;
     hk_rebind_plan_t *plan;
-    bool overflow;
+    add_site_status_t error;
 } collect_ctx_t;
 
-static bool add_site(hk_rebind_plan_t *plan, uintptr_t address, bool from_chained) {
+static bool checked_adjust(uintptr_t value, int64_t addend, bool add,
+                           uintptr_t *out) {
+    uint64_t magnitude = addend < 0
+        ? (uint64_t)(-(addend + 1)) + 1
+        : (uint64_t)addend;
+    bool increase = (addend >= 0) == add;
+    if (increase) {
+        if (magnitude > (uint64_t)UINTPTR_MAX - value) return false;
+        *out = value + (uintptr_t)magnitude;
+    } else {
+        if (magnitude > value) return false;
+        *out = value - (uintptr_t)magnitude;
+    }
+    return true;
+}
+
+static add_site_status_t add_site(hk_rebind_plan_t *plan, uintptr_t address,
+                                  const hk_pac_schema_t *schema, int64_t addend,
+                                  bool weak_import, bool from_chained,
+                                  bool from_cache) {
+    for (uint32_t i = 0; i < plan->count; i++) {
+        hk_rebind_site_t *existing = &plan->sites[i];
+        if (existing->address != address) {
+            continue;
+        }
+        return existing->schema.authenticated == schema->authenticated &&
+                       existing->schema.key == schema->key &&
+                       existing->schema.diversity == schema->diversity &&
+                       existing->schema.address_diversity == schema->address_diversity &&
+                       existing->addend == addend
+            ? ADD_SITE_OK : ADD_SITE_MALFORMED;
+    }
     if (plan->count >= HK_REBIND_MAX_SITES) {
-        return false;
+        return ADD_SITE_OVERFLOW;
+    }
+    uint64_t old = hk_rebind_read_slot(address);
+    if (old == 0) {
+        if (!weak_import || addend != 0) {
+            return ADD_SITE_MALFORMED;
+        }
+    } else if (!hk_pac_slot_matches((uintptr_t)old, schema, address)) {
+        return ADD_SITE_PAC_MISMATCH;
+    }
+    uintptr_t base = 0;
+    if (!checked_adjust(old == 0 ? 0 : hk_pac_strip_slot((uintptr_t)old, schema), addend,
+                        false, &base)) {
+        return ADD_SITE_MALFORMED;
     }
     hk_rebind_site_t *s = &plan->sites[plan->count++];
+    memset(s, 0, sizeof(*s));
     s->address = address;
-    s->original = hk_rebind_read_slot(address);
+    s->original = old;
+    s->callable_original = hk_pac_make_callable(base);
+    s->addend = addend;
+    s->schema = *schema;
+    s->weak_import = weak_import;
     s->from_chained = from_chained;
-    return true;
+    s->from_cache = from_cache;
+    return ADD_SITE_OK;
 }
 
 // LC_DYSYMTAB path: slot_vmaddr is an UNSLID VM address, so the slide applies.
@@ -40,8 +102,18 @@ static bool dysymtab_slot_cb(void *ctx, const hk_import_slot_t *slot) {
     collect_ctx_t *c = (collect_ctx_t *)ctx;
     for (unsigned i = 0; i < c->candidates->count; i++) {
         if (strcmp(slot->symbol_name, c->candidates->names[i]) == 0) {
-            if (!add_site(c->plan, (uintptr_t)slot->slot_vmaddr + c->slide, false)) {
-                c->overflow = true;
+            hk_pac_schema_t schema;
+            memset(&schema, 0, sizeof(schema));
+            if (strcmp(slot->sectname, "__auth_got") == 0) {
+                schema.authenticated = true;
+                schema.key = HK_PAC_KEY_IA;
+                schema.address_diversity = true;
+            }
+            add_site_status_t status = add_site(
+                c->plan, (uintptr_t)slot->slot_vmaddr + c->slide,
+                &schema, 0, false, false, false);
+            if (status != ADD_SITE_OK) {
+                c->error = status;
                 return false;
             }
             break;
@@ -54,9 +126,11 @@ typedef struct {
     const hk_chained_fixups_t *fixups;
     const hk_symbol_candidates_t *candidates;
     uintptr_t image_base;
+    size_t image_size;
     hk_rebind_plan_t *plan;
     bool overflow;
     bool malformed;
+    bool pac_mismatch;
 } chained_ctx_t;
 
 // Chained-fixups path: slot_image_offset is an offset FROM THE IMAGE BASE, a
@@ -71,14 +145,237 @@ static bool chained_bind_cb(void *ctx, const hk_chained_bind_t *bind) {
     }
     for (unsigned i = 0; i < c->candidates->count; i++) {
         if (strcmp(import.symbol_name, c->candidates->names[i]) == 0) {
-            if (!add_site(c->plan, c->image_base + (uintptr_t)bind->slot_image_offset, true)) {
-                c->overflow = true;
+            if (bind->slot_image_offset > c->image_size ||
+                sizeof(uint64_t) > c->image_size - bind->slot_image_offset) {
+                c->malformed = true;
                 return false;
             }
+            if ((bind->addend > 0 && import.addend > INT64_MAX - bind->addend) ||
+                (bind->addend < 0 && import.addend < INT64_MIN - bind->addend)) {
+                c->malformed = true;
+                return false;
+            }
+            int64_t combined = import.addend + bind->addend;
+            hk_pac_schema_t schema = {
+                .authenticated = bind->is_auth,
+                .key = (hk_pac_key_t)bind->key,
+                .diversity = bind->diversity,
+                .address_diversity = bind->address_diversity,
+            };
+            add_site_status_t status = add_site(
+                c->plan, c->image_base + (uintptr_t)bind->slot_image_offset,
+                &schema, combined, import.weak_import, true, false);
+            if (status == ADD_SITE_OVERFLOW) c->overflow = true;
+            if (status == ADD_SITE_MALFORMED) c->malformed = true;
+            if (status == ADD_SITE_PAC_MISMATCH) c->pac_mismatch = true;
+            if (status != ADD_SITE_OK) return false;
             break;
         }
     }
     return true;
+}
+
+typedef struct {
+    hk_rebind_plan_t *plan;
+    bool overflow;
+    bool malformed;
+    bool pac_mismatch;
+} cache_collect_ctx_t;
+
+static bool cache_patch_cb(void *opaque, const hk_cache_patch_site_t *site) {
+    cache_collect_ctx_t *ctx = opaque;
+    add_site_status_t status = add_site(
+        ctx->plan, site->address, &site->schema, site->addend,
+        site->weak_import, false, true);
+    if (status == ADD_SITE_OVERFLOW) ctx->overflow = true;
+    if (status == ADD_SITE_MALFORMED) ctx->malformed = true;
+    if (status == ADD_SITE_PAC_MISMATCH) ctx->pac_mismatch = true;
+    return status == ADD_SITE_OK;
+}
+
+typedef struct {
+    const uint8_t *base;
+    size_t size;
+    bool mapped;
+} file_view_t;
+
+static bool open_file_view(const hk_rebind_target_t *target, file_view_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (target->file_image && target->file_image_size) {
+        out->base = target->file_image;
+        out->size = target->file_image_size;
+        return true;
+    }
+    if (!target->image_path) {
+        return false;
+    }
+    int fd = open(target->image_path, O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size <= 0 ||
+        (uint64_t)st.st_size > SIZE_MAX) {
+        close(fd);
+        return false;
+    }
+    void *map = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (map == MAP_FAILED) {
+        return false;
+    }
+    out->base = map;
+    out->size = (size_t)st.st_size;
+    out->mapped = true;
+    return true;
+}
+
+static void close_file_view(file_view_t *view) {
+    if (view->mapped) {
+        munmap((void *)view->base, view->size);
+    }
+}
+
+#define HK_REBIND_MAX_SEGMENTS 64u
+typedef struct {
+    hk_macho_segment_t segments[HK_REBIND_MAX_SEGMENTS];
+    uint32_t count;
+    bool overflow;
+} segment_collect_t;
+
+static bool collect_segment(void *opaque, uint32_t index,
+                            const hk_macho_segment_t *segment) {
+    segment_collect_t *ctx = opaque;
+    if (index >= HK_REBIND_MAX_SEGMENTS) {
+        ctx->overflow = true;
+        return false;
+    }
+    ctx->segments[index] = *segment;
+    ctx->count = index + 1;
+    return true;
+}
+
+static hk_rebind_status_t prepare_file_chains(
+    const hk_rebind_target_t *target, const hk_symbol_candidates_t *candidates,
+    const hk_macho_header_t *loaded_header, hk_rebind_plan_t *plan) {
+    file_view_t file;
+    if (!open_file_view(target, &file)) {
+        return HK_REBIND_METADATA_UNAVAILABLE;
+    }
+    const void *slice = NULL;
+    size_t slice_size = 0;
+    hk_macho_status_t macho = hk_macho_select_slice(
+        file.base, file.size, loaded_header->cputype, loaded_header->cpusubtype,
+        &slice, &slice_size);
+    if (macho != HK_MACHO_OK) {
+        close_file_view(&file);
+        return macho == HK_MACHO_NOT_FOUND ? HK_REBIND_UNSUPPORTED_FORMAT
+                                            : HK_REBIND_MALFORMED_IMAGE;
+    }
+    uint8_t live_uuid[16], file_uuid[16];
+    size_t live_size = HK_MACHO_HEADER_64_SIZE + loaded_header->sizeofcmds;
+    if (hk_macho_copy_uuid(target->image_base, live_size, live_uuid) != HK_MACHO_OK ||
+        hk_macho_copy_uuid(slice, slice_size, file_uuid) != HK_MACHO_OK ||
+        memcmp(live_uuid, file_uuid, sizeof(live_uuid)) != 0) {
+        close_file_view(&file);
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+    size_t fixup_offset = 0, fixup_size = 0;
+    if (hk_macho_find_chained_fixups(slice, slice_size, &fixup_offset,
+                                     &fixup_size) != HK_MACHO_OK) {
+        close_file_view(&file);
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+    hk_chained_fixups_t fixups;
+    hk_chained_status_t chained = hk_chained_fixups_parse(
+        (const uint8_t *)slice + fixup_offset, fixup_size, &fixups);
+    if (chained != HK_CHAINED_OK) {
+        close_file_view(&file);
+        return chained == HK_CHAINED_UNSUPPORTED_FORMAT ||
+                       chained == HK_CHAINED_UNSUPPORTED_VERSION
+            ? HK_REBIND_UNSUPPORTED_FORMAT : HK_REBIND_MALFORMED_IMAGE;
+    }
+    segment_collect_t collected;
+    memset(&collected, 0, sizeof(collected));
+    if (hk_macho_iterate_segments(slice, slice_size, collect_segment,
+                                  &collected) != HK_MACHO_OK ||
+        collected.overflow || collected.count == 0) {
+        close_file_view(&file);
+        return collected.overflow ? HK_REBIND_UNSUPPORTED_FORMAT
+                                  : HK_REBIND_MALFORMED_IMAGE;
+    }
+    uint64_t preferred = UINT64_MAX;
+    for (uint32_t i = 0; i < collected.count; i++) {
+        hk_macho_segment_t *segment = &collected.segments[i];
+        if (strcmp(segment->segname, "__PAGEZERO") != 0 &&
+            segment->vmaddr < preferred) {
+            preferred = segment->vmaddr;
+        }
+    }
+    if (preferred == UINT64_MAX) {
+        close_file_view(&file);
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+    hk_chained_segment_mapping_t mappings[HK_REBIND_MAX_SEGMENTS];
+    for (uint32_t i = 0; i < collected.count; i++) {
+        hk_macho_segment_t *segment = &collected.segments[i];
+        if (segment->vmaddr < preferred || segment->fileoff > slice_size ||
+            segment->filesize > slice_size - segment->fileoff) {
+            close_file_view(&file);
+            return HK_REBIND_MALFORMED_IMAGE;
+        }
+        mappings[i].image_offset = segment->vmaddr - preferred;
+        mappings[i].file_offset = segment->fileoff;
+        mappings[i].file_size = segment->filesize;
+    }
+    chained_ctx_t ctx = {
+        .fixups = &fixups,
+        .candidates = candidates,
+        .image_base = (uintptr_t)target->image_base,
+        .image_size = target->image_size,
+        .plan = plan,
+    };
+    chained = hk_chained_fixups_iterate_file_binds(
+        &fixups, slice, slice_size, mappings, collected.count,
+        chained_bind_cb, &ctx);
+    close_file_view(&file);
+    if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
+    if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
+    if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
+        return HK_REBIND_MALFORMED_IMAGE;
+    if (chained != HK_CHAINED_OK) return HK_REBIND_UNSUPPORTED_FORMAT;
+    return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
+}
+
+static hk_rebind_status_t finalize_plan(hk_rebind_plan_t *plan) {
+    if (plan->count == 0) {
+        return HK_REBIND_NOT_FOUND;
+    }
+    plan->original = plan->sites[0].callable_original;
+    plan->originals_agree = true;
+    for (uint32_t i = 1; i < plan->count; i++) {
+        if (plan->sites[i].callable_original != plan->original) {
+            plan->originals_agree = false;
+            break;
+        }
+    }
+    return HK_REBIND_OK;
+}
+
+#if defined(__APPLE__)
+extern const void *_dyld_get_shared_cache_range(size_t *length)
+    __attribute__((weak_import));
+#endif
+
+static void live_cache_range(const hk_rebind_target_t *target,
+                             const void **out_base, size_t *out_size) {
+    *out_base = target->cache_base;
+    *out_size = target->cache_size;
+#if defined(__APPLE__)
+    if (!*out_base && _dyld_get_shared_cache_range) {
+        *out_base = _dyld_get_shared_cache_range(out_size);
+    }
+#endif
 }
 
 hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
@@ -100,58 +397,122 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
     const void *image = target->image_base;
     size_t size = target->image_size;
 
-    // Mechanism 1: LC_DYSYMTAB indirect symbols.
-    hk_import_tables_t tables;
-    if (hk_import_tables_from_loaded_image(image, size, target->slide, &tables) == HK_IMPORT_OK &&
-        tables.indirect_symbols) {
-        collect_ctx_t c = { &candidates, target->slide, out_plan, false };
-        hk_import_status_t st = hk_import_slots_iterate(image, size, &tables, dysymtab_slot_cb, &c);
-        if (c.overflow) {
-            return HK_REBIND_TOO_MANY_SITES;
-        }
-        if (st != HK_IMPORT_OK) {
+    hk_macho_header_t loaded_header;
+    if (hk_macho_peek_header(image, HK_MACHO_HEADER_64_SIZE,
+                             &loaded_header) != HK_MACHO_OK ||
+        (size_t)loaded_header.sizeofcmds > SIZE_MAX - HK_MACHO_HEADER_64_SIZE) {
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+    const size_t header_size = HK_MACHO_HEADER_64_SIZE + loaded_header.sizeofcmds;
+    if (size < header_size) {
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+
+    // Cached images no longer carry their input bind chains. The live cache
+    // patch table is dyld's authoritative symbol-to-use map.
+    const void *cache_base = NULL;
+    size_t cache_size = 0;
+    live_cache_range(target, &cache_base, &cache_size);
+    if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
+        (uintptr_t)image - (uintptr_t)cache_base < cache_size) {
+        hk_cache_patch_target_t cache_target;
+        memset(&cache_target, 0, sizeof(cache_target));
+        cache_target.cache_base = cache_base;
+        cache_target.cache_size = cache_size;
+        cache_target.image_header = image;
+        cache_target.image_header_size = header_size;
+        cache_target.image_slide = target->slide;
+        cache_target.image_path = target->image_path;
+        cache_target.uuid_present = target->uuid_present;
+        memcpy(cache_target.uuid, target->uuid, sizeof(cache_target.uuid));
+        cache_target.include_shared_got = target->include_shared_cache_got;
+        cache_collect_ctx_t collect = { .plan = out_plan };
+        hk_cache_patch_status_t status = hk_dyld_cache_iterate_symbol_uses(
+            &cache_target, symbol_name, convention, cache_patch_cb, &collect);
+        if (collect.overflow) return HK_REBIND_TOO_MANY_SITES;
+        if (collect.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
+        if (collect.malformed) return HK_REBIND_MALFORMED_IMAGE;
+        switch (status) {
+        case HK_CACHE_PATCH_OK:
+            return finalize_plan(out_plan);
+        case HK_CACHE_PATCH_NOT_FOUND:
+            return HK_REBIND_NOT_FOUND;
+        case HK_CACHE_PATCH_SCOPE_UNREPRESENTABLE:
+            return HK_REBIND_SCOPE_UNREPRESENTABLE;
+        case HK_CACHE_PATCH_UNSUPPORTED:
+            return HK_REBIND_UNSUPPORTED_FORMAT;
+        case HK_CACHE_PATCH_NO_METADATA:
+            break; // genuine legacy cache: try LC_DYSYMTAB below
+        case HK_CACHE_PATCH_NOT_CACHE:
+        case HK_CACHE_PATCH_INVALID_ARGUMENT:
+        case HK_CACHE_PATCH_MALFORMED:
+        default:
             return HK_REBIND_MALFORMED_IMAGE;
         }
     }
 
-    // Mechanism 2: chained fixups. An image uses one or the other; consulting
-    // both means the caller never has to know which era it came from.
-    const void *blob = NULL;
-    size_t blob_size = 0;
-    if (hk_macho_chained_fixups_for_loaded_image(image, size, target->slide, &blob, &blob_size)
-        == HK_MACHO_OK) {
-        hk_chained_fixups_t fixups;
-        if (hk_chained_fixups_parse(blob, blob_size, &fixups) == HK_CHAINED_OK) {
-            chained_ctx_t c = { &fixups, &candidates, (uintptr_t)image, out_plan, false, false };
-            hk_chained_status_t st =
-                hk_chained_fixups_iterate_binds(&fixups, image, size, chained_bind_cb, &c);
-            if (c.overflow) {
-                return HK_REBIND_TOO_MANY_SITES;
-            }
-            if (c.malformed || st != HK_CHAINED_OK) {
-                return HK_REBIND_MALFORMED_IMAGE;
-            }
+    // A chained-fixup command is authoritative. Walk the original file words,
+    // never the live slots dyld has already resolved and PAC-signed.
+    size_t chained_command = 0;
+    uint32_t chained_command_size = 0;
+    hk_macho_status_t chain_command_status = hk_macho_find_load_command(
+        image, header_size, HK_LC_DYLD_CHAINED_FIXUPS,
+        &chained_command, &chained_command_size);
+    if (chain_command_status == HK_MACHO_OK) {
+        (void)chained_command;
+        if (chained_command_size < HK_LINKEDIT_DATA_CMD_SIZE) {
+            return HK_REBIND_MALFORMED_IMAGE;
         }
+        hk_rebind_status_t status = prepare_file_chains(
+            target, &candidates, &loaded_header, out_plan);
+        return status == HK_REBIND_OK ? finalize_plan(out_plan) : status;
+    }
+    if (chain_command_status != HK_MACHO_NOT_FOUND) {
+        return HK_REBIND_MALFORMED_IMAGE;
     }
 
-    if (out_plan->count == 0) {
+    // Legacy image: LC_DYSYMTAB is authoritative.
+    hk_import_tables_t tables;
+    hk_import_status_t import_status = hk_import_tables_from_loaded_image(
+        image, header_size, target->slide, &tables);
+    if (import_status != HK_IMPORT_OK) {
+        return HK_REBIND_MALFORMED_IMAGE;
+    }
+    if (!tables.indirect_symbols) {
         return HK_REBIND_NOT_FOUND;
     }
-
-    // Do the sites agree on what the original is? Normally yes; if not, the
-    // caller is told rather than handed an arbitrary one.
-    out_plan->original = out_plan->sites[0].original;
-    out_plan->originals_agree = true;
-    for (uint32_t i = 1; i < out_plan->count; i++) {
-        if (out_plan->sites[i].original != out_plan->original) {
-            out_plan->originals_agree = false;
-            break;
-        }
+    collect_ctx_t collect = {
+        .candidates = &candidates,
+        .slide = target->slide,
+        .plan = out_plan,
+        .error = ADD_SITE_OK,
+    };
+    import_status = hk_import_slots_iterate(
+        image, header_size, &tables, dysymtab_slot_cb, &collect);
+    if (collect.error == ADD_SITE_OVERFLOW) return HK_REBIND_TOO_MANY_SITES;
+    if (collect.error == ADD_SITE_PAC_MISMATCH) return HK_REBIND_PAC_MISMATCH;
+    if (collect.error == ADD_SITE_MALFORMED || import_status != HK_IMPORT_OK) {
+        return HK_REBIND_MALFORMED_IMAGE;
     }
-    return HK_REBIND_OK;
+    return finalize_plan(out_plan);
 }
 
 // ---- phase 2: commit ----------------------------------------------------
+
+bool hk_rebind_replacement_for_site(const hk_rebind_site_t *site,
+                                    uint64_t replacement,
+                                    uint64_t *out_value) {
+    if (!site || !out_value) {
+        return false;
+    }
+    uintptr_t adjusted = 0;
+    if (!checked_adjust(hk_pac_strip_code((uintptr_t)replacement),
+                        site->addend, true, &adjusted)) {
+        return false;
+    }
+    *out_value = hk_pac_sign_slot(adjusted, &site->schema, site->address);
+    return true;
+}
 
 static void record_artifact(hk_artifact_sink_t *sink, const hk_rebind_site_t *site,
                             uint64_t replacement) {
@@ -190,11 +551,19 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
         return HK_MUTATION_NONE;  // nothing attempted, nothing touched
     }
 
+    uint64_t replacements[HK_REBIND_MAX_SITES];
+    for (uint32_t i = 0; i < plan->count; i++) {
+        if (!hk_rebind_replacement_for_site(&plan->sites[i], replacement,
+                                            &replacements[i])) {
+            return HK_MUTATION_NONE;
+        }
+    }
+
     if (sink && sink->require_predecessor_match) {
         const uint64_t predecessor =
             (uint64_t)(uintptr_t)sink->required_predecessor;
         for (uint32_t i = 0; i < plan->count; i++) {
-            if (plan->sites[i].original != predecessor) {
+            if (plan->sites[i].callable_original != predecessor) {
                 return HK_MUTATION_NONE;
             }
         }
@@ -203,6 +572,7 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
     uint32_t written = 0;
     for (uint32_t i = 0; i < plan->count; i++) {
         const hk_rebind_site_t *site = &plan->sites[i];
+        uint64_t site_replacement = replacements[i];
 
         // Invariant #3: revalidate immediately before the write. If the slot
         // no longer holds what prepare saw, something else changed it since --
@@ -215,14 +585,14 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
             return (written == 0) ? HK_MUTATION_NONE : HK_MUTATION_PARTIAL;
         }
 
-        if (!target->write(target->write_ctx, site->address, replacement)) {
+        if (!target->write(target->write_ctx, site->address, site_replacement)) {
             if (out_written) { *out_written = written; }
             // Invariant #4: after a partial mutation no fallback may be
             // attempted, so this must be reported as PARTIAL, never as a
             // clean failure the router could retry elsewhere.
             return (written == 0) ? HK_MUTATION_NONE : HK_MUTATION_PARTIAL;
         }
-        record_artifact(sink, site, replacement);
+        record_artifact(sink, site, site_replacement);
         written++;
     }
 

@@ -15,9 +15,9 @@
 // is gone: several runtimes can now drive this engine against different
 // images concurrently, and there is no fixed stash to overflow.
 //
-// On device the context is not a test fixture: image_base/size/slide come
-// from the live image catalog, and the writer is the VM-protection-changing,
-// arm64e-re-signing store -- all device-only.
+// On device the context is not a test fixture: image metadata comes from the
+// live catalog, and the writer stores the engine's already per-site-signed
+// value while preserving the slot page's protection.
 
 #ifndef HK_ENGINES_REBIND_VTABLE_H
 #define HK_ENGINES_REBIND_VTABLE_H
@@ -43,6 +43,7 @@ typedef struct {
     const void *image_base;
     size_t image_size;
     uintptr_t slide;
+    const char *image_path;
     hk_rebind_write_fn write;
     void *write_ctx;
     // Optional. When present, the target's caller_image_scope is enforced

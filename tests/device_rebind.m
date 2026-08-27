@@ -57,6 +57,7 @@ int main(void) {
     target.image_base = header;
     target.image_size = end - (uintptr_t)header;
     target.slide = (uintptr_t)slide;
+    target.image_path = _dyld_get_image_name(image_index);
     target.write = write_pointer;
 
     hk_rebind_plan_t plan;

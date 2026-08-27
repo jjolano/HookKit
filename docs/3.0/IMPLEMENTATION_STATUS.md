@@ -1751,10 +1751,10 @@ failure mode requires:
 `starts_in_segment` field offsets and every pointer-format and sentinel
 constant against Apple's vendored definitions.
 
-**Stated limitation:** traversal uses the **loaded** layout — a segment's
-`segment_offset` is an offset from the image base. A file-on-disk image would
-need its VM offsets translated to file offsets first; that is not done rather
-than guessed at.
+**Historical limitation, closed 2026-08-27:** rebinding no longer walks live
+chain words after dyld has resolved them. It selects the exact file slice,
+verifies LC_UUID, translates segment VM offsets to file offsets, and reads the
+original chain words. Shared-cache images use cache patch metadata instead.
 
 ### Milestone 5 device conformance — FIRST DEVICE-VERIFIED RESULT
 
@@ -1908,12 +1908,11 @@ mutating nothing (invariant #2), which is also what makes the original known
 before any replacement is reachable (invariant #5) — capturing originals
 during the write loop would publish a replacement before its predecessor was
 known. `commit` revalidates each slot against what prepare saw (invariant #3),
-then writes. It consults **both** import mechanisms — LC_DYSYMTAB indirect
-symbols and chained fixups — so a caller never has to know which era the image
-comes from; a subtlety the code names explicitly is that the two report slot
-addresses in *different coordinate systems* (unslid vmaddr + slide vs. offset
-from the image base), and conflating them would put every write at the wrong
-address.
+then writes. Metadata sources are mutually exclusive and authoritative:
+ordinary chained images use UUID-matched file words, shared-cache images use
+the live v1-v4 patch table, and only true legacy images use LC_DYSYMTAB. Their
+slot coordinates still differ (unslid vmaddr + slide vs. image-base offset),
+and conflating them would put every write at the wrong address.
 
 **Mutation state reported honestly, which is the whole reason this is an
 engine and not a loop.** A write that fails before any slot is touched is
@@ -1933,12 +1932,10 @@ of reporting artifacts, and predates the mutation-state and
 original-publication contracts this engine exists to satisfy.
 
 **The write is the only device-only part, and it is behind a seam**
-(`hk_rebind_write_fn`). On device it must change VM protection, store, restore,
-and on arm64e re-sign the pointer for an `__auth_got` slot — none of which can
-run or be verified here. The host test supplies a seam that writes into a
-buffer, exercising every decision the engine makes except the store itself.
-**Not device-verified**, and the arm64e re-signing in particular has no host
-analogue.
+(`hk_rebind_write_fn`). Per-site PAC selection, validation, normalization, and
+signing are covered by the tagged host model and arm64e cross-build. A device
+is still required for the actual authenticated call and cache/COW/protection
+store. No physical arm64e verification is claimed.
 
 The standalone arm64 device smoke closes the non-PAC write gap: it selects
 the loaded `MH_EXECUTE` image (jailbreak injection places `systemhook.dylib`
@@ -1980,8 +1977,8 @@ stable-hook-id stash. The two-phase invariant remains explicit: prepare reads
 and captures, commit revalidates and writes.
 
 On device the context is not a fixture: image/slide data comes from the live
-dyld catalog and the writer is the VM-protection-changing, arm64e-re-signing
-store. `device_smoke3_rebind_adapter` verifies the catalog-wide main-image
+dyld catalog and the writer stores the engine's already per-site-signed value
+while preserving page protections. `device_smoke3_rebind_adapter` verifies the catalog-wide main-image
 path on arm64; arm64e PAC handling is source/ABI-reviewed with no physical
 arm64e claim.
 
@@ -2402,10 +2399,9 @@ refusal honest end to end: a caller asking for a callable original gets
 **Two real gaps in the adapter, recorded rather than papered over**, both
 because the machinery they need does not exist yet:
 
-- `hk_address_target_t.may_strip_pac_or_thumb_state` is **not acted on**. On
-  arm64e a function pointer may carry a signature in its high bits and
-  stripping needs ptrauth intrinsics that exist only on device. The address is
-  used as given.
+- ~~`hk_address_target_t.may_strip_pac_or_thumb_state` is not acted on.~~
+  **Closed 2026-08-27** — permitted address targets are canonicalized before
+  scope checks, preflight, ownership identity, and branch arithmetic.
 - ~~`expected_image` / `expected_uuid` are not checked.~~ **Closed** — the
   dyld-populated catalog plus `HKImageScope` verifies address containment and
   UUID before either inline adapter reads or mutates a target; host and arm64
@@ -3376,3 +3372,26 @@ disposition pays ~145 ms one-time at first launch.
 
 Ground rule carried over from M0: nothing claims improved performance
 without an actual measured run recorded here.
+
+---
+
+## Post-release arm64e PAC correction (2026-08-27)
+
+**State: complete under the accepted host/source/ABI gate; physical arm64e
+device certification is not claimed.**
+
+- PAC handling is centralized. Address targets are canonicalized only when
+  permitted; callable originals are standard IA/discriminator-zero pointers.
+- Rebinding retains exact slot bits for stale checks and rollback while using
+  per-site key, diversity, address diversity, and addends for replacement
+  signing. Ordinary chains come from UUID-verified file bytes; shared-cache
+  patch tables v1-v4 are parsed from the bounded live cache mapping.
+- Runtime symbols classify code versus data before signing, and Swift,
+  relocating-inline, hybrid, and provider originals now cross the public
+  boundary as callable pointers.
+- Host acceptance is covered by `test-pointer-auth`, `test-rebind-pac`,
+  `test-cache-patches`, the complete host suite, and the existing arm64e
+  cross-build/ABI marker gates. A physical device is still required before
+  changing arm64e evidence to `device_certified` because only hardware can
+  exercise secret PAC keys, authenticated indirect calls, and real cache/COW/
+  W^X behavior.

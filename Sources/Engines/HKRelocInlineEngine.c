@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../Core/HKIDs.h"
+#include "../../Internal/HKPointerAuth.h"
 
 // Every failure AFTER the page is allocated routes through here. Without it
 // each one leaked an executable page -- caught by LeakSanitizer, invisible to
@@ -211,7 +212,7 @@ void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
     out_info->struct_version = HK_ABI_VERSION_3_0;
     out_info->kind = static_continuation
         ? HK_CONTINUATION_KIND_STATIC : HK_CONTINUATION_KIND_DYNAMIC;
-    out_info->address = plan->original_entry;
+    out_info->address = hk_pac_make_callable(plan->original_entry);
     out_info->jump_back_destination = plan->address + plan->patch_size;
     out_info->mapping_id = plan->mapping_id;
     out_info->mapping_kind = static_continuation
@@ -272,7 +273,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
             t.engine_id.length = 17;
             t.address = plan->trampoline;
             t.size = plan->trampoline_size;
-            t.continuation_address = plan->original_entry;
+            t.continuation_address = hk_pac_make_callable(plan->original_entry);
             t.jump_back_destination = plan->address + plan->patch_size;
             t.mapping.kind = sink->static_continuation
                 ? HK_MAPPING_STATIC_HOOKKIT_SECTION
@@ -309,7 +310,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         t.engine_id.length = 17;
         t.address = plan->trampoline;
         t.size = plan->trampoline_size;
-        t.continuation_address = plan->original_entry;
+        t.continuation_address = hk_pac_make_callable(plan->original_entry);
         t.jump_back_destination = plan->address + plan->patch_size;
         t.mapping.kind = sink->static_continuation
             ? HK_MAPPING_STATIC_HOOKKIT_SECTION
@@ -342,7 +343,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         a.original_bytes.inline_bytes.data = plan->original;
         a.original_bytes.inline_bytes.size = plan->patch_size;
         a.original_bytes.length = plan->patch_size;
-        a.original_pointer = (void *)plan->original_entry;
+        a.original_pointer = (void *)hk_pac_make_callable(plan->original_entry);
         a.replacement_pointer = (void *)plan->address;
         // The entry bytes are held and can be put back. That restores dispatch
         // but does NOT reclaim the page -- which is why the two artifacts carry

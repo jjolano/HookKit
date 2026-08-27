@@ -48,6 +48,8 @@ extern "C" {
 #define HK_MH_CIGAM    0xcefaedfeu
 #define HK_FAT_MAGIC   0xcafebabeu
 #define HK_FAT_CIGAM   0xbebafecau
+#define HK_FAT_MAGIC_64 0xcafebabfu
+#define HK_FAT_CIGAM_64 0xbfbafecau
 #define HK_MH_EXECUTE  0x2u
 
 // Load command types used here; more can be added as resolvers need them.
@@ -105,6 +107,16 @@ typedef struct {
 // Validates the magic and that the load-command region fits within `size`.
 hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
                                        hk_macho_header_t *out_header);
+
+// Selects an exact architecture slice from a thin, FAT32, or FAT64 file.
+// Returned bytes borrow `file` and are fully range-validated.
+hk_macho_status_t hk_macho_select_slice(const void *file, size_t file_size,
+                                        uint32_t cputype, uint32_t cpusubtype,
+                                        const void **out_slice,
+                                        size_t *out_slice_size);
+
+hk_macho_status_t hk_macho_copy_uuid(const void *image, size_t size,
+                                     uint8_t out_uuid[16]);
 
 // The fixed header fields only. Identical to hk_macho_read_header except that
 // it does NOT require the load-command region to lie within `size`.
@@ -234,6 +246,13 @@ hk_macho_status_t hk_macho_find_indirect_symbols(const void *image, size_t size,
 static inline bool hk_macho_section_is_code(uint32_t section_flags) {
     return (section_flags & (HK_S_ATTR_PURE_INSTRUCTIONS | HK_S_ATTR_SOME_INSTRUCTIONS)) != 0;
 }
+
+// Classifies a loaded runtime address by bounded section containment.
+hk_macho_status_t hk_macho_runtime_address_is_code(const void *header,
+                                                   size_t header_region_size,
+                                                   uintptr_t slide,
+                                                   uintptr_t address,
+                                                   bool *out_is_code);
 
 // ---- loaded-image symbol table -----------------------------------------
 

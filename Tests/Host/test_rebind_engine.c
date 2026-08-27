@@ -107,6 +107,7 @@ static bool test_write(void *ctx, uintptr_t address, uint64_t value) {
 
 static hk_rebind_target_t make_target(uint8_t *img, writer_t *w) {
     hk_rebind_target_t t;
+    memset(&t, 0, sizeof(t));
     t.image_base = img;
     t.image_size = IMG_SIZE;
     t.slide = (uintptr_t)img - (uintptr_t)V_BASE;
@@ -296,6 +297,21 @@ static void test_absent_symbol_and_arguments(void) {
     printf("  absent-symbol-and-arguments: PASS\n");
 }
 
+static void test_nonweak_null_slot_is_malformed(void) {
+    uint8_t *img = (uint8_t *)aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+    put_u64(img, GOT_OFF, 0);
+    writer_t w = {0, 0};
+    hk_rebind_target_t t = make_target(img, &w);
+    hk_rebind_plan_t plan;
+    assert(hk_rebind_prepare(&t, "malloc", HK_SYMBOL_NAME_C, &plan) ==
+           HK_REBIND_MALFORMED_IMAGE);
+    assert(w.calls == 0);
+    free(img);
+    printf("  nonweak-null-slot-is-malformed: PASS\n");
+}
+
 int main(void) {
     test_prepare_finds_sites_and_mutates_nothing();
     test_commit_writes_every_site();
@@ -303,6 +319,7 @@ int main(void) {
     test_failure_after_a_write_is_partial();
     test_revalidation_refuses_a_changed_slot();
     test_absent_symbol_and_arguments();
+    test_nonweak_null_slot_is_malformed();
     printf("all rebind engine tests passed\n");
     return 0;
 }

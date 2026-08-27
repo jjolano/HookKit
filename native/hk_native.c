@@ -1,4 +1,5 @@
 #include "hk_native.h"
+#include "../Internal/HKPointerAuth.h"
 
 #if defined(__arm64__) || defined(__aarch64__)
 
@@ -10,14 +11,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#if __has_feature(ptrauth_calls)
-#include <ptrauth.h>
-#define hk_strip_code(p)  ptrauth_strip((p), ptrauth_key_function_pointer)
-#define hk_sign_code(p)   ptrauth_sign_unauthenticated((void *)(p), ptrauth_key_function_pointer, 0)
-#else
-#define hk_strip_code(p)  (p)
-#define hk_sign_code(p)   ((void *)(p))
-#endif
+#define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
+#define hk_sign_code(p)  ((void *)hk_pac_make_callable((uintptr_t)(p)))
 
 static int hk_errno = 0;
 

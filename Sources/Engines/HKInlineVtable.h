@@ -18,14 +18,9 @@
 // is platform-specific and may not be available in a caller-supplied context.
 // See HKImageScope.h for that policy in full.
 //
-// ONE THING THIS ADAPTER STILL DOES NOT DO, stated rather than silently
-// skipped: `hk_address_target_t.may_strip_pac_or_thumb_state` is not acted on.
-// On arm64e a function pointer may carry a signature in its high bits, and
-// stripping it needs ptrauth intrinsics that exist only on device. The address
-// is used as given. A caller passing a signed pointer with this flag set on
-// device will need the strip performed before it reaches here, and that
-// belongs with the other device-only seams, not in a host-testable adapter
-// pretending to do it.
+// `may_strip_pac_or_thumb_state` is enforced at the adapter boundary. The
+// canonical address is used consistently for scope checks, preflight, branch
+// arithmetic, and ownership identity.
 
 #ifndef HK_ENGINES_INLINE_VTABLE_H
 #define HK_ENGINES_INLINE_VTABLE_H

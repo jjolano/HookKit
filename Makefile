@@ -46,7 +46,7 @@ HookKit_FILES = \
 	Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c \
 	Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c \
 	Sources/Engines/HKSwiftEngine.c Sources/Engines/HKStaticPool.c \
-	Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c \
+	Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c \
 	Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c \
 	Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c \
 	Internal/HKInlinePreflight.m \
@@ -157,7 +157,11 @@ check-shadow376-compat:
 # writes); the write is behind a seam a host test drives into a buffer.
 .PHONY: test-rebind-engine
 test-rebind-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_engine Tests/Host/test_rebind_engine.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_engine Tests/Host/test_rebind_engine.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_engine$(ECHO_END)
+
+.PHONY: test-rebind-pac
+test-rebind-pac:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac Tests/Host/test_rebind_pac.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL memory-patch
 # engine through its runtime adapter (Milestone 6). Real analyze/prepare/commit,
@@ -267,7 +271,15 @@ conformance:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-abi test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-rebind-engine test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-abi test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+
+.PHONY: test-pointer-auth
+test-pointer-auth:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_pointer_auth Tests/Host/test_pointer_auth.c Sources/Core/HKOwnership.c -lpthread && $(THEOS_OBJ_DIR)/test_pointer_auth$(ECHO_END)
+
+.PHONY: test-cache-patches
+test-cache-patches:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_cache_patches Tests/Host/test_cache_patches.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
 
 .PHONY: test-abi
 test-abi:
@@ -566,7 +578,7 @@ comma := ,
 # compile) stays green. HOOKKIT_CANONICAL_3-gated providers (Dobby/Gum/
 # ElleKit/Substitute) are deliberately excluded: host tests never define
 # HOOKKIT_CANONICAL_3, so those stay unreferenced either way.
-HK_PLATFORM_ENGINE_SOURCES = Sources/Core/HKImageScope.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c
+HK_PLATFORM_ENGINE_SOURCES = Sources/Core/HKImageScope.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c
 HK_PLATFORM_ENGINE_LDFLAGS = $(if $(filter Darwin,$(HOST_OS)),-lobjc)
 MODERN_TOOLCHAIN ?= $(THEOS)/toolchain/modern/linux/iphone
 DEVICE_SMOKE_CLANG ?= $(SDKBINPATH)/clang
@@ -669,7 +681,7 @@ device-resolver-smoke:
 
 .PHONY: device-rebind-smoke
 device-rebind-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/Sources/Core -lobjc -o $(THEOS_OBJ_DIR)/device_rebind_smoke tests/device_rebind.m Sources/Engines/HKRebindEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c native/hk_native.c native/hk_arm64.c native/hk_symbols.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/Sources/Core -lobjc -o $(THEOS_OBJ_DIR)/device_rebind_smoke tests/device_rebind.m Sources/Engines/HKRebindEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c native/hk_native.c native/hk_arm64.c native/hk_symbols.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_smoke$(ECHO_END)
 
 .PHONY: device-legacy-facade-smoke
 device-legacy-facade-smoke:
@@ -691,7 +703,7 @@ device-shadow376-smoke:
 
 .PHONY: device-static-smoke
 device-static-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/native -lobjc -o $(THEOS_OBJ_DIR)/device_static_smoke tests/device_static_continuation.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Core/HKImageCatalog.c Sources/Core/HKImageScope.c Sources/Core/HKInstalled.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKRuntime.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Engines/HKStaticPool.c Sources/Engines/HKSwiftEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c native/hk_swift.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_static_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/native -lobjc -o $(THEOS_OBJ_DIR)/device_static_smoke tests/device_static_continuation.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Core/HKImageCatalog.c Sources/Core/HKImageScope.c Sources/Core/HKInstalled.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKRuntime.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Engines/HKStaticPool.c Sources/Engines/HKSwiftEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c native/hk_swift.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_static_smoke$(ECHO_END)
 
 .PHONY: device-provider-smoke
 device-provider-smoke:

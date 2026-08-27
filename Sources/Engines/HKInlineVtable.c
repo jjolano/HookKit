@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../Internal/HKPointerAuth.h"
+
 static hk_engine_capabilities_t inline_describe(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
@@ -67,6 +69,8 @@ static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
         return HK_PREPARE_FAILED;
     }
     const hk_address_target_t *addr = &spec->target.address;
+    uintptr_t target_address = addr->may_strip_pac_or_thumb_state
+        ? hk_pac_strip_code(addr->address) : addr->address;
 
     // Image scope first, before anything is read from the target: if the
     // address is not in the image the request named, reading its prologue is
@@ -75,7 +79,7 @@ static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
     hk_image_scope_status_t scope =
         hk_image_scope_check(ctx->catalog, &addr->expected_image,
                              addr->expected_uuid_present, addr->expected_uuid,
-                             (uintptr_t)addr->address);
+                             target_address);
     if (scope != HK_IMAGE_SCOPE_OK && scope != HK_IMAGE_SCOPE_NO_CATALOG) {
         out_diag->error_code = HK_INLINE_DIAG_IMAGE_SCOPE_BASE + (int64_t)scope;
         out_diag->error_message = hk_image_scope_describe(scope);
@@ -91,8 +95,8 @@ static hk_prepare_result_t inline_prepare_one_ctx_status(void *engine_ctx,
     // caller's demand, and this engine refusing it is the whole reason
     // terminal inline can skip relocation. Passing it through rather than
     // hardcoding NONE is what keeps that refusal honest.
-    hk_inline_status_t st = hk_inline_prepare((uintptr_t)addr->address,
-                                              (uintptr_t)spec->replacement,
+    hk_inline_status_t st = hk_inline_prepare(target_address,
+                                              hk_pac_strip_code((uintptr_t)spec->replacement),
                                               spec->original_requirement,
                                               addr->expected_initial_bytes,
                                               addr->expected_initial_bytes_size,

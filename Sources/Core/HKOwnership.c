@@ -4,6 +4,8 @@
 
 #include "HKOwnership.h"
 
+#include "../../Internal/HKPointerAuth.h"
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -140,11 +142,12 @@ static bool key_target(hk_key_builder_t *builder,
                key_selector(builder, &spec->target.symbol.caller_image_scope, 0);
     }
     case HK_TARGET_FUNCTION_ADDRESS:
-        return key_u64(builder, (uint64_t)spec->target.address.address) &&
+        return key_u64(builder, (uint64_t)(spec->target.address.may_strip_pac_or_thumb_state
+                           ? hk_pac_strip_code(spec->target.address.address)
+                           : spec->target.address.address)) &&
                key_u8(builder, spec->target.address.expected_uuid_present) &&
                key_append(builder, spec->target.address.expected_uuid,
                           sizeof(spec->target.address.expected_uuid)) &&
-               key_u8(builder, spec->target.address.may_strip_pac_or_thumb_state) &&
                key_selector(builder, &spec->target.address.expected_image, 0);
     case HK_TARGET_OBJC_METHOD:
         return key_u64(builder, (uint64_t)(uintptr_t)spec->target.objc.cls) &&

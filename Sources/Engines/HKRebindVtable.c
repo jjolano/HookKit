@@ -40,9 +40,11 @@ static rebind_bundle_t *rebind_bundle_create(size_t capacity) {
 static hk_rebind_target_t target_from(const hk_rebind_engine_ctx_t *ctx,
                                       bool with_writer) {
     hk_rebind_target_t t;
+    memset(&t, 0, sizeof(t));
     t.image_base = ctx->image_base;
     t.image_size = ctx->image_size;
     t.slide = ctx->slide;
+    t.image_path = ctx->image_path;
     t.write = with_writer ? ctx->write : NULL;
     t.write_ctx = ctx->write_ctx;
     return t;
@@ -100,6 +102,11 @@ static bool rebind_collect_image(void *opaque, size_t index,
     out->target.image_size = HK_MACHO_HEADER_64_SIZE +
                              (size_t)header.sizeofcmds;
     out->target.slide = entry->slide;
+    out->target.image_path = entry->path;
+    out->target.uuid_present = entry->uuid_present;
+    memcpy(out->target.uuid, entry->uuid, sizeof(out->target.uuid));
+    out->target.include_shared_cache_got =
+        ctx->spec->target.symbol.caller_image_scope.kind == HK_IMAGE_ANY_LOADED;
 
     // Import-slot iteration only needs the load-command region, but chained
     // fixup traversal also reads bind locations throughout the mapped image.
@@ -128,6 +135,30 @@ static bool rebind_collect_image(void *opaque, size_t index,
         return false;
     }
 
+    // Cache-global GOT uses are reported while visiting every cached image.
+    // Retain each runtime slot once so commit cannot encounter its own write
+    // as a stale value in a later per-image plan.
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < out->plan.count; i++) {
+        bool duplicate = false;
+        for (size_t e = 0; e < ctx->bundle->count && !duplicate; e++) {
+            for (uint32_t s = 0; s < ctx->bundle->entries[e].plan.count; s++) {
+                if (ctx->bundle->entries[e].plan.sites[s].address ==
+                    out->plan.sites[i].address) {
+                    duplicate = true;
+                    break;
+                }
+            }
+        }
+        if (!duplicate) {
+            out->plan.sites[kept++] = out->plan.sites[i];
+        }
+    }
+    out->plan.count = kept;
+    if (kept == 0) {
+        return true;
+    }
+
     if (!out->plan.originals_agree) {
         ctx->bundle->originals_agree = false;
     }
@@ -154,6 +185,14 @@ static hk_prepare_result_t rebind_classify(hk_rebind_status_t st, hk_prepare_dia
             diag->error_message = "the image's import metadata is structurally invalid"; break;
         case HK_REBIND_TOO_MANY_SITES:
             diag->error_message = "more import slots for this symbol than the engine can record"; break;
+        case HK_REBIND_METADATA_UNAVAILABLE:
+            diag->error_message = "authoritative on-disk import metadata is unavailable"; break;
+        case HK_REBIND_PAC_MISMATCH:
+            diag->error_message = "an authenticated import slot does not match its declared PAC schema"; break;
+        case HK_REBIND_UNSUPPORTED_FORMAT:
+            diag->error_message = "the image uses an unsupported chained-fixup or cache-patch format"; break;
+        case HK_REBIND_SCOPE_UNREPRESENTABLE:
+            diag->error_message = "shared-cache GOT uses cannot represent the requested caller scope"; break;
         case HK_REBIND_INVALID_ARGUMENT:
         case HK_REBIND_OK:
             diag->error_message = "invalid rebind target"; break;
@@ -202,7 +241,7 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
             return result;
         }
         if (spec->original_requirement != HK_ORIGINAL_NONE &&
-            !bundle->originals_agree) {
+            (!bundle->originals_agree || bundle->original == 0)) {
             out_diag->error_message = "rebind sites have no single original";
             free(bundle);
             return HK_PREPARE_FAILED;
@@ -236,6 +275,8 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
         return HK_PREPARE_FAILED;
     }
     hk_rebind_target_t target = target_from(ctx, false);  // prepare never writes
+    target.include_shared_cache_got =
+        spec->target.symbol.caller_image_scope.kind == HK_IMAGE_ANY_LOADED;
     hk_rebind_status_t st = hk_rebind_prepare(&target, spec->target.symbol.name,
                                               spec->target.symbol.name_convention, plan);
     hk_prepare_result_t result = rebind_classify(st, out_diag);
@@ -244,7 +285,7 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
         return result;
     }
     if (spec->original_requirement != HK_ORIGINAL_NONE &&
-        !plan->originals_agree) {
+        (!plan->originals_agree || plan->original == 0)) {
         out_diag->error_message = "rebind sites have no single original";
         free(plan);
         return HK_PREPARE_FAILED;
@@ -312,12 +353,15 @@ static hk_verify_result_t rebind_verify_one_ctx(void *engine_ctx,
         return HK_VERIFY_FAILED;
     }
 
-    const uint64_t replacement = (uint64_t)(uintptr_t)spec->replacement;
     if (!ctx->image_base && ctx->catalog) {
         const rebind_bundle_t *bundle = prepared;
         for (size_t i = 0; i < bundle->count; i++) {
             for (uint32_t j = 0; j < bundle->entries[i].plan.count; j++) {
-                if (hk_rebind_read_slot(bundle->entries[i].plan.sites[j].address) != replacement) {
+                uint64_t expected = 0;
+                if (!hk_rebind_replacement_for_site(
+                        &bundle->entries[i].plan.sites[j],
+                        (uint64_t)(uintptr_t)spec->replacement, &expected) ||
+                    hk_rebind_read_slot(bundle->entries[i].plan.sites[j].address) != expected) {
                     out_diag->error_message = "rebind slot readback does not match the replacement";
                     return HK_VERIFY_FAILED;
                 }
@@ -328,7 +372,11 @@ static hk_verify_result_t rebind_verify_one_ctx(void *engine_ctx,
 
     const hk_rebind_plan_t *plan = prepared;
     for (uint32_t i = 0; i < plan->count; i++) {
-        if (hk_rebind_read_slot(plan->sites[i].address) != replacement) {
+        uint64_t expected = 0;
+        if (!hk_rebind_replacement_for_site(
+                &plan->sites[i], (uint64_t)(uintptr_t)spec->replacement,
+                &expected) ||
+            hk_rebind_read_slot(plan->sites[i].address) != expected) {
             out_diag->error_message = "rebind slot readback does not match the replacement";
             return HK_VERIFY_FAILED;
         }

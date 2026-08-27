@@ -219,9 +219,19 @@ typedef struct {
     bool is_auth;
     uint32_t ordinal;
     uint32_t next;
+    uint8_t key;
+    uint16_t diversity;
+    bool address_diversity;
+    int64_t addend;
 } chained_ptr_t;
 
+static int64_t sign_extend(uint64_t value, unsigned bits) {
+    const uint64_t sign = UINT64_C(1) << (bits - 1u);
+    return (int64_t)((value ^ sign) - sign);
+}
+
 static void decode_pointer(uint64_t raw, uint16_t pointer_format, chained_ptr_t *out) {
+    memset(out, 0, sizeof(*out));
     if (format_is_arm64e(pointer_format)) {
         // ordinal:16|24, ... , next:11 (bits 51-61), bind:62, auth:63
         out->is_auth = ((raw >> 63) & 1u) != 0;
@@ -230,6 +240,13 @@ static void decode_pointer(uint64_t raw, uint16_t pointer_format, chained_ptr_t 
         out->ordinal = (pointer_format == HK_CHAINED_PTR_ARM64E_USERLAND24)
                            ? (uint32_t)(raw & 0xFFFFFFu)   // 24-bit bind
                            : (uint32_t)(raw & 0xFFFFu);
+        if (out->is_bind && out->is_auth) {
+            out->diversity = (uint16_t)((raw >> 32) & 0xFFFFu);
+            out->address_diversity = ((raw >> 48) & 1u) != 0;
+            out->key = (uint8_t)((raw >> 49) & 0x3u);
+        } else if (out->is_bind) {
+            out->addend = sign_extend((raw >> 32) & 0x7FFFFu, 19);
+        }
     } else {
         // DYLD_CHAINED_PTR_64 / _64_OFFSET:
         // ordinal:24 (bits 0-23), ..., next:12 (bits 51-62), bind:63
@@ -237,12 +254,17 @@ static void decode_pointer(uint64_t raw, uint16_t pointer_format, chained_ptr_t 
         out->is_bind = ((raw >> 63) & 1u) != 0;
         out->next = (uint32_t)((raw >> 51) & 0xFFFu);
         out->ordinal = (uint32_t)(raw & 0xFFFFFFu);
+        if (out->is_bind) {
+            out->addend = (int64_t)((raw >> 24) & 0xFFu);
+        }
     }
 }
 
 typedef struct {
-    const uint8_t *image;
-    size_t image_size;
+    const uint8_t *storage;
+    size_t storage_size;
+    uint64_t storage_segment_start;
+    uint64_t storage_segment_size;
     uint16_t pointer_format;
     uint32_t stride;
     uint64_t segment_start;   // segment_offset
@@ -259,14 +281,19 @@ static hk_chained_status_t walk_chain(chain_ctx_t *c, uint64_t offset) {
     for (;;) {
         // Every read is bounded by BOTH the readable image and the segment's
         // own declared span, so a corrupt `next` cannot wander out of either.
-        if (offset < c->segment_start || offset + 8 > c->segment_end) {
+        if (offset < c->segment_start || offset > c->segment_end ||
+            8u > c->segment_end - offset) {
             return HK_CHAINED_MALFORMED;
         }
-        if (offset + 8 > (uint64_t)c->image_size) {
+        uint64_t within_segment = offset - c->segment_start;
+        if (within_segment + 8 > c->storage_segment_size ||
+            c->storage_segment_start > c->storage_size ||
+            within_segment + 8 > c->storage_size - c->storage_segment_start) {
             return HK_CHAINED_MALFORMED;
         }
 
-        uint64_t raw = read_u64(c->image + (size_t)offset);
+        uint64_t raw = read_u64(c->storage + (size_t)c->storage_segment_start +
+                                (size_t)within_segment);
         chained_ptr_t ptr;
         decode_pointer(raw, c->pointer_format, &ptr);
 
@@ -278,6 +305,10 @@ static hk_chained_status_t walk_chain(chain_ctx_t *c, uint64_t offset) {
             bind.segment_index = c->segment_index;
             bind.pointer_format = c->pointer_format;
             bind.is_auth = ptr.is_auth;
+            bind.key = ptr.key;
+            bind.diversity = ptr.diversity;
+            bind.address_diversity = ptr.address_diversity;
+            bind.addend = ptr.addend;
             if (!c->visit(c->ctx, &bind)) {
                 c->stopped = true;
                 return HK_CHAINED_OK;
@@ -299,7 +330,8 @@ static hk_chained_status_t walk_chain(chain_ctx_t *c, uint64_t offset) {
 }
 
 static hk_chained_status_t walk_segment(const hk_chained_fixups_t *fixups,
-                                        const uint8_t *image, size_t image_size,
+                                        const uint8_t *storage, size_t storage_size,
+                                        const hk_chained_segment_mapping_t *mapping,
                                         size_t seg_info_offset, uint32_t segment_index,
                                         hk_chained_bind_visit_fn visit, void *ctx,
                                         bool *stopped) {
@@ -342,7 +374,7 @@ static hk_chained_status_t walk_segment(const hk_chained_fixups_t *fixups,
     }
     uint64_t starts_extent = (uint64_t)declared_size - HK_CHAINED_STARTS_IN_SEGMENT_HEADER;
     if (starts_extent > available) {
-        starts_extent = available;  // never trust `size` past the blob
+        return HK_CHAINED_MALFORMED;
     }
     uint64_t page_start_bytes = (uint64_t)page_count * sizeof(uint16_t);
     if (page_start_bytes > starts_extent) {
@@ -350,12 +382,24 @@ static hk_chained_status_t walk_segment(const hk_chained_fixups_t *fixups,
     }
 
     chain_ctx_t c;
-    c.image = image;
-    c.image_size = image_size;
+    c.storage = storage;
+    c.storage_size = storage_size;
+    c.storage_segment_start = mapping ? mapping->file_offset : segment_off;
+    c.storage_segment_size = mapping ? mapping->file_size
+                                     : (uint64_t)storage_size -
+                                           (segment_off <= storage_size ? segment_off
+                                                                        : storage_size);
+    if (mapping && mapping->image_offset != segment_off) {
+        return HK_CHAINED_MALFORMED;
+    }
     c.pointer_format = ptr_format;
     c.stride = stride;
     c.segment_start = segment_off;
-    c.segment_end = segment_off + (uint64_t)page_count * (uint64_t)page_size;
+    uint64_t segment_span = (uint64_t)page_count * (uint64_t)page_size;
+    if (segment_span > UINT64_MAX - segment_off) {
+        return HK_CHAINED_MALFORMED;
+    }
+    c.segment_end = segment_off + segment_span;
     c.segment_index = segment_index;
     c.visit = visit;
     c.ctx = ctx;
@@ -410,12 +454,12 @@ static hk_chained_status_t walk_segment(const hk_chained_fixups_t *fixups,
     return HK_CHAINED_OK;
 }
 
-hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *fixups,
-                                                    const void *image_base,
-                                                    size_t image_size,
-                                                    hk_chained_bind_visit_fn visit,
-                                                    void *ctx) {
-    if (!fixups || !fixups->blob || !image_base || !visit) {
+static hk_chained_status_t iterate_binds(
+    const hk_chained_fixups_t *fixups, const void *storage_base,
+    size_t storage_size, const hk_chained_segment_mapping_t *segments,
+    uint32_t segment_count, hk_chained_bind_visit_fn visit, void *ctx) {
+    if (!fixups || !fixups->blob || !storage_base || !visit ||
+        (segments && segment_count == 0)) {
         return HK_CHAINED_INVALID_ARGUMENT;
     }
     const uint8_t *blob = fixups->blob;
@@ -431,7 +475,7 @@ hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *f
         return HK_CHAINED_MALFORMED;
     }
 
-    const uint8_t *image = (const uint8_t *)image_base;
+    const uint8_t *storage = (const uint8_t *)storage_base;
     bool stopped = false;
 
     for (uint32_t i = 0; i < seg_count && !stopped; i++) {
@@ -440,8 +484,15 @@ hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *f
         if (seg_info_offset == 0) {
             continue;  // this segment has no fixups
         }
+        if (segments && i >= segment_count) {
+            return HK_CHAINED_MALFORMED;
+        }
+        if (seg_info_offset > blob_size - starts) {
+            return HK_CHAINED_MALFORMED;
+        }
         // seg_info_offset is relative to the starts_in_image struct.
-        hk_chained_status_t status = walk_segment(fixups, image, image_size,
+        hk_chained_status_t status = walk_segment(fixups, storage, storage_size,
+                                                  segments ? &segments[i] : NULL,
                                                   starts + seg_info_offset, i,
                                                   visit, ctx, &stopped);
         if (status != HK_CHAINED_OK) {
@@ -449,4 +500,23 @@ hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *f
         }
     }
     return HK_CHAINED_OK;
+}
+
+hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *fixups,
+                                                    const void *image_base,
+                                                    size_t image_size,
+                                                    hk_chained_bind_visit_fn visit,
+                                                    void *ctx) {
+    return iterate_binds(fixups, image_base, image_size, NULL, 0, visit, ctx);
+}
+
+hk_chained_status_t hk_chained_fixups_iterate_file_binds(
+    const hk_chained_fixups_t *fixups, const void *file_base, size_t file_size,
+    const hk_chained_segment_mapping_t *segments, uint32_t segment_count,
+    hk_chained_bind_visit_fn visit, void *ctx) {
+    if (!segments) {
+        return HK_CHAINED_INVALID_ARGUMENT;
+    }
+    return iterate_binds(fixups, file_base, file_size, segments, segment_count,
+                         visit, ctx);
 }

@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../Internal/HKPointerAuth.h"
+
 typedef struct {
     hk_provider_kind_t kind;
     const char *engine_id;
@@ -157,6 +159,12 @@ static bool provider_needs_hybrid(const provider_profile_t *profile,
            spec->original_requirement == HK_ORIGINAL_CALLABLE_CONTINUATION;
 }
 
+static uintptr_t provider_target_address(const hk_hook_spec_t *spec) {
+    return spec->target.address.may_strip_pac_or_thumb_state
+        ? hk_pac_strip_code(spec->target.address.address)
+        : spec->target.address.address;
+}
+
 static hk_engine_capabilities_t provider_describe(const provider_profile_t *profile) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
@@ -233,7 +241,7 @@ static bool provider_analyze(void *engine_ctx, const hk_hook_spec_t *spec,
     const hk_provider_engine_ctx_t *ctx =
         provider_context(engine_ctx, profile->kind);
     if (!ctx || !spec || !out || spec->target_kind != HK_TARGET_FUNCTION_ADDRESS ||
-        !spec->replacement || spec->target.address.address == 0 || !ctx->hook) {
+        !spec->replacement || provider_target_address(spec) == 0 || !ctx->hook) {
         return false;
     }
     memset(out, 0, sizeof(*out));
@@ -254,8 +262,10 @@ static bool provider_analyze(void *engine_ctx, const hk_hook_spec_t *spec,
     // Dobby's fixed-window relocator honestly refuses a target.
     if (ctx->validate) {
         hk_prepare_diag_t diag;
+        hk_hook_spec_t canonical = *spec;
+        canonical.target.address.address = provider_target_address(spec);
         memset(&diag, 0, sizeof(diag));
-        if (!ctx->validate(ctx->provider_ctx, spec, &diag)) {
+        if (!ctx->validate(ctx->provider_ctx, &canonical, &diag)) {
             return true;
         }
     }
@@ -298,7 +308,7 @@ static hk_prepare_result_t provider_prepare(void *engine_ctx,
         provider_context(engine_ctx, profile->kind);
     if (!ctx || !spec || !out_prepared || !out_diag ||
         spec->target_kind != HK_TARGET_FUNCTION_ADDRESS ||
-        !spec->replacement || spec->target.address.address == 0 || !ctx->hook) {
+        !spec->replacement || provider_target_address(spec) == 0 || !ctx->hook) {
         out_diag->error_message = "provider adapter received invalid hook state";
         return HK_PREPARE_FAILED;
     }
@@ -321,7 +331,9 @@ static hk_prepare_result_t provider_prepare(void *engine_ctx,
             "provider cannot revalidate a precondition larger than its inspected entry window";
         return HK_PREPARE_FAILED;
     }
-    if (ctx->validate && !ctx->validate(ctx->provider_ctx, spec, out_diag)) {
+    hk_hook_spec_t canonical = *spec;
+    canonical.target.address.address = provider_target_address(spec);
+    if (ctx->validate && !ctx->validate(ctx->provider_ctx, &canonical, out_diag)) {
         if (!out_diag->error_message) {
             out_diag->error_message = "provider preflight refused the target";
         }
@@ -329,7 +341,7 @@ static hk_prepare_result_t provider_prepare(void *engine_ctx,
     }
     if (spec->target.address.expected_initial_bytes_size != 0 &&
         (!spec->target.address.expected_initial_bytes ||
-         memcmp((const void *)spec->target.address.address,
+         memcmp((const void *)canonical.target.address.address,
                 spec->target.address.expected_initial_bytes,
                 spec->target.address.expected_initial_bytes_size) != 0)) {
         out_diag->error_message = "target does not match the request's expected entry bytes";
@@ -340,7 +352,7 @@ static hk_prepare_result_t provider_prepare(void *engine_ctx,
         out_diag->error_message = "out of memory";
         return HK_PREPARE_FAILED;
     }
-    prepared->target = spec->target.address.address;
+    prepared->target = canonical.target.address.address;
     prepared->replacement = spec->replacement;
     prepared->inspection_size = inspection_size;
     prepared->hybrid = hybrid;
@@ -499,7 +511,8 @@ static void provider_record_hybrid_continuation(
     artifact.mechanism_id.length = 23;
     artifact.address = prepared->continuation.trampoline;
     artifact.size = prepared->continuation.trampoline_size;
-    artifact.continuation_address = prepared->continuation.original_entry;
+    artifact.continuation_address =
+        hk_pac_make_callable(prepared->continuation.original_entry);
     artifact.jump_back_destination = prepared->target +
                                      prepared->continuation.patch_size;
     artifact.mapping.struct_size = sizeof(artifact.mapping);
@@ -562,7 +575,7 @@ static hk_mutation_state_t provider_commit(void *engine_ctx,
     provider_prepared_t *prepared = prepared_state;
     if (!ctx || !spec || !prepared || !ctx->hook ||
         spec->target_kind != HK_TARGET_FUNCTION_ADDRESS ||
-        prepared->target != spec->target.address.address ||
+        prepared->target != provider_target_address(spec) ||
         prepared->replacement != spec->replacement ||
         !(profile->original_requirements &
           HK_ORIGINAL_REQ_BIT(spec->original_requirement)) ||
@@ -591,7 +604,8 @@ static hk_mutation_state_t provider_commit(void *engine_ctx,
         (profile->publishes_original_before_activation || hybrid);
     void *local_original = NULL;
     if (hybrid && sink) {
-        sink->published_original = (void *)prepared->continuation.original_entry;
+        sink->published_original =
+            (void *)hk_pac_make_callable(prepared->continuation.original_entry);
         provider_fill_hybrid_continuation(sink, prepared);
     }
     void **out_original = hybrid || !profile->publishes_original_before_activation
@@ -610,8 +624,11 @@ static hk_mutation_state_t provider_commit(void *engine_ctx,
         return HK_MUTATION_UNKNOWN;
     }
     void *original = hybrid
-        ? (void *)prepared->continuation.original_entry
+        ? (void *)hk_pac_make_callable(prepared->continuation.original_entry)
         : (out_original ? *out_original : NULL);
+    if (original) {
+        original = (void *)hk_pac_make_callable((uintptr_t)original);
+    }
 
     if (profile->activation_happens_at_commit) {
         provider_record(sink, profile, HK_ARTIFACT_PROVIDER_ACTIVATION,
@@ -674,7 +691,7 @@ static hk_verify_result_t provider_verify(void *engine_ctx,
                                           hk_provider_kind_t kind) {
     const hk_provider_engine_ctx_t *ctx = provider_context(engine_ctx, kind);
     const provider_prepared_t *prepared = prepared_state;
-    if (!ctx || !spec || !prepared || prepared->target != spec->target.address.address ||
+    if (!ctx || !spec || !prepared || prepared->target != provider_target_address(spec) ||
         prepared->replacement != spec->replacement) {
         out_diag->error_message = "provider verification received invalid prepared state";
         return HK_VERIFY_FAILED;
@@ -727,7 +744,7 @@ static hk_verify_result_t provider_inspect_continuation(
     const hk_provider_engine_ctx_t *ctx = engine_ctx;
     const provider_prepared_t *prepared = prepared_state;
     if (!ctx || !spec || !prepared || !out_info ||
-        prepared->target != spec->target.address.address) {
+        prepared->target != provider_target_address(spec)) {
         out_diag->error_message =
             "provider continuation inspection received invalid prepared state";
         return HK_VERIFY_FAILED;

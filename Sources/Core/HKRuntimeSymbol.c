@@ -15,11 +15,13 @@
 #endif
 
 #include <string.h>
+#include "../../Internal/HKPointerAuth.h"
 
 #if defined(__APPLE__) && defined(__LP64__)
 typedef struct {
     const char *symbol_name;
     void *address;
+    bool classification_failed;
 } hk_runtime_symbol_lookup_t;
 
 static bool hk_runtime_find_symbol_64(void *opaque, size_t index,
@@ -39,7 +41,27 @@ static bool hk_runtime_find_symbol_64(void *opaque, size_t index,
             entry->slide, lookup->symbol_name, HK_SYMBOL_NAME_C,
             HK_SYMBOL_VISIBILITY_PRIVATE_ALLOWED, &resolved) == HK_RESOLVE_OK &&
         resolved.address != 0) {
-        lookup->address = (void *)resolved.address;
+        bool is_code = false;
+        hk_macho_status_t classification;
+        if (resolved.source == HK_RESOLVE_SOURCE_SYMBOL_TABLE &&
+            resolved.n_sect != 0) {
+            uint32_t flags = 0;
+            classification = hk_macho_section_flags(
+                entry->header, HK_MACHO_HEADER_64_SIZE + header.sizeofcmds,
+                resolved.n_sect, &flags);
+            is_code = classification == HK_MACHO_OK &&
+                      hk_macho_section_is_code(flags);
+        } else {
+            classification = hk_macho_runtime_address_is_code(
+                entry->header, HK_MACHO_HEADER_64_SIZE + header.sizeofcmds,
+                entry->slide, resolved.address, &is_code);
+        }
+        if (classification != HK_MACHO_OK) {
+            lookup->classification_failed = true;
+            return false;
+        }
+        lookup->address = (void *)(is_code
+            ? hk_pac_make_callable(resolved.address) : resolved.address);
         return false;
     }
     return true;
@@ -217,6 +239,9 @@ hk_status_t hk_runtime_find_symbol(hk_runtime_t *runtime, const char *image_path
     };
     (void)hk_image_catalog_match(runtime->catalog, &selector,
                                  hk_runtime_find_symbol_64, &lookup);
+    if (lookup.classification_failed) {
+        return HK_STATUS_UNAVAILABLE;
+    }
     *out_address = lookup.address;
     return lookup.address ? HK_STATUS_OK : HK_STATUS_UNAVAILABLE;
 #elif defined(__APPLE__)

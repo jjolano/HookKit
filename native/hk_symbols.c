@@ -1,4 +1,5 @@
 #include "hk_native.h"
+#include "../Internal/HKPointerAuth.h"
 
 #if defined(__arm64__) || defined(__aarch64__)
 
@@ -33,14 +34,8 @@ struct hk_image {
 // symbols that resolve into instruction sections are returned signed with the
 // function-pointer key, discriminator 0 -- the same recipe hk_native.c uses
 // for the originals it hands out. Data symbols stay unsigned.
-#if __has_feature(ptrauth_calls)
-#include <ptrauth.h>
-#define hk_sym_strip(p)  ptrauth_strip((p), ptrauth_key_function_pointer)
-#define hk_sym_sign(p)   ptrauth_sign_unauthenticated((void *)(p), ptrauth_key_function_pointer, 0)
-#else
-#define hk_sym_strip(p)  (p)
-#define hk_sym_sign(p)   ((void *)(p))
-#endif
+#define hk_sym_strip(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
+#define hk_sym_sign(p)  ((void *)hk_pac_make_callable((uintptr_t)(p)))
 
 #pragma mark - Loaded image lookup
 

@@ -11,12 +11,9 @@
 #include <pthread.h>
 #include <string.h>
 
-#if __has_include(<ptrauth.h>)
-#import <ptrauth.h>
-#endif
-
 #import "native/hk_arm64.h"
 #import "native/hk_native.h"
+#import "HKPointerAuth.h"
 
 // Executable-range probe: not declared in hk_native.h, whose public contract
 // is readable-only (the Swift metadata reader depends on that). The inline
@@ -34,13 +31,11 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
     }
 
 #if defined(__arm64__) || defined(__aarch64__)
-#if __has_feature(ptrauth_calls)
     // Strip PAC so the raw address is what the relocator will inspect
     // (arm64e). Replacement is stripped too so the self-hook check below
     // compares raw addresses.
-    function = ptrauth_strip(function, ptrauth_key_asia);
-    replacement = ptrauth_strip(replacement, ptrauth_key_asia);
-#endif
+    function = (void *)hk_pac_strip_code((uintptr_t)function);
+    replacement = (void *)hk_pac_strip_code((uintptr_t)replacement);
 
     // Mirror of the target check: the replacement is branched to, so it must
     // sit on an instruction boundary too (AArch64 instructions are 4-byte
@@ -96,11 +91,9 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
 
 bool hk_inline_target_is_trap_stub(void *function) {
 #if defined(__arm64__) || defined(__aarch64__)
-#if __has_feature(ptrauth_calls)
     // Same canonicalization as the preflight: strip PAC so the raw address
     // is what the decode sees (arm64e).
-    function = ptrauth_strip(function, ptrauth_key_asia);
-#endif
+    function = (void *)hk_pac_strip_code((uintptr_t)function);
 
     // The decode dereferences the entry; a bogus non-NULL address must fail
     // cleanly instead of faulting (same probe the preflight uses, and the

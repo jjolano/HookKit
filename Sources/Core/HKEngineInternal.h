@@ -46,9 +46,9 @@ typedef uint32_t hk_install_context_mask_t;
                                 HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_RUNTIME_SERIALIZED) | \
                                 HK_INSTALL_CONTEXT_BIT(HK_INSTALL_CONTEXT_ARBITRARY_RUNTIME))
 
-// Production routing is architecture-specific: compiling an arm64e slice is
-// not evidence that its PAC path is certified. Zero remains reserved for the
-// private host/test seam, whose synthetic runtime has no iOS architecture.
+// Production routing is architecture-specific. This mask records the accepted
+// release lane, not proof of a physical-device run; evidence records carry
+// that separate certification status. Zero remains reserved for host fakes.
 typedef uint32_t hk_engine_architecture_mask_t;
 #define HK_ENGINE_ARCHITECTURE_ARM64  (1u << 0)
 #define HK_ENGINE_ARCHITECTURE_ARM64E (1u << 1)
@@ -70,9 +70,7 @@ typedef struct {
     hk_target_kind_mask_t exact_image_scope_targets;
     hk_install_context_mask_t install_contexts;
     // Architectures this engine was built to handle, and the subset accepted
-    // for production routing. This release accepts the source/ABI-reviewed
-    // arm64e lane without requiring a second physical device; the private
-    // test registration can still bypass both masks.
+    // for production routing. Device certification is tracked separately.
     hk_engine_architecture_mask_t architectures;
     hk_engine_architecture_mask_t certified_architectures;
     // Minimum iOS version for this engine mode. A zero value is reserved for

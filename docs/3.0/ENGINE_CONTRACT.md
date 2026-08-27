@@ -139,14 +139,13 @@ rebind engine's atomic slot CAS.
 
 ## Engine certification
 
-Only certified engine modes participate in automatic routing (the private
-test SPI can enable uncertified modes for testing, but that SPI never ships
-in public production headers). Certification requires host conformance,
-device conformance for every claimed architecture/lane, continuation
-classification, effect classification, verification behavior, mutation-state
-accuracy, ownership interaction tests, and — for provider-backed engines —
-an evidence record per `hookkit-provider-evidence.schema.json` with
-`certification_status: "device_certified"`.
+Only architectures in `certified_architectures` participate in automatic
+routing. Despite the retained field name, this is the production-routing
+allowlist; physical-device certification is a separate evidence claim. An
+arm64e lane may be host/source/ABI accepted while its evidence remains
+`certification_status: "uncertified"`. A `device_certified` claim additionally
+requires device conformance for that architecture, including continuation,
+effects, verification, mutation-state, ownership, and provider evidence.
 
 **What's already true of the 2.x code this maps onto** (informs which
 engines are closest to certifiable once ported):

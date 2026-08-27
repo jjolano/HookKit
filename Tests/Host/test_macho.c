@@ -27,6 +27,16 @@ static void put_u32(uint8_t *b, size_t off, uint32_t v) {
     memcpy(b + off, &v, sizeof(v));
 }
 
+static void put_be32(uint8_t *b, size_t off, uint32_t v) {
+    b[off] = (uint8_t)(v >> 24); b[off + 1] = (uint8_t)(v >> 16);
+    b[off + 2] = (uint8_t)(v >> 8); b[off + 3] = (uint8_t)v;
+}
+
+static void put_be64(uint8_t *b, size_t off, uint64_t v) {
+    put_be32(b, off, (uint32_t)(v >> 32));
+    put_be32(b, off + 4, (uint32_t)v);
+}
+
 // Writes a 64-bit Mach-O header. `ncmds`/`sizeofcmds` are written verbatim so
 // tests can deliberately make them inconsistent with the actual commands.
 static void write_header(uint8_t *b, uint32_t magic, uint32_t ncmds, uint32_t sizeofcmds) {
@@ -83,6 +93,53 @@ static void test_valid_header(void) {
     assert(h.sizeofcmds == HK_SYMTAB_COMMAND_SIZE);
     assert(h.filetype == 6);
     printf("  valid-header: PASS\n");
+}
+
+static void test_selects_thin_fat32_and_fat64_slices(void) {
+    const uint32_t cpu = 0x0100000cu;
+    const uint32_t subtype = 2;
+    const void *slice = NULL;
+    size_t slice_size = 0;
+
+    uint8_t thin[HK_MACHO_HEADER_64_SIZE];
+    write_header(thin, HK_MH_MAGIC_64, 0, 0);
+    put_u32(thin, 8, subtype);
+    assert(hk_macho_select_slice(thin, sizeof(thin), cpu, subtype,
+                                 &slice, &slice_size) == HK_MACHO_OK);
+    assert(slice == thin && slice_size == sizeof(thin));
+
+    uint8_t fat32[128] = {0};
+    put_be32(fat32, 0, HK_FAT_MAGIC);
+    put_be32(fat32, 4, 1);
+    put_be32(fat32, 8, cpu);
+    put_be32(fat32, 12, subtype);
+    put_be32(fat32, 16, 64);
+    put_be32(fat32, 20, HK_MACHO_HEADER_64_SIZE);
+    write_header(fat32 + 64, HK_MH_MAGIC_64, 0, 0);
+    put_u32(fat32 + 64, 8, subtype);
+    assert(hk_macho_select_slice(fat32, sizeof(fat32), cpu, subtype,
+                                 &slice, &slice_size) == HK_MACHO_OK);
+    assert(slice == fat32 + 64 && slice_size == HK_MACHO_HEADER_64_SIZE);
+
+    uint8_t fat64[192] = {0};
+    put_be32(fat64, 0, HK_FAT_MAGIC_64);
+    put_be32(fat64, 4, 1);
+    put_be32(fat64, 8, cpu);
+    put_be32(fat64, 12, subtype);
+    put_be64(fat64, 16, 128);
+    put_be64(fat64, 24, HK_MACHO_HEADER_64_SIZE);
+    write_header(fat64 + 128, HK_MH_MAGIC_64, 0, 0);
+    put_u32(fat64 + 128, 8, subtype);
+    assert(hk_macho_select_slice(fat64, sizeof(fat64), cpu, subtype,
+                                 &slice, &slice_size) == HK_MACHO_OK);
+    assert(slice == fat64 + 128 && slice_size == HK_MACHO_HEADER_64_SIZE);
+    assert(hk_macho_select_slice(fat64, sizeof(fat64), cpu, 0,
+                                 &slice, &slice_size) == HK_MACHO_NOT_FOUND);
+
+    put_be64(fat64, 24, 1000);
+    assert(hk_macho_select_slice(fat64, sizeof(fat64), cpu, subtype,
+                                 &slice, &slice_size) == HK_MACHO_MALFORMED);
+    printf("  selects-thin-fat32-and-fat64-slices: PASS\n");
 }
 
 static void test_magic_dispatch(void) {
@@ -485,6 +542,28 @@ static void test_section_flags_and_code_check(void) {
     printf("  section-flags-and-code-check: PASS\n");
 }
 
+static void test_runtime_address_code_classification(void) {
+    _Alignas(8) uint8_t img[SEG_IMG_SIZE];
+    const uint64_t base = 0x100000000ull;
+    build_segment_image(img, base);
+    size_t text = SEG_TEXT_OFF + HK_SEGMENT_COMMAND_64_SIZE;
+    size_t data = text + HK_SECTION_64_SIZE;
+    put_u64(img, text + 32, base + 0x400);
+    put_u64(img, text + 40, 0x40);
+    put_u64(img, data + 32, base + 0x500);
+    put_u64(img, data + 40, 0x40);
+    bool code = false;
+    assert(hk_macho_runtime_address_is_code(
+               img, sizeof(img), 0, base + 0x410, &code) == HK_MACHO_OK);
+    assert(code);
+    assert(hk_macho_runtime_address_is_code(
+               img, sizeof(img), 0, base + 0x510, &code) == HK_MACHO_OK);
+    assert(!code);
+    assert(hk_macho_runtime_address_is_code(
+               img, sizeof(img), 0, base + 0x900, &code) == HK_MACHO_NOT_FOUND);
+    printf("  runtime-address-code-classification: PASS\n");
+}
+
 static void test_section_array_must_fit_in_cmdsize(void) {
     // The check HookKit 2.x omits (it only runs on dyld-validated images): a
     // segment claiming more sections than its own cmdsize can hold would walk
@@ -810,6 +889,7 @@ static void test_image_span_tracks_both_ends(void) {
 
 int main(void) {
     test_valid_header();
+    test_selects_thin_fat32_and_fat64_slices();
     test_magic_dispatch();
     test_too_small_buffers();
     test_sizeofcmds_overrunning_buffer();
@@ -826,6 +906,7 @@ int main(void) {
     test_find_segment();
     test_segname_is_not_read_as_a_c_string();
     test_section_flags_and_code_check();
+    test_runtime_address_code_classification();
     test_section_array_must_fit_in_cmdsize();
     test_truncated_segment_command_rejected();
     test_loaded_image_symtab_translation();

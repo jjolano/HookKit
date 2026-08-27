@@ -22,6 +22,15 @@ static uint64_t read_u64(const uint8_t *p) {
     return v;
 }
 
+static uint32_t read_be32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint64_t read_be64(const uint8_t *p) {
+    return ((uint64_t)read_be32(p) << 32) | read_be32(p + 4);
+}
+
 hk_macho_status_t hk_macho_peek_header(const void *image, size_t size,
                                        hk_macho_header_t *out_header) {
     if (!image || !out_header) {
@@ -77,6 +86,80 @@ hk_macho_status_t hk_macho_read_header(const void *image, size_t size,
     if (out_header->sizeofcmds > size - HK_MACHO_HEADER_64_SIZE) {
         return HK_MACHO_MALFORMED;
     }
+    return HK_MACHO_OK;
+}
+
+hk_macho_status_t hk_macho_select_slice(const void *file, size_t file_size,
+                                        uint32_t cputype, uint32_t cpusubtype,
+                                        const void **out_slice,
+                                        size_t *out_slice_size) {
+    if (!file || !out_slice || !out_slice_size || file_size < 4) {
+        return HK_MACHO_TOO_SMALL;
+    }
+    const uint8_t *base = file;
+    hk_macho_header_t thin;
+    hk_macho_status_t thin_status = hk_macho_read_header(file, file_size, &thin);
+    if (thin_status == HK_MACHO_OK) {
+        if (thin.cputype != cputype || thin.cpusubtype != cpusubtype) {
+            return HK_MACHO_NOT_FOUND;
+        }
+        *out_slice = file;
+        *out_slice_size = file_size;
+        return HK_MACHO_OK;
+    }
+
+    uint32_t magic = read_be32(base);
+    bool fat64 = magic == HK_FAT_MAGIC_64;
+    if (magic != HK_FAT_MAGIC && !fat64) {
+        return thin_status;
+    }
+    if (file_size < 8) {
+        return HK_MACHO_MALFORMED;
+    }
+    uint32_t count = read_be32(base + 4);
+    size_t stride = fat64 ? 32u : 20u;
+    if ((uint64_t)count * stride > file_size - 8u) {
+        return HK_MACHO_MALFORMED;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *arch = base + 8u + (size_t)i * stride;
+        if (read_be32(arch) != cputype || read_be32(arch + 4) != cpusubtype) {
+            continue;
+        }
+        uint64_t offset = fat64 ? read_be64(arch + 8) : read_be32(arch + 8);
+        uint64_t size = fat64 ? read_be64(arch + 16) : read_be32(arch + 12);
+        if (offset > file_size || size > file_size - offset || size > SIZE_MAX) {
+            return HK_MACHO_MALFORMED;
+        }
+        hk_macho_header_t selected;
+        if (hk_macho_read_header(base + (size_t)offset, (size_t)size,
+                                 &selected) != HK_MACHO_OK ||
+            selected.cputype != cputype || selected.cpusubtype != cpusubtype) {
+            return HK_MACHO_MALFORMED;
+        }
+        *out_slice = base + (size_t)offset;
+        *out_slice_size = (size_t)size;
+        return HK_MACHO_OK;
+    }
+    return HK_MACHO_NOT_FOUND;
+}
+
+hk_macho_status_t hk_macho_copy_uuid(const void *image, size_t size,
+                                     uint8_t out_uuid[16]) {
+    if (!out_uuid) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    size_t offset = 0;
+    uint32_t cmdsize = 0;
+    hk_macho_status_t status = hk_macho_find_load_command(
+        image, size, HK_LC_UUID, &offset, &cmdsize);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (cmdsize < 24u) {
+        return HK_MACHO_MALFORMED;
+    }
+    memcpy(out_uuid, (const uint8_t *)image + offset + 8u, 16u);
     return HK_MACHO_OK;
 }
 
@@ -473,6 +556,59 @@ hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
         return status;
     }
     *out_flags = section.flags;
+    return HK_MACHO_OK;
+}
+
+typedef struct {
+    uintptr_t slide;
+    uintptr_t address;
+    bool found;
+    bool code;
+} address_section_ctx_t;
+
+static bool address_section_visit(void *opaque, uint8_t n_sect,
+                                  const hk_macho_section_t *section) {
+    (void)n_sect;
+    address_section_ctx_t *ctx = opaque;
+    if (section->size > UINT64_MAX - section->addr ||
+        section->addr > UINTPTR_MAX - ctx->slide) {
+        return true;
+    }
+    uintptr_t start = (uintptr_t)section->addr + ctx->slide;
+    uint64_t end64 = section->addr + section->size;
+    if (end64 > UINTPTR_MAX - ctx->slide) {
+        return true;
+    }
+    uintptr_t end = (uintptr_t)end64 + ctx->slide;
+    if (ctx->address >= start && ctx->address < end) {
+        ctx->found = true;
+        ctx->code = hk_macho_section_is_code(section->flags);
+        return false;
+    }
+    return true;
+}
+
+hk_macho_status_t hk_macho_runtime_address_is_code(const void *header,
+                                                   size_t header_region_size,
+                                                   uintptr_t slide,
+                                                   uintptr_t address,
+                                                   bool *out_is_code) {
+    if (!header || !out_is_code) {
+        return HK_MACHO_NOT_MACHO;
+    }
+    address_section_ctx_t ctx = {
+        .slide = slide,
+        .address = address,
+    };
+    hk_macho_status_t status = hk_macho_iterate_sections(
+        header, header_region_size, address_section_visit, &ctx);
+    if (status != HK_MACHO_OK) {
+        return status;
+    }
+    if (!ctx.found) {
+        return HK_MACHO_NOT_FOUND;
+    }
+    *out_is_code = ctx.code;
     return HK_MACHO_OK;
 }
 

@@ -16,16 +16,13 @@
 //   commit   revalidates each slot against what prepare saw (invariant #3)
 //            and writes.
 //
-// Both import mechanisms are consulted: LC_DYSYMTAB indirect symbols
-// (HKImportSlots.h) and chained fixups (HKChainedFixups.h). An iOS 15+ image
-// generally uses the latter, older ones the former, and a caller should not
-// have to know which.
+// Import metadata is authoritative and mutually exclusive: ordinary chained
+// images are walked from their original file words, shared-cache images use
+// the live cache patch table, and only legacy images use LC_DYSYMTAB.
 //
-// THE WRITE IS THE ONLY DEVICE-ONLY PART, and it is behind a seam. On device
-// it must change VM protection, write, restore, and on arm64e re-sign the
-// pointer for an __auth_got slot; none of that can run or be verified here.
-// Host tests supply a seam that writes into a buffer, which exercises every
-// decision this engine makes except the store itself.
+// The write is behind a seam. PAC selection and signing are host-tested with
+// tagged pointers; a physical arm64e run remains the hardware certification
+// gate for CPU authentication and real cache/protection behavior.
 //
 #ifndef HK_ENGINES_REBIND_H
 #define HK_ENGINES_REBIND_H
@@ -35,6 +32,7 @@
 #include <stdint.h>
 
 #include "../Core/HKArtifactLedger.h"
+#include "../../Internal/HKPointerAuth.h"
 #include "../Resolvers/HKImportSlots.h"
 #include "../Resolvers/HKSymbolTable.h"
 
@@ -54,6 +52,10 @@ typedef enum {
     HK_REBIND_INVALID_ARGUMENT,
     HK_REBIND_MALFORMED_IMAGE,
     HK_REBIND_TOO_MANY_SITES,
+    HK_REBIND_METADATA_UNAVAILABLE,
+    HK_REBIND_PAC_MISMATCH,
+    HK_REBIND_UNSUPPORTED_FORMAT,
+    HK_REBIND_SCOPE_UNREPRESENTABLE,
 } hk_rebind_status_t;
 
 // The one device-only operation. Returns false if the store could not be
@@ -64,6 +66,14 @@ typedef struct {
     const void *image_base;   // the mach header, as mapped
     size_t image_size;        // how much is readable from it
     uintptr_t slide;          // dyld slide; 0 for an unslid buffer
+    const char *image_path;   // original file, for authoritative chain words
+    const void *file_image;   // optional host/test seam; preferred over path
+    size_t file_image_size;
+    const void *cache_base;   // optional host/test seam; live cache otherwise
+    size_t cache_size;
+    bool uuid_present;
+    uint8_t uuid[16];
+    bool include_shared_cache_got;
     hk_rebind_write_fn write; // required for commit, unused by prepare
     void *write_ctx;
 } hk_rebind_target_t;
@@ -71,7 +81,12 @@ typedef struct {
 typedef struct {
     uintptr_t address;   // runtime address of the slot
     uint64_t original;   // value read during prepare, before any write
+    uint64_t callable_original; // standard IA/discriminator-zero base target
+    int64_t addend;
+    hk_pac_schema_t schema;
+    bool weak_import;
     bool from_chained;   // found via chained fixups rather than LC_DYSYMTAB
+    bool from_cache;
 } hk_rebind_site_t;
 
 typedef struct {
@@ -86,6 +101,9 @@ typedef struct {
 
 // Read-only slot witness shared by commit and post-commit verification.
 uint64_t hk_rebind_read_slot(uintptr_t address);
+bool hk_rebind_replacement_for_site(const hk_rebind_site_t *site,
+                                    uint64_t replacement,
+                                    uint64_t *out_value);
 
 // Phase 1. Enumerates slots and reads their current values. Mutates nothing.
 hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,

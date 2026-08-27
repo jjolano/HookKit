@@ -2,6 +2,7 @@
 // define is inert there). Keeps the host-side test build warning-free.
 #define _GNU_SOURCE
 #include "hk_swift.h"
+#include "../Internal/HKPointerAuth.h"
 #include "hk_native.h"
 
 #include <dlfcn.h>
@@ -27,20 +28,10 @@ typedef struct {
 // pre-write self-check discriminates real from tampered discriminators on a
 // machine with no PAC hardware.
 #ifndef hk_strip_code
-#if __has_feature(ptrauth_calls)
-#include <ptrauth.h>
-#define hk_strip_code(p)  ptrauth_strip((p), ptrauth_key_function_pointer)
-#define hk_strip_data(p)  ptrauth_strip((p), ptrauth_key_process_independent_data)
-#define hk_sign_code(p, d) ptrauth_sign_unauthenticated((void *)(p), ptrauth_key_function_pointer, (d))
-#define hk_blend_disc(p, x) ptrauth_blend_discriminator((p), (x))
-#else
-// Identity, but still consume the arguments so `extra`/`disc` stay "used"
-// under -Werror on non-PAC builds.
-#define hk_strip_code(p)  (p)
-#define hk_strip_data(p)  (p)
-#define hk_sign_code(p, d) ((void)(d), (void *)(p))
-#define hk_blend_disc(p, x) ((void)(p), (void)(x), (uintptr_t)0)
-#endif
+#define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
+#define hk_strip_data(p) ((void *)hk_pac_strip_key((uintptr_t)(p), HK_PAC_KEY_DA))
+#define hk_sign_code(p, d) ((void *)hk_pac_sign_key((uintptr_t)(p), HK_PAC_KEY_IA, (d)))
+#define hk_blend_disc(p, x) hk_pac_blend((uintptr_t)(p), (uintptr_t)(x))
 #endif
 
 static int hk_swift_errno = 0;
@@ -365,7 +356,7 @@ bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
     // Publish the stripped original BEFORE the slot mutates: callers wiring a
     // trampoline chain to the original need it before the write, not after.
     if(out_orig) {
-        *out_orig = hk_strip_code(plan->original);
+        *out_orig = hk_sign_code(hk_strip_code(plan->original), 0);
     }
 
     // Strip-then-sign: the replacement may arrive already PAC-signed (dlsym,

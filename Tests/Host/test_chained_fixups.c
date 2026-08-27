@@ -396,10 +396,10 @@ static uint64_t arm64e_rebase24(uint32_t next) {
     uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
 }
 
-static uint64_t ptr64_bind(uint32_t ordinal, uint32_t next) {
+static uint64_t ptr64_bind(uint32_t ordinal, uint32_t next, uint8_t addend) {
     struct dyld_chained_ptr_64_bind e;
     memset(&e, 0, sizeof(e));
-    e.ordinal = ordinal; e.next = next; e.bind = 1;
+    e.ordinal = ordinal; e.addend = addend; e.next = next; e.bind = 1;
     uint64_t raw; memcpy(&raw, &e, sizeof(raw)); return raw;
 }
 
@@ -530,8 +530,8 @@ static void test_ptr64_format_has_its_own_bit_layout(void) {
     _Alignas(8) uint8_t img[T_IMG_SIZE];
     build_traversal_blob(blob, HK_CHAINED_PTR_64, 0x10, 1);
     memset(img, 0, sizeof(img));
-    put_u64f(img, 0x110, ptr64_bind(1, 4));   // stride 4 -> next 4 == +16 bytes
-    put_u64f(img, 0x120, ptr64_bind(0, 0));
+    put_u64f(img, 0x110, ptr64_bind(1, 4, 255)); // stride 4 -> next 4 == +16 bytes
+    put_u64f(img, 0x120, ptr64_bind(0, 0, 0));
 
     hk_chained_fixups_t fixups;
     assert(hk_chained_fixups_parse(blob, sizeof(blob), &fixups) == HK_CHAINED_OK);
@@ -541,6 +541,7 @@ static void test_ptr64_format_has_its_own_bit_layout(void) {
     assert(c.n == 2);
     assert(c.binds[0].slot_image_offset == 0x110 && c.binds[0].import_ordinal == 1);
     assert(c.binds[1].slot_image_offset == 0x120 && c.binds[1].import_ordinal == 0);
+    assert(c.binds[0].addend == 255); // Apple's PTR_64 addend is unsigned.
     assert(!c.binds[0].is_auth);  // PTR_64 has no auth bit
     printf("  ptr64-format-has-its-own-bit-layout: PASS\n");
 }

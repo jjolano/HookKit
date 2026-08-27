@@ -129,7 +129,19 @@ typedef struct {
     uint32_t segment_index;
     uint16_t pointer_format;
     bool is_auth;              // arm64e authenticated bind
+    uint8_t key;               // 0=IA, 1=IB, 2=DA, 3=DB
+    uint16_t diversity;
+    bool address_diversity;
+    int64_t addend;            // addend encoded in the pointer word
 } hk_chained_bind_t;
+
+// Translation for one LC_SEGMENT_64 when chain words are read from the
+// original file rather than dyld's already-fixed live mapping.
+typedef struct {
+    uint64_t image_offset;
+    uint64_t file_offset;
+    uint64_t file_size;
+} hk_chained_segment_mapping_t;
 
 typedef bool (*hk_chained_bind_visit_fn)(void *ctx, const hk_chained_bind_t *bind);
 
@@ -153,6 +165,11 @@ hk_chained_status_t hk_chained_fixups_iterate_binds(const hk_chained_fixups_t *f
                                                     size_t image_size,
                                                     hk_chained_bind_visit_fn visit,
                                                     void *ctx);
+
+hk_chained_status_t hk_chained_fixups_iterate_file_binds(
+    const hk_chained_fixups_t *fixups, const void *file_base, size_t file_size,
+    const hk_chained_segment_mapping_t *segments, uint32_t segment_count,
+    hk_chained_bind_visit_fn visit, void *ctx);
 
 // Finds the first import whose name matches, using the SAME linker-form
 // candidate expansion as hk_resolve_symbol and hk_import_slots_find
