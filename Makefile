@@ -267,7 +267,7 @@ conformance:
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-abi test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-rebind-engine test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-abi test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-rebind-engine test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
 
 .PHONY: test-abi
 test-abi:
@@ -369,6 +369,13 @@ test-plan-analyze:
 .PHONY: test-engine-registry
 test-engine-registry:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_engine_registry Tests/Host/test_engine_registry.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_engine_registry$(ECHO_END)
+
+# HookKit 3.0 backend-selection override: hk_runtime_apply_backend_policy
+# reorders/trims the registered engines[] from HOOKKIT_BACKENDS /
+# HOOKKIT_DISABLE_BACKENDS (v1's "pick the backend" knob, without Modulous).
+.PHONY: test-backend-policy
+test-backend-policy:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_backend_policy Tests/Host/test_backend_policy.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_backend_policy$(ECHO_END)
 
 # HookKit 3.0 plan preparation test (Milestone 4): real hk_plan_prepare.
 # Covers the per-hook outcome transitions (ANALYZED -> PREPARED/

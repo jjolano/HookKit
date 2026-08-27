@@ -568,4 +568,18 @@ bool hk_runtime_register_engine_with_context(
     const hk_engine_vtable_t *vtable,
     void *engine_ctx);
 
+// Applies the optional backend-selection override to the already-registered
+// engines[], in place: reorders by an ordered preference and/or drops a
+// disable set, keyed on each engine's describe().engine_id (matched
+// case-insensitively, tolerating an omitted "provider-" prefix so "ellekit"
+// matches "provider-ellekit"). Sources, in precedence order: the environment
+// variables HOOKKIT_BACKENDS / HOOKKIT_DISABLE_BACKENDS (comma- or
+// space-separated), then on iOS the "Backends" / "DisabledBackends" keys of
+// the me.jjolano.hookkit preferences. The choosable set is exactly the
+// engines this build registered -- unknown tokens match nothing. Never empties
+// the registry: a disable set covering every engine is ignored. Called once by
+// hk_runtime_create after platform engines register; host tests may call it
+// after registering their own engines. Defined in HKRuntime.c.
+void hk_runtime_apply_backend_policy(hk_runtime_t *runtime);
+
 #endif // HK_CORE_ENGINE_INTERNAL_H

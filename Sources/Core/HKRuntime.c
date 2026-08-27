@@ -706,6 +706,7 @@ hk_status_t hk_runtime_create(
     atomic_init(&runtime->shutdown_called, false);
 
     hk_runtime_register_platform_engines(runtime);
+    hk_runtime_apply_backend_policy(runtime);
 
     *out_runtime = runtime;
     return HK_STATUS_OK;
@@ -940,6 +941,200 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
 #else
     (void)runtime;
 #endif
+}
+
+// --- Backend-selection override -----------------------------------------
+// Reorders/trims engines[] from an ordered preference and a disable set. The
+// choosable names are the engines this build registered (their engine_id);
+// nothing external is loaded, so this replaces v1's Modulous priority without
+// its plugin machinery. Strict C11 on purpose (no strtok_r/strdup/strcasecmp)
+// so the -std=c11 -Werror host tests compile it unchanged.
+
+#define HK_BACKEND_UNRANKED (1L << 30)  // sorts after any real token index
+
+// Case-insensitive equality of the span text[0..len) against C-string id.
+static bool hk_ci_span_eq(const char *text, size_t len, const char *id) {
+    size_t i = 0;
+    for (; i < len && id[i]; i++) {
+        char a = text[i], b = id[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        if (a != b) {
+            return false;
+        }
+    }
+    return i == len && id[i] == '\0';
+}
+
+// A token matches an engine_id exactly, or with the "provider-" prefix
+// omitted, so "ellekit" selects "provider-ellekit".
+static bool hk_backend_span_matches(const char *tok, size_t len, const char *id) {
+    if (!id) {
+        return false;
+    }
+    if (hk_ci_span_eq(tok, len, id)) {
+        return true;
+    }
+    static const char prefix[] = "provider-";
+    size_t pn = sizeof(prefix) - 1;
+    return strncmp(id, prefix, pn) == 0 && hk_ci_span_eq(tok, len, id + pn);
+}
+
+// 0-based index of the first comma/space-separated token in `list` matching
+// `id`, or -1 if none. Read-only walk -- no copy, no mutation.
+static int hk_backend_token_index(const char *list, const char *id) {
+    if (!list || !id) {
+        return -1;
+    }
+    int idx = 0;
+    for (const char *p = list; *p;) {
+        while (*p == ',' || *p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        const char *start = p;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t') {
+            p++;
+        }
+        size_t len = (size_t)(p - start);
+        if (len && hk_backend_span_matches(start, len, id)) {
+            return idx;
+        }
+        idx++;
+    }
+    return -1;
+}
+
+#if defined(__APPLE__) && TARGET_OS_IOS
+#include <CoreFoundation/CoreFoundation.h>
+// Joins the me.jjolano.hookkit preference `key` (a string, or an array of
+// strings) into a malloc'd comma-separated C string, or NULL. Caller frees.
+static char *hk_backend_pref_csv(CFStringRef key) {
+    CFPropertyListRef value =
+        CFPreferencesCopyAppValue(key, CFSTR("me.jjolano.hookkit"));
+    if (!value) {
+        return NULL;
+    }
+    CFMutableStringRef joined = CFStringCreateMutable(NULL, 0);
+    if (CFGetTypeID(value) == CFArrayGetTypeID()) {
+        CFIndex count = CFArrayGetCount(value);
+        for (CFIndex i = 0; i < count; i++) {
+            CFStringRef s = CFArrayGetValueAtIndex(value, i);
+            if (s && CFGetTypeID(s) == CFStringGetTypeID()) {
+                if (CFStringGetLength(joined) > 0) {
+                    CFStringAppendCString(joined, ",", kCFStringEncodingUTF8);
+                }
+                CFStringAppend(joined, s);
+            }
+        }
+    } else if (CFGetTypeID(value) == CFStringGetTypeID()) {
+        CFStringAppend(joined, value);
+    }
+    CFRelease(value);
+
+    char *out = NULL;
+    CFIndex cap = CFStringGetMaximumSizeForEncoding(
+                      CFStringGetLength(joined), kCFStringEncodingUTF8) + 1;
+    if (cap > 0 && (out = (char *)malloc((size_t)cap)) != NULL) {
+        if (!CFStringGetCString(joined, out, cap, kCFStringEncodingUTF8)) {
+            free(out);
+            out = NULL;
+        }
+    }
+    CFRelease(joined);
+    return out;
+}
+#endif
+
+void hk_runtime_apply_backend_policy(hk_runtime_t *runtime) {
+    if (!runtime || runtime->engine_count == 0) {
+        return;
+    }
+
+    const char *order = getenv("HOOKKIT_BACKENDS");
+    const char *disable = getenv("HOOKKIT_DISABLE_BACKENDS");
+    char *order_owned = NULL;
+    char *disable_owned = NULL;
+#if defined(__APPLE__) && TARGET_OS_IOS
+    if (!order) {
+        order = order_owned = hk_backend_pref_csv(CFSTR("Backends"));
+    }
+    if (!disable) {
+        disable = disable_owned = hk_backend_pref_csv(CFSTR("DisabledBackends"));
+    }
+#endif
+    if ((!order || !*order) && (!disable || !*disable)) {
+        free(order_owned);
+        free(disable_owned);
+        return;
+    }
+
+    size_t n = runtime->engine_count;
+    const char *ids[HK_RUNTIME_MAX_ENGINES];
+    bool drop[HK_RUNTIME_MAX_ENGINES];
+    size_t survivors = 0;
+    for (size_t i = 0; i < n; i++) {
+        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
+                     ? runtime->engines[i]->describe().engine_id
+                     : NULL;
+        drop[i] = disable && hk_backend_token_index(disable, ids[i]) >= 0;
+        if (!drop[i]) {
+            survivors++;
+        }
+    }
+    if (survivors == 0) {  // never let a disable set empty the registry
+        for (size_t i = 0; i < n; i++) {
+            drop[i] = false;
+        }
+    }
+
+    // Stable order: kept engines by (preference rank, original index). Matched
+    // tokens sort by their position; unmatched keep their original order after.
+    size_t idx_order[HK_RUNTIME_MAX_ENGINES];
+    long keys[HK_RUNTIME_MAX_ENGINES];
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (drop[i]) {
+            continue;
+        }
+        int rank = order ? hk_backend_token_index(order, ids[i]) : -1;
+        idx_order[kept] = i;
+        keys[kept] = rank >= 0 ? (long)rank : HK_BACKEND_UNRANKED + (long)i;
+        kept++;
+    }
+    for (size_t a = 1; a < kept; a++) {  // stable insertion sort, n <= 16
+        size_t vi = idx_order[a];
+        long vk = keys[a];
+        size_t b = a;
+        while (b > 0 && keys[b - 1] > vk) {
+            idx_order[b] = idx_order[b - 1];
+            keys[b] = keys[b - 1];
+            b--;
+        }
+        idx_order[b] = vi;
+        keys[b] = vk;
+    }
+
+    const hk_engine_vtable_t *new_engines[HK_RUNTIME_MAX_ENGINES];
+    void *new_ctxs[HK_RUNTIME_MAX_ENGINES];
+    bool new_testing[HK_RUNTIME_MAX_ENGINES];
+    for (size_t k = 0; k < kept; k++) {
+        size_t src = idx_order[k];
+        new_engines[k] = runtime->engines[src];
+        new_ctxs[k] = runtime->engine_ctxs[src];
+        new_testing[k] = runtime->engine_testing[src];
+    }
+    for (size_t k = 0; k < kept; k++) {
+        runtime->engines[k] = new_engines[k];
+        runtime->engine_ctxs[k] = new_ctxs[k];
+        runtime->engine_testing[k] = new_testing[k];
+    }
+    runtime->engine_count = kept;
+
+    free(order_owned);
+    free(disable_owned);
 }
 
 // hk_runtime_drain_pending now lives in HKPlan.c, next to the per-hook

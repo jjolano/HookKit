@@ -28,6 +28,41 @@ HKSubstitutor *sub = [HKSubstitutor substitutorWithOrderedTypes:@[@(HK_LIB_SUBST
 - With no types set, `activeType` still reports the legacy pinned provider/fishhook backend used by image and symbol APIs. Function and memory hooks may select another backend per operation; `activeType` is not their winner.
 - `getSubstitutorTypeInfo:` returns per-backend metadata including a `selectable` flag for settings-style pickers: substrate, substitute, and swift are excluded from user-facing selection.
 
+### Overriding the default backend
+
+Where v1 let the device decide which hooking engine wins by installing a Modulous provider bundle and giving it priority, HookKit 3 has every engine compiled in and picks per operation. That per-operation order can be overridden — device-wide or per process — **without any plugin system**: the override just reorders and/or trims the built-in engine registry the operation router walks.
+
+The choosable names are exactly the engines this build registered — their `engine_id`. The `provider-` prefix is optional and matching is case-insensitive, so `ellekit` and `provider-ellekit` are the same:
+
+| Name(s) | Engine |
+|---------|--------|
+| `ellekit` | ElleKit provider |
+| `dobby` | Dobby provider |
+| `gum` | Frida Gum provider |
+| `substitute` | Cydia Substrate / Substitute provider |
+| `rebind` | fishhook-style symbol rebinder |
+| `inline-terminal`, `inline-relocating` | native inline engines |
+| `memory` | native memory patcher |
+| `objc` | Objective-C message engine |
+
+Two knobs, from two sources (environment first, then — on iOS — the `me.jjolano.hookkit` preferences; environment wins):
+
+- **Preference order** — `HOOKKIT_BACKENDS` env (comma/space-separated) or the `Backends` preference array. Listed engines are tried first, in that order; unlisted ones keep their default order after. This is pure reordering, so it only changes the winner when candidates otherwise tie.
+- **Disable** — `HOOKKIT_DISABLE_BACKENDS` env or the `DisabledBackends` preference array. Removes those engines outright — the way to *force* a lower-priority engine over one the router would otherwise prefer. A disable set covering every engine is ignored (the registry is never emptied). Disabling `objc` disables Objective-C message hooking.
+
+```sh
+# force ElleKit for inline work, take fishhook out of the running
+HOOKKIT_BACKENDS=ellekit HOOKKIT_DISABLE_BACKENDS=rebind MyTweakHost
+```
+
+```xml
+<!-- /var/mobile/Library/Preferences/me.jjolano.hookkit.plist (rootless: under the jailbreak prefix) -->
+<key>Backends</key><array><string>ellekit</string><string>dobby</string></array>
+<key>DisabledBackends</key><array><string>gum</string></array>
+```
+
+Unknown names match nothing (so a typo is inert, never an error), and a preferred engine that can't serve a given operation still falls through to the next — the same `HK_ERR_NOT_SUPPORTED` fall-through the router already applies. The facade selection APIs (`substitutorWithTypes:` etc.) are unaffected; this override is the device/process-level policy, not the in-code one.
+
 ### Capability matrix
 
 Message hooking is facade-native and available independently of this matrix.
