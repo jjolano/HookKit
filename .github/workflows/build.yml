@@ -51,6 +51,7 @@ jobs:
             -install_name @rpath/libHookKitLiveTargets.dylib \
             -o "$targets" Tests/MacOS/live_hook_targets.c
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
+            -DHK_REBIND_DIAGNOSTICS \
             -arch "${{ matrix.arch }}" -Wl,-no_fixup_chains \
             -framework Foundation -lpthread \
             -o "$out" \

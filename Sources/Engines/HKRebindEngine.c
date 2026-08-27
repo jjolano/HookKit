@@ -8,6 +8,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(HK_REBIND_DIAGNOSTICS)
+#include <stdio.h>
+#endif
 
 #include "../Resolvers/HKChainedFixups.h"
 #include "../Resolvers/HKDyldCachePatches.h"
@@ -72,6 +75,14 @@ static add_site_status_t add_site(hk_rebind_plan_t *plan, uintptr_t address,
         return ADD_SITE_OVERFLOW;
     }
     uint64_t old = hk_rebind_read_slot(address);
+#if defined(HK_REBIND_DIAGNOSTICS)
+    fprintf(stderr,
+            "rebind site: address=%#lx old=%#llx auth=%d key=%u diversity=%u address_diversity=%d addend=%lld weak=%d\n",
+            (unsigned long)address, (unsigned long long)old,
+            schema->authenticated, (unsigned)schema->key,
+            (unsigned)schema->diversity,
+            schema->address_diversity, (long long)addend, weak_import);
+#endif
     if (old == 0) {
         if (!weak_import || addend != 0) {
             return ADD_SITE_MALFORMED;
