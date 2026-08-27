@@ -8,6 +8,7 @@
 #include <objc/runtime.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../../Internal/HKPointerAuth.h"
@@ -223,8 +224,13 @@ static void test_rebind_hook(void) {
     target.write = write_pointer;
 
     hk_rebind_plan_t plan;
-    assert(hk_rebind_prepare(&target, "puts", HK_SYMBOL_NAME_C, &plan) ==
-           HK_REBIND_OK);
+    hk_rebind_status_t status =
+        hk_rebind_prepare(&target, "puts", HK_SYMBOL_NAME_C, &plan);
+    if (status != HK_REBIND_OK) {
+        fprintf(stderr, "rebind prepare failed: %d (%s)\n", status,
+                target.image_path);
+        abort();
+    }
     assert(plan.count > 0 && plan.originals_agree);
     g_original_puts = (int (*)(const char *))(uintptr_t)plan.original;
     assert(g_original_puts);
