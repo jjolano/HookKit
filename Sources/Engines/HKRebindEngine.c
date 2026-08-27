@@ -8,12 +8,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined(HK_REBIND_DIAGNOSTICS)
-#include <stdio.h>
-#define HK_REBIND_DIAG(...) fprintf(stderr, __VA_ARGS__)
-#else
-#define HK_REBIND_DIAG(...) ((void)0)
-#endif
 
 #include "../Resolvers/HKChainedFixups.h"
 #include "../Resolvers/HKDyldCachePatches.h"
@@ -78,14 +72,6 @@ static add_site_status_t add_site(hk_rebind_plan_t *plan, uintptr_t address,
         return ADD_SITE_OVERFLOW;
     }
     uint64_t old = hk_rebind_read_slot(address);
-#if defined(HK_REBIND_DIAGNOSTICS)
-    fprintf(stderr,
-            "rebind site: address=%#lx old=%#llx auth=%d key=%u diversity=%u address_diversity=%d addend=%lld weak=%d\n",
-            (unsigned long)address, (unsigned long long)old,
-            schema->authenticated, (unsigned)schema->key,
-            (unsigned)schema->diversity,
-            schema->address_diversity, (long long)addend, weak_import);
-#endif
     if (old == 0) {
         if (!weak_import || addend != 0) {
             return ADD_SITE_MALFORMED;
@@ -274,7 +260,6 @@ static hk_rebind_status_t prepare_file_chains(
     const hk_macho_header_t *loaded_header, hk_rebind_plan_t *plan) {
     file_view_t file;
     if (!open_file_view(target, &file)) {
-        HK_REBIND_DIAG("rebind chains: open failed\n");
         return HK_REBIND_METADATA_UNAVAILABLE;
     }
     const void *slice = NULL;
@@ -283,7 +268,6 @@ static hk_rebind_status_t prepare_file_chains(
         file.base, file.size, loaded_header->cputype, loaded_header->cpusubtype,
         &slice, &slice_size);
     if (macho != HK_MACHO_OK) {
-        HK_REBIND_DIAG("rebind chains: slice=%d\n", macho);
         close_file_view(&file);
         return macho == HK_MACHO_NOT_FOUND ? HK_REBIND_UNSUPPORTED_FORMAT
                                             : HK_REBIND_MALFORMED_IMAGE;
@@ -293,14 +277,12 @@ static hk_rebind_status_t prepare_file_chains(
     if (hk_macho_copy_uuid(target->image_base, live_size, live_uuid) != HK_MACHO_OK ||
         hk_macho_copy_uuid(slice, slice_size, file_uuid) != HK_MACHO_OK ||
         memcmp(live_uuid, file_uuid, sizeof(live_uuid)) != 0) {
-        HK_REBIND_DIAG("rebind chains: uuid mismatch\n");
         close_file_view(&file);
         return HK_REBIND_MALFORMED_IMAGE;
     }
     size_t fixup_offset = 0, fixup_size = 0;
     if (hk_macho_find_chained_fixups(slice, slice_size, &fixup_offset,
                                      &fixup_size) != HK_MACHO_OK) {
-        HK_REBIND_DIAG("rebind chains: fixups missing\n");
         close_file_view(&file);
         return HK_REBIND_MALFORMED_IMAGE;
     }
@@ -308,7 +290,6 @@ static hk_rebind_status_t prepare_file_chains(
     hk_chained_status_t chained = hk_chained_fixups_parse(
         (const uint8_t *)slice + fixup_offset, fixup_size, &fixups);
     if (chained != HK_CHAINED_OK) {
-        HK_REBIND_DIAG("rebind chains: parse=%d\n", chained);
         close_file_view(&file);
         return chained == HK_CHAINED_UNSUPPORTED_FORMAT ||
                        chained == HK_CHAINED_UNSUPPORTED_VERSION
@@ -319,8 +300,6 @@ static hk_rebind_status_t prepare_file_chains(
     if (hk_macho_iterate_segments(slice, slice_size, collect_segment,
                                   &collected) != HK_MACHO_OK ||
         collected.overflow || collected.count == 0) {
-        HK_REBIND_DIAG("rebind chains: segments count=%u overflow=%d\n",
-                       collected.count, collected.overflow);
         close_file_view(&file);
         return collected.overflow ? HK_REBIND_UNSUPPORTED_FORMAT
                                   : HK_REBIND_MALFORMED_IMAGE;
@@ -334,16 +313,18 @@ static hk_rebind_status_t prepare_file_chains(
         }
     }
     if (preferred == UINT64_MAX) {
-        HK_REBIND_DIAG("rebind chains: no preferred address\n");
         close_file_view(&file);
         return HK_REBIND_MALFORMED_IMAGE;
     }
     hk_chained_segment_mapping_t mappings[HK_REBIND_MAX_SEGMENTS];
     for (uint32_t i = 0; i < collected.count; i++) {
         hk_macho_segment_t *segment = &collected.segments[i];
+        if (strcmp(segment->segname, "__PAGEZERO") == 0) {
+            memset(&mappings[i], 0, sizeof(mappings[i]));
+            continue;
+        }
         if (segment->vmaddr < preferred || segment->fileoff > slice_size ||
             segment->filesize > slice_size - segment->fileoff) {
-            HK_REBIND_DIAG("rebind chains: segment %u invalid\n", i);
             close_file_view(&file);
             return HK_REBIND_MALFORMED_IMAGE;
         }
@@ -361,8 +342,6 @@ static hk_rebind_status_t prepare_file_chains(
     chained = hk_chained_fixups_iterate_file_binds(
         &fixups, slice, slice_size, mappings, collected.count,
         chained_bind_cb, &ctx);
-    HK_REBIND_DIAG("rebind chains: iterate=%d count=%u malformed=%d pac=%d\n",
-                   chained, plan->count, ctx.malformed, ctx.pac_mismatch);
     close_file_view(&file);
     if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
     if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;

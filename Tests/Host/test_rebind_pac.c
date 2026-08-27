@@ -54,20 +54,21 @@ static void build_header(uint8_t *b) {
     put_u32(b, 4, CPU_ARM64);
     put_u32(b, 8, CPU_SUBTYPE_ARM64E);
     put_u32(b, 12, 6);
-    put_u32(b, 16, 5);
-    put_u32(b, 20, 256);
-    put_segment(b, 32, "__TEXT", VM_BASE, 0x400, 0, 0x200, 5);
-    put_segment(b, 104, "__DATA", VM_BASE + 0x400, 0x100,
+    put_u32(b, 16, 6);
+    put_u32(b, 20, 328);
+    put_segment(b, 32, "__PAGEZERO", 0, VM_BASE, 0, 0, 0);
+    put_segment(b, 104, "__TEXT", VM_BASE, 0x400, 0, 0x200, 5);
+    put_segment(b, 176, "__DATA", VM_BASE + 0x400, 0x100,
                 DATA_FILE_OFFSET, 0x100, 3);
-    put_segment(b, 176, "__LINKEDIT", VM_BASE + 0x500, 0x200,
+    put_segment(b, 248, "__LINKEDIT", VM_BASE + 0x500, 0x200,
                 0x300, 0x200, 1);
-    put_u32(b, 248, HK_LC_UUID);
-    put_u32(b, 252, 24);
-    memcpy(b + 256, UUID, sizeof(UUID));
-    put_u32(b, 272, HK_LC_DYLD_CHAINED_FIXUPS);
-    put_u32(b, 276, HK_LINKEDIT_DATA_CMD_SIZE);
-    put_u32(b, 280, FIXUPS_FILE_OFFSET);
-    put_u32(b, 284, FIXUPS_SIZE);
+    put_u32(b, 320, HK_LC_UUID);
+    put_u32(b, 324, 24);
+    memcpy(b + 328, UUID, sizeof(UUID));
+    put_u32(b, 344, HK_LC_DYLD_CHAINED_FIXUPS);
+    put_u32(b, 348, HK_LINKEDIT_DATA_CMD_SIZE);
+    put_u32(b, 352, FIXUPS_FILE_OFFSET);
+    put_u32(b, 356, FIXUPS_SIZE);
 }
 
 static void build_fixups(uint8_t *file) {
@@ -80,16 +81,17 @@ static void build_fixups(uint8_t *file) {
     put_u32(b, 16, 1);
     put_u32(b, 20, HK_CHAINED_IMPORT_ADDEND);
     put_u32(b, 24, 0);
-    put_u32(b, 28, 3);
+    put_u32(b, 28, 4);
     put_u32(b, 32, 0);
-    put_u32(b, 36, 16);
-    put_u32(b, 40, 0);
-    put_u32(b, 44, 24);
-    put_u16(b, 48, 0x100);
-    put_u16(b, 50, HK_CHAINED_PTR_ARM64E_USERLAND24);
-    put_u64(b, 52, 0x400);
-    put_u16(b, 64, 1);
-    put_u16(b, 66, 0x10);
+    put_u32(b, 36, 0);
+    put_u32(b, 40, 20);
+    put_u32(b, 44, 0);
+    put_u32(b, 48, 24);
+    put_u16(b, 52, 0x100);
+    put_u16(b, 54, HK_CHAINED_PTR_ARM64E_USERLAND24);
+    put_u64(b, 56, 0x400);
+    put_u16(b, 68, 1);
+    put_u16(b, 70, 0x10);
     put_u32(b, 72, 1);
     put_u32(b, 76, 5);
     memcpy(b + 80, "_foo", 5);
@@ -173,7 +175,7 @@ int main(void) {
     assert(hk_rebind_read_slot((uintptr_t)live + SLOT_IMAGE_OFFSET + 8) == expected1);
 
     setup(live, file, &writer, &target);
-    file[256] ^= 1;
+    file[328] ^= 1;
     writer.calls = 0;
     assert(hk_rebind_prepare(&target, "foo", HK_SYMBOL_NAME_C, &plan) ==
            HK_REBIND_MALFORMED_IMAGE);
