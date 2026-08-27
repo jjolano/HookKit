@@ -3,6 +3,7 @@
 
 #include <mach/mach_time.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 
@@ -144,11 +145,25 @@ int main(void) {
         int failures = 0;
         volatile int argument = 10;
 
+        // This lane exists to observe HookKit's OWN native engines — above all
+        // the one-page-per-trampoline allocator the page check below asserts.
+        // When a provider (ElleKit/Substrate/Gum) is installed it wins the
+        // function-inline route and serves the hook from its own packed arena,
+        // so the check would measure the provider's layout, not HookKit's, and
+        // report "the old arena is back" on a perfectly healthy build. Pin the
+        // built-in engines for the whole run; the provider path has its own
+        // dedicated device-provider*-smoke coverage.
+        setenv("HOOKKIT_DISABLE_BACKENDS",
+               "provider-dobby,provider-gum,provider-ellekit,provider-substitute", 1);
+
         HKSubstitutor *dobby = [HKSubstitutor substitutorWithTypes:HK_LIB_DOBBY];
         hookkit_status_t status = [dobby hookFunction:(void *)dobbyTarget
             withReplacement:(void *)dobbyReplacement outOldPtr:(void **)&dobbyOriginal];
         int dobbyValue = dobbyTarget(argument);
-        BOOL dobbyOK = dobby.activeType == HK_LIB_DOBBY && status == HK_OK &&
+        // activeType is intentionally HK_LIB_NONE in the HookKit 3 facade — the
+        // 2.x backend-type router is retired — so it is no longer asserted here;
+        // the hook is verified by its observable effect instead.
+        BOOL dobbyOK = status == HK_OK &&
             dobbyOriginal && dobbyHits == 1 && dobbyValue == 155 && dobbyOriginal(argument) == 55;
         printf("Dobby: %s status=%d original=%p hits=%d value=%d\n",
             dobbyOK ? "PASS" : "FAIL", status, dobbyOriginal, dobbyHits, dobbyValue);
@@ -158,7 +173,7 @@ int main(void) {
         status = [native hookFunction:(void *)nativeTarget
             withReplacement:(void *)nativeReplacement outOldPtr:(void **)&nativeOriginal];
         int nativeValue = nativeTarget(argument);
-        BOOL nativeOK = native.activeType == HK_LIB_NATIVE && status == HK_OK &&
+        BOOL nativeOK = status == HK_OK &&
             nativeOriginal && nativeHits == 1 && nativeValue == 335 && nativeOriginal(argument) == 135;
         printf("Native: %s status=%d original=%p hits=%d value=%d\n",
             nativeOK ? "PASS" : "FAIL", status, nativeOriginal, nativeHits, nativeValue);
