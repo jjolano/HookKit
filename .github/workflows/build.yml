@@ -8,6 +8,28 @@ env:
   THEOS: /opt/theos
 
 jobs:
+  pac:
+    name: macos-pac
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      # This exercises real Apple-silicon PAC instructions, not HookKit's
+      # tagged host simulator. It does not claim macOS backend or iOS
+      # shared-cache support.
+      - name: Run native PAC self-test
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcrun clang \
+            -Wall -Wextra -Werror -std=c11 -O2 \
+            -arch arm64 -fptrauth-calls \
+            -DHK_EXPECT_NATIVE_PTRAUTH=1 \
+            -o "$RUNNER_TEMP/test_pointer_auth" \
+            Tests/Host/test_pointer_auth.c Sources/Core/HKOwnership.c \
+            -lpthread
+          "$RUNNER_TEMP/test_pointer_auth"
+
   legacy:
     name: rootful-legacy
     runs-on: ubuntu-24.04

@@ -2,9 +2,19 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HK_PTRAUTH_TEST 1
 #include "../../Internal/HKPointerAuth.h"
 #include "../../Sources/Core/HKOwnership.h"
+
+#if defined(HK_EXPECT_NATIVE_PTRAUTH)
+#if !defined(__APPLE__) || !__has_feature(ptrauth_calls)
+#error "native PAC test requires Apple pointer-authentication calls"
+#endif
+typedef int (*pac_test_fn_t)(int);
+
+__attribute__((noinline)) static int pac_test_target(int value) {
+    return value + 1;
+}
+#endif
 
 int main(void) {
     const uintptr_t raw = UINT64_C(0x1234567890);
@@ -40,6 +50,12 @@ int main(void) {
     assert(callable != raw);
     assert(hk_pac_strip_code(callable) == raw);
 
+#if defined(HK_EXPECT_NATIVE_PTRAUTH)
+    volatile uintptr_t native_callable =
+        hk_pac_make_callable((uintptr_t)(pac_test_fn_t)pac_test_target);
+    assert(((pac_test_fn_t)(uintptr_t)native_callable)(41) == 42);
+#endif
+
     hk_hook_spec_t recorded;
     memset(&recorded, 0, sizeof(recorded));
     recorded.target_kind = HK_TARGET_FUNCTION_ADDRESS;
@@ -63,6 +79,10 @@ int main(void) {
     hk_ownership_lock();
     assert(hk_ownership_lookup_locked(&query, &state) == HK_OWNERSHIP_FOUND);
     hk_ownership_unlock();
+#if defined(HK_EXPECT_NATIVE_PTRAUTH)
+    printf("native pointer-auth tests passed\n");
+#else
     printf("pointer-auth simulation tests passed\n");
+#endif
     return 0;
 }
