@@ -30,6 +30,46 @@ jobs:
             -lpthread
           "$RUNNER_TEMP/test_pointer_auth"
 
+  macos-hooks:
+    name: macos-hooks-${{ matrix.arch }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, arm64e]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run live hook smoke
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          out="$RUNNER_TEMP/hookkit-live-${{ matrix.arch }}"
+          targets="$RUNNER_TEMP/libHookKitLiveTargets.dylib"
+          xcrun clang -Wall -Wextra -Werror -O0 -fno-inline \
+            -arch "${{ matrix.arch }}" -dynamiclib \
+            -install_name @rpath/libHookKitLiveTargets.dylib \
+            -o "$targets" Tests/MacOS/live_hook_targets.c
+          xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
+            -arch "${{ matrix.arch }}" \
+            -framework Foundation -lpthread \
+            -o "$out" \
+            Tests/MacOS/test_live_hooks.m \
+            Sources/Engines/HKInlineEngine.c \
+            Sources/Engines/HKMemoryEngine.c \
+            Sources/Engines/HKObjCEngine.c \
+            Sources/Engines/HKRebindEngine.c \
+            Sources/Resolvers/HKChainedFixups.c \
+            Sources/Resolvers/HKDyldCachePatches.c \
+            Sources/Resolvers/HKExportTrie.c \
+            Sources/Resolvers/HKImportSlots.c \
+            Sources/Resolvers/HKMachO.c \
+            Sources/Resolvers/HKSymbolResolve.c \
+            Sources/Resolvers/HKSymbolTable.c \
+            Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c \
+            native/hk_arm64.c native/hk_native.c native/hk_symbols.c
+          "$out" "$targets"
+
   legacy:
     name: rootful-legacy
     runs-on: ubuntu-24.04
