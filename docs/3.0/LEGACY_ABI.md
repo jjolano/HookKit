@@ -2,7 +2,7 @@
 
 Status: **canonical cutover implemented**. `HookKit.framework` is the only
 3.0 framework identity; `HookKit3.framework` and its beta package are
-retired. The canonical facade, packages, exports, and five historical ABI
+retired. The canonical facade, packages, exports, and six historical ABI
 baselines are release-gated together.
 
 ## What must keep working, unrecompiled
@@ -77,7 +77,7 @@ Canonical 3.0 build: `@rpath/HookKit.framework/HookKit`,
 `hk_*` C ABI, `_OBJC_CLASS_$_HKSubstitutor` /
 `_OBJC_METACLASS_$_HKSubstitutor`, and any v1 classes the module audit
 decides to retain. Everything else stays hidden — enforced today by
-`scripts/check_exports.sh` and the five historical ABI baselines.
+`scripts/check_exports.sh` and the six historical ABI baselines (the sixth is the v1.0.1 `HKSubstitutor` subset).
 
 Every package is version `3.0.0-1`. Canonical modern packages conflict with
 and replace both `me.jjolano.fmwk.hookkit.legacy` and the retired
@@ -97,7 +97,7 @@ search/sign-off is still an ABI-freeze gate.
 ## Test system pointer
 
 `tests/device_legacy_abi.m` and `tests/device_legacy_facade3.m` are retained
-for current-device smoke. `scripts/check_legacy_abi.sh` validates all five
+for current-device smoke. `scripts/check_legacy_abi.sh` validates all six
 historical JSON baselines against each built framework. The accepted release
 bar is package/source/ABI validation across all lanes plus the existing arm64
 device smoke; it does not claim physical armv7, armv7s, or arm64e verification.

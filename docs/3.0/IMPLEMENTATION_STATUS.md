@@ -319,7 +319,7 @@ own description and the tool's code comment.
 | `HookKitArtifacts.h` | complete | commit `0fd823e` — field-for-field transcription of `Schemas/hookkit-artifact.schema.json`; snapshot functions are implemented and host-tested in the Milestone 4 artifact ledger |
 | `HookKitObjC.h` | complete | commit `57b10df` — typed Class/SEL constructors; deliberately NOT in the umbrella (it needs `<objc/runtime.h>`), covered by the ObjC and ObjC++ header-compile variants |
 | `HookKitSwift.h` | complete | commit `9d4911f` plus current working tree — separate two-phase Swift surface; plain C, so unlike `HookKitObjC.h` it IS in the umbrella, and all four header-compile variants cover it |
-| ABI symbol manifest | complete (host-verified) | `Tools/abi/extract_abi.py`, `Tools/abi/compare_abi.py`, `scripts/check_legacy_abi.sh`; `Tools/abi/test_*.py`; five rich baselines and canonical candidate gate |
+| ABI symbol manifest | complete (host-verified) | `Tools/abi/extract_abi.py`, `Tools/abi/compare_abi.py`, `scripts/check_legacy_abi.sh`; `Tools/abi/test_*.py`; six baselines (five binary-extracted + one v1.0.1 `HKSubstitutor` subset) and canonical candidate gate |
 
 Deliberately safe by construction, not just by intent: the Makefile's
 `HookKit_PUBLIC_HEADERS` still lists only the legacy `Headers/HookKit.h` —
@@ -388,7 +388,7 @@ extractor ABI dimension is silently fabricated as an empty field.
 The comparison gate checks retained per-slice exports, classes, selectors,
 method encodings, enum values, install name, compatibility version presence,
 architectures, and historical header paths. `scripts/check_legacy_abi.sh`
-passes against all five checked-in baselines; the JSON schema validates every
+passes against all six checked-in baselines; the JSON schema validates every
 baseline. The historical records now carry rich ObjC method/property metadata
 and available enum values. The comparator treats struct fields behind an
 already-stable pointer as an ABI-neutral definition change and fills arm64e
@@ -453,7 +453,7 @@ five — the linker-enforced boundary has not moved once in the extracted range.
 **The user's call, 2026-08-19: "i think we just don't worry about modulous
 anymore."** So the named-baseline set is **five, complete** — v2.5.0, v2.4.0,
 v2.3.0, v2.2.5, v2.1.1 — and `v1.0.1` is out of scope. It is not a pending
-task, not a TODO, and not something a later iteration should re-attempt.
+task, not a TODO, and not something a later iteration should re-attempt. *(Superseded 2026-08-27 — a v1.0.1 `HKSubstitutor` subset baseline was since added on the user's request; see below.)*
 
 Kept because it explains the shape of the set rather than because anything is
 outstanding: `v1.0.1` is a different product generation, not just an older tag.
@@ -472,7 +472,7 @@ added**. Its only motivation was labelling a declaration-derived `v1.0.1.json`
 distinctly from real extractions, and no such file will exist.
 `Tests/LegacyABI/Baselines/` therefore keeps its stronger, simpler invariant
 with no schema change at all: **everything in it is binary-extracted from a
-real build.** Five files, one provenance, nothing to label.
+real build.** Five files, one provenance, nothing to label. *(Superseded 2026-08-27 — see below; a sixth, assembled `v1.0.1` subset baseline was since added.)*
 
 Also settled: stubbing `ModulousLoader` to force a link was declined at the
 time and stays declined — a binary built against a stub is not the v1.0.1
@@ -482,6 +482,37 @@ the unearned claim this ledger exists to prevent. The tag's shipped
 where the package `control` says `1.0.1`) was likewise not turned into a
 baseline: a `.tbd` is a *declaration* of the export surface, not an
 observation of what the linker emitted.
+
+### `v1.0.1`: subset baseline added (2026-08-27, superseding the drop)
+
+**The user's later call, 2026-08-27: "generate the v1.0.1 baseline ... just
+the hookkit parts, no modulous."** `Tests/LegacyABI/Baselines/v1.0.1.json` now
+exists and `scripts/check_legacy_abi.sh` gates it alongside the other five; the
+current 3.0 build passes it, and a negative control (drop a v1 selector,
+renumber `HK_OK`) is caught. This reverses the 2026-08-19 "out of scope" call
+above without invalidating it as a record: the drop was about the **Modulous
+module ABI**, which stays out; the baseline gates only the retained
+`HKSubstitutor` subset.
+
+It is deliberately **not** a full seven-class extraction. `compare_abi.py` fails
+on any baseline class the 3.0 build dropped, so gating the six Modulous classes
+would break the "no Modulous" build by construction. The file encodes only the
+retained v1 `HKSubstitutor` subset — exactly the contract `ARCHITECTURE.md`
+already states ("the v1.0.1 `HKSubstitutor` subset must run unrecompiled").
+
+Provenance, stated plainly because it is **not** a Mach-O extraction (no v1.0.1
+binary is on disk and `vendor/Modulous.framework` is still unvendored): install
+name, architectures, exported-symbol subset, and versions come from the v1.0.1
+tag's own shipped `HookKit.tbd`; the selector list and enum values are the
+v1.0.1 `Compat.h` contract; the ObjC type encodings are copied verbatim from
+the real, binary-extracted `v2.1.1.json` (identical selector signatures, so the
+encodings are genuinely linker-observed, just not from a v1 binary).
+`extractor_version` is omitted to mark the file as assembled rather than
+extracted. The `provenance` schema enum is still not added — the distinction
+lives in that omission, in the generator's header comment, and here. So the
+invariant above now reads: **five binary-extracted, plus one v1.0.1
+`HKSubstitutor` subset assembled from the tag's own declaration and
+v2.1.1-observed encodings.**
 
 **`HookKitArtifacts.h`**, this iteration: written field-for-field from
 `Schemas/hookkit-artifact.schema.json` (re-read in full first, same

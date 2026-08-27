@@ -1,0 +1,179 @@
+{
+  "architectures": [
+    "arm64",
+    "arm64e"
+  ],
+  "compatibility_version": "0",
+  "current_version": "0",
+  "enum_values": {
+    "HK_ERR": 1,
+    "HK_ERR_NOT_SUPPORTED": 2,
+    "HK_LIB_NONE": 0,
+    "HK_OK": 0
+  },
+  "exported_symbols": {
+    "arm64": [
+      "_OBJC_CLASS_$_HKSubstitutor",
+      "_OBJC_METACLASS_$_HKSubstitutor"
+    ],
+    "arm64e": [
+      "_OBJC_CLASS_$_HKSubstitutor",
+      "_OBJC_METACLASS_$_HKSubstitutor"
+    ]
+  },
+  "generated_at": "2026-08-27T16:30:19Z",
+  "header_checksums": {
+    "Headers/HookKit.h": "f6b26d282aa74a754497ed1071e17165877b27d9d3dc85510eb4fd4a5313aa28"
+  },
+  "install_name": "@rpath/HookKit.framework/HookKit",
+  "objc": {
+    "classes": [
+      {
+        "class_methods": [
+          {
+            "selector": "getAvailableSubstitutorTypes",
+            "type_encoding": {
+              "arm64": "i16@0:8",
+              "arm64e": "i16@0:8"
+            }
+          },
+          {
+            "selector": "getSubstitutorTypeInfo:",
+            "type_encoding": {
+              "arm64": "@20@0:8i16",
+              "arm64e": "@20@0:8i16"
+            }
+          },
+          {
+            "selector": "substitutorWithTypes:",
+            "type_encoding": {
+              "arm64": "@20@0:8i16",
+              "arm64e": "@20@0:8i16"
+            }
+          },
+          {
+            "selector": "defaultSubstitutor",
+            "type_encoding": {
+              "arm64": "@16@0:8",
+              "arm64e": "@16@0:8"
+            }
+          }
+        ],
+        "instance_methods": [
+          {
+            "selector": "initLibraries",
+            "type_encoding": {
+              "arm64": "v16@0:8",
+              "arm64e": "v16@0:8"
+            }
+          },
+          {
+            "selector": "hookMessageInClass:withSelector:withReplacement:outOldPtr:",
+            "type_encoding": {
+              "arm64": "i48@0:8#16:24^v32^^v40",
+              "arm64e": "i48@0:8#16:24^v32^^v40"
+            }
+          },
+          {
+            "selector": "hookFunction:withReplacement:outOldPtr:",
+            "type_encoding": {
+              "arm64": "i40@0:8^v16^v24^^v32",
+              "arm64e": "i40@0:8^v16^v24^^v32"
+            }
+          },
+          {
+            "selector": "hookMemory:withData:size:",
+            "type_encoding": {
+              "arm64": "i40@0:8^v16r^v24Q32",
+              "arm64e": "i40@0:8^v16r^v24Q32"
+            }
+          },
+          {
+            "selector": "openImage:",
+            "type_encoding": {
+              "arm64": "^{HKImage=}24@0:8@16",
+              "arm64e": "^{HKImage=}24@0:8@16"
+            }
+          },
+          {
+            "selector": "closeImage:",
+            "type_encoding": {
+              "arm64": "v24@0:8^{HKImage=}16",
+              "arm64e": "v24@0:8^{HKImage=}16"
+            }
+          },
+          {
+            "selector": "findSymbolsInImage:symbolNames:outSymbols:",
+            "type_encoding": {
+              "arm64": "i40@0:8^{HKImage=}16@24^@32",
+              "arm64e": "i40@0:8^{HKImage=}16@24^@32"
+            }
+          },
+          {
+            "selector": "findSymbolInImage:symbolName:",
+            "type_encoding": {
+              "arm64": "^v32@0:8^{HKImage=}16@24",
+              "arm64e": "^v32@0:8^{HKImage=}16@24"
+            }
+          },
+          {
+            "selector": "executeHooks",
+            "type_encoding": {
+              "arm64": "i16@0:8",
+              "arm64e": "i16@0:8"
+            }
+          },
+          {
+            "selector": "getLibErrno:",
+            "type_encoding": {
+              "arm64": "i24@0:8^i16",
+              "arm64e": "i24@0:8^i16"
+            }
+          },
+          {
+            "selector": "types",
+            "type_encoding": {
+              "arm64": "i16@0:8",
+              "arm64e": "i16@0:8"
+            }
+          },
+          {
+            "selector": "setTypes:",
+            "type_encoding": {
+              "arm64": "v20@0:8i16",
+              "arm64e": "v20@0:8i16"
+            }
+          },
+          {
+            "selector": "batching",
+            "type_encoding": {
+              "arm64": "B16@0:8",
+              "arm64e": "B16@0:8"
+            }
+          },
+          {
+            "selector": "setBatching:",
+            "type_encoding": {
+              "arm64": "v20@0:8B16",
+              "arm64e": "v20@0:8B16"
+            }
+          }
+        ],
+        "name": "HKSubstitutor",
+        "properties": [
+          {
+            "getter_encoding": "B16@0:8",
+            "name": "batching",
+            "setter_encoding": "v20@0:8B16"
+          },
+          {
+            "getter_encoding": "i16@0:8",
+            "name": "types",
+            "setter_encoding": "v20@0:8i16"
+          }
+        ]
+      }
+    ]
+  },
+  "tag": "v1.0.1"
+}
