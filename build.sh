@@ -242,7 +242,7 @@ build_rootful_legacy() {
 }
 
 package_modern_lane() {
-    local lane=$1 artifact gum_artifact
+    local lane=$1 artifact gum_artifact empty_layout
     write_control "$lane"
     write_gum_control "$lane"
 
@@ -254,10 +254,15 @@ package_modern_lane() {
     artifact=$(cat .theos/last_package)
     copy_release_artifact "$artifact" "hookkit-$lane"
 
-    # Then stage just HKGum with its own package metadata. Theos clears its
-    # stage between package runs, while the already-built framework object
-    # remains available for the ABI check below.
+    # Then stage just HKGum with its own package metadata. The base package
+    # owns the shared release notices; the Gum package depends on that exact
+    # base version, so duplicating those files would make dpkg reject the pair.
+    # Theos normally stages layout/ for every package, so point this invocation
+    # at an empty layout directory instead.
+    empty_layout="$STAGE/empty-layout"
+    mkdir -p "$empty_layout"
     modern_make HOOKKIT_LANE="$lane" FRAMEWORK_NAME= package FINALPACKAGE=1 \
+        THEOS_LAYOUT_DIR="$empty_layout" THEOS_LAYOUT_DIR_NAME="$empty_layout" \
         _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane.gum"
     gum_artifact=$(cat .theos/last_package)
     copy_release_artifact "$gum_artifact" "hookkit-$lane-gum"

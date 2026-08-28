@@ -287,7 +287,7 @@ check_binary() {
 }
 
 check_gum_package() {
-    local gum_root actual_package actual_arch actual_version depends field expected_path hkgum_rel doc_rel count actual_files expected_files rel
+    local gum_root actual_package actual_arch actual_version depends field expected_path hkgum_rel count actual_files expected_files
     [ -n "$gum_package" ] || return 0
 
     gum_root="$tmp/gum"
@@ -320,7 +320,6 @@ check_gum_package() {
         echo "FAIL Gum package must not contain HookKit.framework" >&2; return 1;
     }
     hkgum_rel="${notice_prefix:+$notice_prefix/}usr/lib/HKGum.dylib"
-    doc_rel="${notice_prefix:+$notice_prefix/}usr/share/doc/hookkit"
     expected_path="$gum_root/$hkgum_rel"
     [ -f "$expected_path" ] || {
         echo "FAIL Gum package is missing $expected_path" >&2; return 1;
@@ -330,14 +329,10 @@ check_gum_package() {
         echo "FAIL Gum package must contain exactly one HKGum.dylib" >&2; return 1;
     }
     actual_files=$(find "$gum_root" -type f -print | sed "s|^$gum_root/||" | sort)
-    expected_files=$({
-        printf '%s\n' "$hkgum_rel"
-        for rel in "${NOTICE_FILES[@]}"; do printf '%s/%s\n' "$doc_rel" "$rel"; done
-    } | sort)
+    expected_files=$hkgum_rel
     [ "$actual_files" = "$expected_files" ] || {
-        echo "FAIL Gum package must contain only HKGum.dylib and release notices" >&2; return 1;
+        echo "FAIL Gum package must contain only HKGum.dylib" >&2; return 1;
     }
-    check_notice_tree "$gum_root"
     echo "Gum package: $actual_package ($actual_arch), firmware >= 15.0"
     check_binary "$expected_path" "$gum_expected" "$gum_root"
     bash "$ROOT/scripts/check_exports.sh" "$expected_path"

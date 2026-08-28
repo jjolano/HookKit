@@ -11,7 +11,7 @@ review, **not legal advice** or a legal-compliance opinion.
 - Resolved short pins against the upstream GitHub API and inspected local diffs.
 - Verified Frida's two release-asset SHA-256 values against GitHub's release
   manifest, then unpacked both devkits in temporary storage.
-- Reviewed the release layout now installed into each package at
+- Reviewed the release layout installed by the required base package at
   `usr/share/doc/hookkit` (under `var/jb` for rootless), including the
   version-pinned Frida component inventory.
 
@@ -74,9 +74,10 @@ patch/lock are now shipped or retained as above.
   for the binary.
 
 **Technical remediation:** `layout/usr/share/doc/hookkit/` now supplies a
-version-pinned Frida devkit SBOM and the identified full license texts in both
-the core and optional Gum packages. This remains a factual inventory, not a
-legal compatibility conclusion.
+version-pinned Frida devkit SBOM and the identified full license texts in the
+base package. Every optional Gum package has an exact dependency on that base,
+so the notices are installed without file ownership conflicts. This remains a
+factual inventory, not a legal compatibility conclusion.
 
 ### fishhook — BSD-3-Clause; source-only, notices preserved
 
@@ -162,7 +163,8 @@ unused header. Do not describe the mirror as canonical upstream.
 
 The technical release blockers identified by this audit are implemented:
 
-1. Every package installs a fixed, verified notice tree.
+1. Every base package installs a fixed, verified notice tree; each optional
+   Gum package depends on that exact base rather than duplicating its files.
 2. Modern builds emit a base package plus a separate manual-opt-in Gum
    package; the base framework does not contain Gum.
 3. Dobby has a retained source patch, lockfile, and reproducible verification
