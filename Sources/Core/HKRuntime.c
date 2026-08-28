@@ -568,8 +568,13 @@ static bool hk_platform_write_pointer(void *ctx, uintptr_t address,
 // size cost; raise it if a consumer installs more concurrent near hooks.
 #define HK_STATIC_TRAMP_PAGE  16384u  // iOS arm64 kernel page
 #define HK_STATIC_TRAMP_SLOTS 8u
+// const with an explicit initializer, deliberately: it forces the section to
+// be emitted as file-backed, mapped-executable __TEXT rather than zerofill --
+// a zerofill section is not executable and vm_protect on it fails. The bytes
+// are written at hook time through slot pointers (after unprotect), never
+// through this symbol, so the const does not obstruct the build.
 __attribute__((section("__TEXT,__hktramp"), used, aligned(HK_STATIC_TRAMP_PAGE)))
-static uint8_t g_hk_static_tramp[HK_STATIC_TRAMP_SLOTS * HK_STATIC_TRAMP_PAGE];
+static const uint8_t g_hk_static_tramp[HK_STATIC_TRAMP_SLOTS * HK_STATIC_TRAMP_PAGE] = {0};
 
 // One pool per PROCESS, not per runtime: chained owners run separate runtimes
 // in one process and all share this single fixed section, so a per-runtime

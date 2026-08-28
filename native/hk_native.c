@@ -514,9 +514,13 @@ bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
         hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
+    // VM_PROT_COPY forces a copy-on-write break, which is what makes a pool
+    // slot in a code-signed __TEXT page (max_protection R-X, so a plain
+    // R-W raise is refused) privately writable. Without it this returns
+    // KERN_PROTECTION_FAILURE and the trampoline can never be built.
     kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)page,
                                   (vm_size_t)getpagesize(), FALSE,
-                                  VM_PROT_READ | VM_PROT_WRITE);
+                                  VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
     hk_errno = kr == KERN_SUCCESS ? 0 : kr;
     return kr == KERN_SUCCESS;
 }

@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
+#include <mach-o/getsect.h>
+#include <mach-o/ldsyms.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -117,7 +119,77 @@ static hk_hook_spec_t address_spec(uintptr_t target, void *replacement) {
     return spec;
 }
 
+__attribute__((noinline))
+static int default_target(int value) {
+    volatile int result = value;
+    result += 10;
+    result += 20;
+    result += 30;
+    return result;
+}
+
+__attribute__((noinline))
+static int default_replacement(int value) {
+    return value + 500;
+}
+
+// The shipped behavior: with NO caller opt-in, a fresh runtime's default
+// relocating engine prefers the in-image __hktramp pool for a near target, so
+// the continuation is not an anonymous executable page. Proven by finding the
+// continuation's page inside the process's own __TEXT,__hktramp section.
+static void test_default_prefers_in_image_pool(void) {
+    unsigned long sect_size = 0;
+    uint8_t *sect = getsectiondata(&_mh_execute_header, "__TEXT", "__hktramp",
+                                   &sect_size);
+    assert(sect && sect_size >= DEVICE_PAGE_BYTES);   // the section is mapped
+    uintptr_t sect_lo = (uintptr_t)sect;
+    uintptr_t sect_hi = sect_lo + sect_size;
+
+    hk_runtime_t *runtime = NULL;
+    hk_plan_t *plan = NULL;
+    hk_report_t *report = NULL;
+    assert(hk_runtime_create(NULL, &runtime) == HK_STATUS_OK);  // auto engines
+    assert(hk_plan_create(runtime, NULL, &plan) == HK_STATUS_OK);
+
+    // A plain relocating hook: callable original, no forbid constraint, default
+    // continuation policy. Nothing here asks for a static continuation.
+    hk_hook_spec_t spec = address_spec((uintptr_t)default_target,
+                                       (void *)default_replacement);
+    spec.stable_hook_id = "device.default.pool";
+    spec.continuation_policy = HK_CONTINUATION_ANY;
+
+    hk_hook_t *hook = NULL;
+    assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, &report) == HK_STATUS_OK);
+    hk_report_release(report);
+    report = NULL;
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+    assert(hook->result.outcome == HK_OUTCOME_ACTIVE && hook->result.verified);
+
+    // The hook works, and the original is still reachable through it.
+    assert(default_target(3) == 503);
+    const hk_original_slot_t *slot = hk_hook_original_slot(hook);
+    assert(slot);
+    int (*original)(int) = (int (*)(int))hk_original_slot_load(slot);
+    assert(original && original(3) == 63);
+
+    // The continuation lives in the in-image pool, not an anonymous page: its
+    // trampoline base falls inside __TEXT,__hktramp. (arm64 device: the slot
+    // base carries no PAC; an arm64e build would strip it first.)
+    uintptr_t base = hook->result.continuation.mapping_base;
+    assert(base >= sect_lo && base < sect_hi);
+
+    hk_report_release(report);
+    hk_plan_release(plan);
+    hk_runtime_release(runtime);
+    puts("HookKit default-prefers-pool: PASS");
+}
+
 int main(void) {
+    test_default_prefers_in_image_pool();
+
     const vm_size_t page_size = (vm_size_t)getpagesize();
     assert(page_size == DEVICE_PAGE_BYTES);
     assert(((uintptr_t)hk_static_pool_page % page_size) == 0);
@@ -145,6 +217,13 @@ int main(void) {
     hk_report_t *report = NULL;
     hk_artifact_snapshot_t *artifacts = NULL;
     assert(hk_runtime_create(NULL, &runtime) == HK_STATUS_OK);
+    // hk_runtime_create now auto-registers a static engine backed by the
+    // runtime's own __hktramp pool (see the default path exercised below).
+    // This scenario isolates the engine mechanism over a CALLER-supplied pool,
+    // so clear the auto set first and register only ours -- otherwise the
+    // router would pick the auto engine (same vtable, registered first) and
+    // this test's controlled counters would never move.
+    runtime->engine_count = 0;
     assert(hk_runtime_register_engine_with_context(
         runtime, hk_static_inline_vtable(), &engine));
     assert(hk_plan_create(runtime, NULL, &plan) == HK_STATUS_OK);
