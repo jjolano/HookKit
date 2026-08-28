@@ -341,7 +341,7 @@ static void test_rebind_refusals_are_distinguishable(void) {
     assert(ha->result.error_message.data &&
            strcmp(ha->result.error_message.data, "the image imports no such symbol") == 0);
     assert(ha->result.error_domain.data &&
-           strcmp(ha->result.error_domain.data, "rebind") == 0);
+           strcmp(ha->result.error_domain.data, "fishhook") == 0);
     // Distinct from the image-scope band, which is what the offset guarantees.
     assert(ha->result.error_code < HK_REBIND_DIAG_IMAGE_SCOPE_BASE);
 

@@ -14,8 +14,10 @@
 
 #import <objc/runtime.h>
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 enum { HK_LEGACY_IMAGE_MAGIC = 0x484B3349u };  // canonical image wrapper magic
 
@@ -161,58 +163,12 @@ static bool hk_legacy_collect_backend_id(void *opaque,
     return true;
 }
 
-typedef struct {
-    const char *engine_id;
-    const char *identifier;
-    const char *name;
-    hookkit_lib_t type;
-} hk_legacy_backend_label_t;
-
-// v1 exposed opaque type bits paired with IDs. Keep those pairs stable while
-// availability changes, so Shadow can enumerate, persist an ID, then later
-// hand its paired bit back to setTypes: without selecting a shifted engine.
-static const hk_legacy_backend_label_t hk_legacy_backend_labels[] = {
-    { "objc", "objc", "Objective-C runtime", (hookkit_lib_t)(1u << 0) },
-    { "rebind", "fishhook", "fishhook", (hookkit_lib_t)(1u << 1) },
-    { "memory", "memory", "HookKit memory", (hookkit_lib_t)(1u << 2) },
-    { "provider-dobby", "dobby", "Dobby", (hookkit_lib_t)(1u << 3) },
-    { "provider-gum", "frida", "Frida", (hookkit_lib_t)(1u << 4) },
-    { "provider-ellekit", "ellekit", "ElleKit", (hookkit_lib_t)(1u << 5) },
-    { "inline-terminal", "inline-terminal", "HookKit inline", (hookkit_lib_t)(1u << 6) },
-    { "inline-relocating", "native", "HookKit", (hookkit_lib_t)(1u << 7) },
-    { "provider-substitute", "substitute", "Cydia Substrate / Substitute", (hookkit_lib_t)(1u << 8) },
-};
-
-static const hk_legacy_backend_label_t *hk_legacy_label_for_backend_id(
-    NSString *backend_id) {
-    const char *value = backend_id.UTF8String;
-    if (!value) {
-        return NULL;
+static hookkit_lib_t hk_legacy_type_for_backend_index(NSUInteger index) {
+    // hookkit_lib_t is a signed legacy bitmask, so leave its sign bit unused.
+    if (index >= (sizeof(hookkit_lib_t) * CHAR_BIT) - 1) {
+        return HK_LIB_NONE;
     }
-    for (size_t i = 0;
-         i < sizeof(hk_legacy_backend_labels) /
-                 sizeof(hk_legacy_backend_labels[0]);
-         i++) {
-        const hk_legacy_backend_label_t *label = &hk_legacy_backend_labels[i];
-        if (strcmp(value, label->engine_id) == 0) {
-            return label;
-        }
-    }
-    return NULL;
-}
-
-static NSString *hk_legacy_identifier_for_backend_id(NSString *backend_id) {
-    const hk_legacy_backend_label_t *label =
-        hk_legacy_label_for_backend_id(backend_id);
-    return label ? [[NSString alloc] initWithUTF8String:label->identifier]
-                 : backend_id;
-}
-
-static NSString *hk_legacy_name_for_backend_id(NSString *backend_id) {
-    const hk_legacy_backend_label_t *label =
-        hk_legacy_label_for_backend_id(backend_id);
-    return label ? [[NSString alloc] initWithUTF8String:label->name]
-                 : backend_id;
+    return (hookkit_lib_t)(UINTMAX_C(1) << index);
 }
 
 static NSArray<NSString *> *hk_legacy_backend_ids_for_types(
@@ -226,17 +182,19 @@ static NSArray<NSString *> *hk_legacy_backend_ids_for_types(
     }
 
     for (NSUInteger i = 0; i < available_backend_ids.count; i++) {
+        hookkit_lib_t type = hk_legacy_type_for_backend_index(i);
+        if (type == HK_LIB_NONE) {
+            break;
+        }
         id candidate = [available_backend_ids objectAtIndex:i];
         if (![candidate isKindOfClass:[NSString class]]) {
             continue;
         }
-        const hk_legacy_backend_label_t *label =
-            hk_legacy_label_for_backend_id(candidate);
-        if (!label || (types & label->type) == 0) {
+        if ((types & type) == 0) {
             continue;
         }
         if (active_type) {
-            *active_type = label->type;
+            *active_type = type;
         }
         return @[(NSString *)candidate];
     }
@@ -270,14 +228,13 @@ static NSArray<NSString *> *hk_legacy_backend_ids_for_types(
     NSArray<NSString *> *backend_ids = [self getAvailableBackendIDs];
     hookkit_lib_t types = HK_LIB_NONE;
     for (NSUInteger i = 0; i < backend_ids.count; i++) {
-        id candidate = [backend_ids objectAtIndex:i];
-        if (![candidate isKindOfClass:[NSString class]]) {
-            continue;
+        hookkit_lib_t type = hk_legacy_type_for_backend_index(i);
+        if (type == HK_LIB_NONE) {
+            break;
         }
-        const hk_legacy_backend_label_t *label =
-            hk_legacy_label_for_backend_id(candidate);
-        if (label) {
-            types = (hookkit_lib_t)(types | label->type);
+        id candidate = [backend_ids objectAtIndex:i];
+        if ([candidate isKindOfClass:[NSString class]]) {
+            types = (hookkit_lib_t)(types | type);
         }
     }
     return types;
@@ -294,22 +251,23 @@ static NSArray<NSString *> *hk_legacy_backend_ids_for_types(
     NSArray<NSString *> *backend_ids = [self getAvailableBackendIDs];
     NSMutableArray<NSDictionary *> *info = [NSMutableArray array];
     for (NSUInteger i = 0; i < backend_ids.count; i++) {
+        hookkit_lib_t type = hk_legacy_type_for_backend_index(i);
+        if (type == HK_LIB_NONE) {
+            break;
+        }
         id candidate = [backend_ids objectAtIndex:i];
         if (![candidate isKindOfClass:[NSString class]]) {
             continue;
         }
-        const hk_legacy_backend_label_t *label =
-            hk_legacy_label_for_backend_id(candidate);
-        if (!label || (types & label->type) == 0) {
+        if ((types & type) == 0) {
             continue;
         }
-        NSString *identifier = hk_legacy_identifier_for_backend_id(candidate);
-        NSString *name = hk_legacy_name_for_backend_id(candidate);
-        if (identifier && name) {
+        NSString *identifier = (NSString *)candidate;
+        if (identifier.length > 0) {
             [info addObject:@{
                 @"id": identifier,
-                @"name": name,
-                @"type": @(label->type),
+                @"name": identifier,
+                @"type": @(type),
                 @"selectable": @YES,
             }];
         }

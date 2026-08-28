@@ -43,23 +43,32 @@ int main(void) {
         if (!backend_ids || info.count != backend_ids.count) {
             return fail("legacy picker enumeration");
         }
+        hookkit_lib_t seen_types = HK_LIB_NONE;
         BOOL saw_fishhook = NO;
-        for (NSDictionary *backend in info) {
+        for (NSUInteger i = 0; i < info.count; i++) {
+            NSDictionary *backend = info[i];
             NSString *identifier = backend[@"id"];
             NSString *name = backend[@"name"];
             NSNumber *type = backend[@"type"];
+            hookkit_lib_t expected_type = (hookkit_lib_t)(1u << i);
+            hookkit_lib_t actual_type =
+                (hookkit_lib_t)type.unsignedIntegerValue;
             if (![identifier isKindOfClass:[NSString class]] || identifier.length == 0 ||
                 ![name isKindOfClass:[NSString class]] || name.length == 0 ||
                 ![type isKindOfClass:[NSNumber class]] ||
-                (available & (hookkit_lib_t)type.unsignedIntegerValue) == 0) {
+                ![identifier isEqualToString:backend_ids[i]] ||
+                ![name isEqualToString:identifier] || actual_type != expected_type ||
+                (available & actual_type) == 0 || (seen_types & actual_type) != 0) {
                 return fail("legacy provider metadata");
             }
+            seen_types = (hookkit_lib_t)(seen_types | actual_type);
             saw_fishhook |= [identifier isEqualToString:@"fishhook"];
         }
         if (backend_ids.count == 0) {
             return fail("dynamic backend enumeration");
         }
-        if ([backend_ids containsObject:@"rebind"] != saw_fishhook) {
+        if ([backend_ids containsObject:@"fishhook"] != saw_fishhook ||
+            available != seen_types) {
             return fail("fishhook picker entry");
         }
         HKSubstitutor *selected =

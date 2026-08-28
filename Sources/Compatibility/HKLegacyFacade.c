@@ -113,7 +113,7 @@ static int hk_legacy_route_function_spec(const hk_hook_spec_t *spec,
         return HK_LEGACY_ERR_INVALID_ARGUMENT;
     }
     *out_spec = *spec;
-    if (!hk_legacy_backend_ids_are_only(backend_ids, "rebind") ||
+    if (!hk_legacy_backend_ids_are_only(backend_ids, "fishhook") ||
         spec->target_kind != HK_TARGET_FUNCTION_ADDRESS) {
         return HK_LEGACY_OK;
     }

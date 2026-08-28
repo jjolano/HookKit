@@ -530,8 +530,8 @@ static void record_artifact(hk_artifact_sink_t *sink, const hk_rebind_site_t *si
     a.kind = HK_ARTIFACT_IMPORT_SLOT;
     a.state = HK_ARTIFACT_COMMITTED;
     a.effects = HK_EFFECT_IMPORT_MUTATION;
-    a.engine_id.data = "rebind";
-    a.engine_id.length = 6;
+    a.engine_id.data = "fishhook";
+    a.engine_id.length = 8;
     a.import_slot_address = site->address;
     a.address = site->address;
     a.original_pointer = (void *)(uintptr_t)site->original;
