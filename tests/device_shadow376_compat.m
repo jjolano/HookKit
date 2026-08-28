@@ -36,14 +36,55 @@ int main(void) {
     @autoreleasepool {
         hookkit_lib_t available = [HKSubstitutor getAvailableSubstitutorTypes];
         NSArray<NSDictionary *> *info = [HKSubstitutor getSubstitutorTypeInfo:available];
-        if (available != HK_LIB_NONE || !info || info.count != 0) {
-            return fail("retired provider discovery");
+        NSArray<NSString *> *backend_ids = [HKSubstitutor getAvailableBackendIDs];
+        if (!info) {
+            return fail("legacy provider discovery");
+        }
+        if (!backend_ids || info.count != backend_ids.count) {
+            return fail("legacy picker enumeration");
+        }
+        BOOL saw_fishhook = NO;
+        for (NSDictionary *backend in info) {
+            NSString *identifier = backend[@"id"];
+            NSString *name = backend[@"name"];
+            NSNumber *type = backend[@"type"];
+            if (![identifier isKindOfClass:[NSString class]] || identifier.length == 0 ||
+                ![name isKindOfClass:[NSString class]] || name.length == 0 ||
+                ![type isKindOfClass:[NSNumber class]] ||
+                (available & (hookkit_lib_t)type.unsignedIntegerValue) == 0) {
+                return fail("legacy provider metadata");
+            }
+            saw_fishhook |= [identifier isEqualToString:@"fishhook"];
+        }
+        if (backend_ids.count == 0) {
+            return fail("dynamic backend enumeration");
+        }
+        if ([backend_ids containsObject:@"rebind"] != saw_fishhook) {
+            return fail("fishhook picker entry");
+        }
+        HKSubstitutor *selected =
+            [HKSubstitutor substitutorWithBackendIDs:@[backend_ids.firstObject]];
+        if (!selected) {
+            return fail("per-instance backend selection");
         }
 
         HKSubstitutor *hooks = [HKSubstitutor defaultSubstitutor];
         if (!hooks) {
             return fail("default substitutor");
         }
+        if (info.count > 0) {
+            hookkit_lib_t selected_type =
+                (hookkit_lib_t)[info.firstObject[@"type"] unsignedIntegerValue];
+            [hooks setTypes:selected_type];
+            [hooks initLibraries];
+            if (hooks.activeType != selected_type) {
+                return fail("legacy backend selection");
+            }
+        }
+        // The following functional probe needs the automatic route because
+        // this test intentionally enumerates every engine, including
+        // operation-specific choices such as the ObjC and memory engines.
+        [hooks setTypes:HK_LIB_NONE];
 
         Class super_class = objc_getClass("NSObject");
         SEL selector = sel_registerName("shadow376_value");

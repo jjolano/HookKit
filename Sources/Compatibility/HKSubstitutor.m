@@ -1,8 +1,8 @@
 // HookKit 3 canonical compatibility facade.
 //
-// This keeps the historical Objective-C ABI intentionally thin: it only
-// translates calls into HookKit 3 plans/engines and never selects or invokes
-// the former 2.x backend router.
+// This keeps the historical Objective-C ABI intentionally thin: it translates
+// calls into HookKit 3 plans/engines.  Its v1 ID/type projection is dynamic,
+// just like the former module list; it never invokes the former 2.x router.
 
 #import "../../Headers/HookKit.h"
 #import "HKLegacyFacade.h"
@@ -134,6 +134,7 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 - (void)drainRoutedHooks:(NSArray *)hooks;
 - (BOOL)routeFunctionOperation:(id)operation;
 - (BOOL)routeMemoryOperation:(id)operation;
+- (NSString *)backendIDCSV;
 - (id)hk_backendForAutoCoverFunction:(void *)function
                          replacement:(void *)replacement;
 - (id)hk_backendForAutoCoverFunction:(void *)function
@@ -148,8 +149,104 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
                          technique:(HKLegacyTechnique *)technique;
 @end
 
+static bool hk_legacy_collect_backend_id(void *opaque,
+                                         hk_string_view_t backend_id) {
+    NSMutableArray<NSString *> *ids = (__bridge NSMutableArray *)opaque;
+    NSString *identifier = [[NSString alloc] initWithBytes:backend_id.data
+                                                     length:backend_id.length
+                                                   encoding:NSUTF8StringEncoding];
+    if (identifier) {
+        [ids addObject:identifier];
+    }
+    return true;
+}
+
+typedef struct {
+    const char *engine_id;
+    const char *identifier;
+    const char *name;
+    hookkit_lib_t type;
+} hk_legacy_backend_label_t;
+
+// v1 exposed opaque type bits paired with IDs. Keep those pairs stable while
+// availability changes, so Shadow can enumerate, persist an ID, then later
+// hand its paired bit back to setTypes: without selecting a shifted engine.
+static const hk_legacy_backend_label_t hk_legacy_backend_labels[] = {
+    { "objc", "objc", "Objective-C runtime", (hookkit_lib_t)(1u << 0) },
+    { "rebind", "fishhook", "fishhook", (hookkit_lib_t)(1u << 1) },
+    { "memory", "memory", "HookKit memory", (hookkit_lib_t)(1u << 2) },
+    { "provider-dobby", "dobby", "Dobby", (hookkit_lib_t)(1u << 3) },
+    { "provider-gum", "frida", "Frida", (hookkit_lib_t)(1u << 4) },
+    { "provider-ellekit", "ellekit", "ElleKit", (hookkit_lib_t)(1u << 5) },
+    { "inline-terminal", "inline-terminal", "HookKit inline", (hookkit_lib_t)(1u << 6) },
+    { "inline-relocating", "native", "HookKit", (hookkit_lib_t)(1u << 7) },
+    { "provider-substitute", "substitute", "Cydia Substrate / Substitute", (hookkit_lib_t)(1u << 8) },
+};
+
+static const hk_legacy_backend_label_t *hk_legacy_label_for_backend_id(
+    NSString *backend_id) {
+    const char *value = backend_id.UTF8String;
+    if (!value) {
+        return NULL;
+    }
+    for (size_t i = 0;
+         i < sizeof(hk_legacy_backend_labels) /
+                 sizeof(hk_legacy_backend_labels[0]);
+         i++) {
+        const hk_legacy_backend_label_t *label = &hk_legacy_backend_labels[i];
+        if (strcmp(value, label->engine_id) == 0) {
+            return label;
+        }
+    }
+    return NULL;
+}
+
+static NSString *hk_legacy_identifier_for_backend_id(NSString *backend_id) {
+    const hk_legacy_backend_label_t *label =
+        hk_legacy_label_for_backend_id(backend_id);
+    return label ? [[NSString alloc] initWithUTF8String:label->identifier]
+                 : backend_id;
+}
+
+static NSString *hk_legacy_name_for_backend_id(NSString *backend_id) {
+    const hk_legacy_backend_label_t *label =
+        hk_legacy_label_for_backend_id(backend_id);
+    return label ? [[NSString alloc] initWithUTF8String:label->name]
+                 : backend_id;
+}
+
+static NSArray<NSString *> *hk_legacy_backend_ids_for_types(
+    hookkit_lib_t types, NSArray<NSString *> *available_backend_ids,
+    hookkit_lib_t *active_type) {
+    if (active_type) {
+        *active_type = HK_LIB_NONE;
+    }
+    if (types == HK_LIB_NONE) {
+        return nil;
+    }
+
+    for (NSUInteger i = 0; i < available_backend_ids.count; i++) {
+        id candidate = [available_backend_ids objectAtIndex:i];
+        if (![candidate isKindOfClass:[NSString class]]) {
+            continue;
+        }
+        const hk_legacy_backend_label_t *label =
+            hk_legacy_label_for_backend_id(candidate);
+        if (!label || (types & label->type) == 0) {
+            continue;
+        }
+        if (active_type) {
+            *active_type = label->type;
+        }
+        return @[(NSString *)candidate];
+    }
+    return @[];
+}
+
 @implementation HKSubstitutor {
     hookkit_lib_t _types;
+    hookkit_lib_t _activeLegacyType;
+    NSArray<NSString *> *_backendIDs;
     BOOL _batching;
     NSMutableArray<HKLegacyOperation *> *_queuedOperations;
     int _lastError;
@@ -170,7 +267,20 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 }
 
 + (hookkit_lib_t)getAvailableSubstitutorTypes {
-    return HK_LIB_NONE;
+    NSArray<NSString *> *backend_ids = [self getAvailableBackendIDs];
+    hookkit_lib_t types = HK_LIB_NONE;
+    for (NSUInteger i = 0; i < backend_ids.count; i++) {
+        id candidate = [backend_ids objectAtIndex:i];
+        if (![candidate isKindOfClass:[NSString class]]) {
+            continue;
+        }
+        const hk_legacy_backend_label_t *label =
+            hk_legacy_label_for_backend_id(candidate);
+        if (label) {
+            types = (hookkit_lib_t)(types | label->type);
+        }
+    }
+    return types;
 }
 
 + (hookkit_cat_t)getAvailableCategories {
@@ -178,8 +288,53 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 }
 
 + (NSArray<NSDictionary *> *)getSubstitutorTypeInfo:(hookkit_lib_t)types {
-    (void)types;
-    return @[];
+    if (types == HK_LIB_NONE) {
+        return @[];
+    }
+    NSArray<NSString *> *backend_ids = [self getAvailableBackendIDs];
+    NSMutableArray<NSDictionary *> *info = [NSMutableArray array];
+    for (NSUInteger i = 0; i < backend_ids.count; i++) {
+        id candidate = [backend_ids objectAtIndex:i];
+        if (![candidate isKindOfClass:[NSString class]]) {
+            continue;
+        }
+        const hk_legacy_backend_label_t *label =
+            hk_legacy_label_for_backend_id(candidate);
+        if (!label || (types & label->type) == 0) {
+            continue;
+        }
+        NSString *identifier = hk_legacy_identifier_for_backend_id(candidate);
+        NSString *name = hk_legacy_name_for_backend_id(candidate);
+        if (identifier && name) {
+            [info addObject:@{
+                @"id": identifier,
+                @"name": name,
+                @"type": @(label->type),
+                @"selectable": @YES,
+            }];
+        }
+    }
+    return [info copy];
+}
+
++ (NSArray<NSString *> *)getAvailableBackendIDs {
+    hk_runtime_t *runtime = NULL;
+    if (hk_runtime_create(NULL, &runtime) != HK_STATUS_OK || !runtime) {
+        return @[];
+    }
+    NSMutableArray<NSString *> *ids = [NSMutableArray new];
+    (void)hk_runtime_enumerate_backends(runtime,
+                                        hk_legacy_collect_backend_id,
+                                        (__bridge void *)ids);
+    hk_runtime_release(runtime);
+    return [ids copy];
+}
+
++ (instancetype)substitutorWithBackendIDs:(NSArray<NSString *> *)backendIDs {
+    HKSubstitutor *substitutor = [self new];
+    substitutor->_backendIDs = [backendIDs isKindOfClass:[NSArray class]]
+        ? [backendIDs copy] : @[];
+    return substitutor;
 }
 
 + (instancetype)substitutorWithTypes:(hookkit_lib_t)types {
@@ -190,8 +345,15 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 
 + (instancetype)substitutorWithOrderedTypes:(NSArray<NSNumber *> *)types {
     HKSubstitutor *substitutor = [self new];
-    if ([types.firstObject isKindOfClass:[NSNumber class]]) {
-        substitutor.types = (hookkit_lib_t)types.firstObject.unsignedIntegerValue;
+    for (id candidate in types) {
+        if (![candidate isKindOfClass:[NSNumber class]]) {
+            continue;
+        }
+        substitutor.types =
+            (hookkit_lib_t)[(NSNumber *)candidate unsignedIntegerValue];
+        if (substitutor.activeType != HK_LIB_NONE) {
+            break;
+        }
     }
     return substitutor;
 }
@@ -220,14 +382,33 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 }
 
 - (hookkit_lib_t)types { return _types; }
-- (void)setTypes:(hookkit_lib_t)types { _types = types; }
+- (void)setTypes:(hookkit_lib_t)types {
+    _types = types;
+    _backendIDs = hk_legacy_backend_ids_for_types(
+        types, [HKSubstitutor getAvailableBackendIDs], &_activeLegacyType);
+}
 - (BOOL)batching { return _batching; }
 - (void)setBatching:(BOOL)batching { _batching = batching; }
-- (hookkit_lib_t)activeType { return HK_LIB_NONE; }
+- (hookkit_lib_t)activeType { return _activeLegacyType; }
 - (HKStrategy)activeStrategy { return HKStrategyDefault; }
 
+- (NSString *)backendIDCSV {
+    if (!_backendIDs) {
+        return nil;
+    }
+    NSMutableArray<NSString *> *ids = [NSMutableArray array];
+    for (id candidate in _backendIDs) {
+        if ([candidate isKindOfClass:[NSString class]] &&
+            ((NSString *)candidate).length > 0) {
+            [ids addObject:candidate];
+        }
+    }
+    return [ids componentsJoinedByString:@","];
+}
+
 - (void)initLibraries {
-    // 3.0 deliberately creates/activates only while an operation executes.
+    // v1 resolved the ID/type pair at setTypes:. Recomputing an opaque type
+    // later could bind a newly discovered engine at a different index.
 }
 
 - (hookkit_lib_t)backendType { return HK_LIB_NONE; }
@@ -246,6 +427,8 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
 
 - (hookkit_status_t)executeOperation:(HKLegacyOperation *)operation onBackend:(id)backend {
     (void)backend;
+    NSString *backend_ids = [self backendIDCSV];
+    const char *backend_csv = backend_ids ? backend_ids.UTF8String : NULL;
     switch (operation->kind) {
     case HK_LEGACY_OP_MESSAGE:
         return (hookkit_status_t)hk_legacy_hook_objc((__bridge void *)operation->objcClass,
@@ -253,13 +436,13 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
                                                        operation->replacement,
                                                        operation->oldPtr);
     case HK_LEGACY_OP_FUNCTION:
-        return (hookkit_status_t)hk_legacy_hook_function(operation->target,
-                                                           operation->replacement,
-                                                           operation->oldPtr);
+        return (hookkit_status_t)hk_legacy_hook_function_with_backend_ids(
+            operation->target, operation->replacement, operation->oldPtr,
+            backend_csv);
     case HK_LEGACY_OP_MEMORY:
-        return (hookkit_status_t)hk_legacy_hook_memory(operation->target,
-                                                         operation->bytes.bytes,
-                                                         operation->bytes.length);
+        return (hookkit_status_t)hk_legacy_hook_memory_with_backend_ids(
+            operation->target, operation->bytes.bytes, operation->bytes.length,
+            backend_csv);
     }
     return HK_ERR;
 }
@@ -381,8 +564,10 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
         [self noteHookResult:HK_OK];
         return HK_OK;
     }
-    hookkit_status_t status = (hookkit_status_t)hk_legacy_hook_function(
-        function, replacement, oldPtr);
+    NSString *backend_ids = [self backendIDCSV];
+    hookkit_status_t status = (hookkit_status_t)
+        hk_legacy_hook_function_with_backend_ids(function, replacement, oldPtr,
+                                                  backend_ids.UTF8String);
     [self noteHookResult:status];
     return status;
 }
@@ -403,7 +588,10 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
         [self noteHookResult:HK_OK];
         return HK_OK;
     }
-    hookkit_status_t status = (hookkit_status_t)hk_legacy_hook_memory(target, data, size);
+    NSString *backend_ids = [self backendIDCSV];
+    hookkit_status_t status = (hookkit_status_t)
+        hk_legacy_hook_memory_with_backend_ids(target, data, size,
+                                                backend_ids.UTF8String);
     [self noteHookResult:status];
     return status;
 }
@@ -578,7 +766,10 @@ static void *hk_legacy_find_symbol_in_payload(const hk_legacy_image_t *image,
                 specs[i] = operation->spec;
                 originals[i] = operation->oldPtr;
             }
-            hk_legacy_apply_specs(specs, originals, count, results);
+            NSString *backend_ids = [self backendIDCSV];
+            hk_legacy_apply_specs_with_backend_ids(specs, originals, count,
+                                                   results,
+                                                   backend_ids.UTF8String);
             for (size_t i = 0; i < count; i++) {
                 succeeded += results[i] == HK_LEGACY_OK;
             }

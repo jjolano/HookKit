@@ -109,6 +109,11 @@ static void exercise_swift_target(void) {
     assert(t.slot_index == 3);
 }
 
+static bool backend_enumerator(void *context, hk_string_view_t backend_id) {
+    (void)context;
+    return backend_id.data != NULL;
+}
+
 int main(void) {
     exercise_swift_target();
     hk_hook_spec_t spec = make_sample_spec();
@@ -116,9 +121,11 @@ int main(void) {
     hk_task_fn task_fn_var = NULL;
     hk_executor_submit_fn submit_fn_var = NULL;
     hk_diagnostic_callback_fn diag_fn_var = NULL;
+    hk_backend_enumerator_fn backend_enumerator_fn_var = backend_enumerator;
     (void)task_fn_var;
     (void)submit_fn_var;
     (void)diag_fn_var;
+    (void)backend_enumerator_fn_var;
 
     if (spec.target_kind != HK_TARGET_FUNCTION_SYMBOL) {
         return 1;

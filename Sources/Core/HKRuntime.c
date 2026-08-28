@@ -650,8 +650,9 @@ static uint32_t hk_runtime_platform_ios_version(void) {
 // diagnostics, HK_INSTALL_CONTEXT_EARLY_PROCESS. Makes the common case
 // (a plain hk_runtime_create(NULL, &rt)) not require constructing a
 // struct just to zero it.
-hk_status_t hk_runtime_create(
+static hk_status_t hk_runtime_create_impl(
     const hk_runtime_config_t *config,
+    const char *backend_override,
     hk_runtime_t **out_runtime)
 {
     if (!out_runtime) {
@@ -706,10 +707,29 @@ hk_status_t hk_runtime_create(
     atomic_init(&runtime->shutdown_called, false);
 
     hk_runtime_register_platform_engines(runtime);
-    hk_runtime_apply_backend_policy(runtime);
+    if (backend_override) {
+        hk_runtime_apply_backend_override(runtime, backend_override);
+    } else {
+        hk_runtime_apply_backend_policy(runtime);
+    }
 
     *out_runtime = runtime;
     return HK_STATUS_OK;
+}
+
+hk_status_t hk_runtime_create(
+    const hk_runtime_config_t *config,
+    hk_runtime_t **out_runtime)
+{
+    return hk_runtime_create_impl(config, NULL, out_runtime);
+}
+
+hk_status_t hk_runtime_create_with_backend_override(
+    const hk_runtime_config_t *config,
+    const char *backend_ids,
+    hk_runtime_t **out_runtime)
+{
+    return hk_runtime_create_impl(config, backend_ids, out_runtime);
 }
 
 void hk_runtime_shutdown(hk_runtime_t *runtime) {
@@ -745,6 +765,57 @@ hk_id_t hk_runtime_owner_id(const hk_runtime_t *runtime) {
         return zero;
     }
     return runtime->owner_id;
+}
+
+static bool hk_runtime_vtable_has_field(const hk_engine_vtable_t *vtable,
+                                        size_t offset, size_t size) {
+    if (!vtable) {
+        return false;
+    }
+    return (vtable->abi_version == 0 && vtable->struct_size == 0) ||
+           vtable->struct_size >= offset + size;
+}
+
+hk_status_t hk_runtime_enumerate_backends(
+    hk_runtime_t *runtime,
+    hk_backend_enumerator_fn enumerator,
+    void *context)
+{
+    if (!runtime || !enumerator) {
+        return HK_STATUS_INVALID_ARGUMENT;
+    }
+    for (size_t i = 0; i < runtime->engine_count; i++) {
+        const hk_engine_vtable_t *engine = runtime->engines[i];
+        if (!engine || !engine->describe) {
+            continue;
+        }
+        hk_engine_capabilities_t capabilities = engine->describe();
+        if (!capabilities.engine_id || !capabilities.engine_id[0] ||
+            !hk_engine_supports_platform(&capabilities,
+                                         runtime->platform_architecture,
+                                         runtime->platform_ios_version,
+                                         runtime->engine_testing[i])) {
+            continue;
+        }
+        if (hk_runtime_vtable_has_field(
+                engine, offsetof(hk_engine_vtable_t, discover),
+                sizeof(engine->discover)) && engine->discover) {
+            hk_engine_discovery_t discovery;
+            memset(&discovery, 0, sizeof(discovery));
+            if (!engine->discover(runtime->engine_ctxs[i], &discovery) ||
+                !discovery.available) {
+                continue;
+            }
+        }
+        hk_string_view_t backend_id = {
+            .data = capabilities.engine_id,
+            .length = strlen(capabilities.engine_id),
+        };
+        if (!enumerator(context, backend_id)) {
+            break;
+        }
+    }
+    return HK_STATUS_OK;
 }
 
 bool hk_runtime_append_artifacts(hk_runtime_t *runtime,
@@ -1007,95 +1078,18 @@ static int hk_backend_token_index(const char *list, const char *id) {
     return -1;
 }
 
-#if defined(__APPLE__) && TARGET_OS_IOS
-#include <CoreFoundation/CoreFoundation.h>
-// Joins the me.jjolano.hookkit preference `key` (a string, or an array of
-// strings) into a malloc'd comma-separated C string, or NULL. Caller frees.
-static char *hk_backend_pref_csv(CFStringRef key) {
-    CFPropertyListRef value =
-        CFPreferencesCopyAppValue(key, CFSTR("me.jjolano.hookkit"));
-    if (!value) {
-        return NULL;
-    }
-    CFMutableStringRef joined = CFStringCreateMutable(NULL, 0);
-    if (CFGetTypeID(value) == CFArrayGetTypeID()) {
-        CFIndex count = CFArrayGetCount(value);
-        for (CFIndex i = 0; i < count; i++) {
-            CFStringRef s = CFArrayGetValueAtIndex(value, i);
-            if (s && CFGetTypeID(s) == CFStringGetTypeID()) {
-                if (CFStringGetLength(joined) > 0) {
-                    CFStringAppendCString(joined, ",", kCFStringEncodingUTF8);
-                }
-                CFStringAppend(joined, s);
-            }
-        }
-    } else if (CFGetTypeID(value) == CFStringGetTypeID()) {
-        CFStringAppend(joined, value);
-    }
-    CFRelease(value);
-
-    char *out = NULL;
-    CFIndex cap = CFStringGetMaximumSizeForEncoding(
-                      CFStringGetLength(joined), kCFStringEncodingUTF8) + 1;
-    if (cap > 0 && (out = (char *)malloc((size_t)cap)) != NULL) {
-        if (!CFStringGetCString(joined, out, cap, kCFStringEncodingUTF8)) {
-            free(out);
-            out = NULL;
-        }
-    }
-    CFRelease(joined);
-    return out;
-}
-#endif
-
-void hk_runtime_apply_backend_policy(hk_runtime_t *runtime) {
-    if (!runtime || runtime->engine_count == 0) {
-        return;
-    }
-
-    const char *order = getenv("HOOKKIT_BACKENDS");
-    const char *disable = getenv("HOOKKIT_DISABLE_BACKENDS");
-    char *order_owned = NULL;
-    char *disable_owned = NULL;
-#if defined(__APPLE__) && TARGET_OS_IOS
-    if (!order) {
-        order = order_owned = hk_backend_pref_csv(CFSTR("Backends"));
-    }
-    if (!disable) {
-        disable = disable_owned = hk_backend_pref_csv(CFSTR("DisabledBackends"));
-    }
-#endif
-    if ((!order || !*order) && (!disable || !*disable)) {
-        free(order_owned);
-        free(disable_owned);
-        return;
-    }
-
+static void hk_runtime_retain_ordered_engines(hk_runtime_t *runtime,
+                                              const bool *drop,
+                                              const char *order) {
     size_t n = runtime->engine_count;
     const char *ids[HK_RUNTIME_MAX_ENGINES];
-    bool drop[HK_RUNTIME_MAX_ENGINES];
-    size_t survivors = 0;
-    for (size_t i = 0; i < n; i++) {
-        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
-                     ? runtime->engines[i]->describe().engine_id
-                     : NULL;
-        drop[i] = disable && hk_backend_token_index(disable, ids[i]) >= 0;
-        if (!drop[i]) {
-            survivors++;
-        }
-    }
-    if (survivors == 0) {  // never let a disable set empty the registry
-        for (size_t i = 0; i < n; i++) {
-            drop[i] = false;
-        }
-    }
-
-    // Stable order: kept engines by (preference rank, original index). Matched
-    // tokens sort by their position; unmatched keep their original order after.
     size_t idx_order[HK_RUNTIME_MAX_ENGINES];
     long keys[HK_RUNTIME_MAX_ENGINES];
     size_t kept = 0;
     for (size_t i = 0; i < n; i++) {
+        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
+                     ? runtime->engines[i]->describe().engine_id
+                     : NULL;
         if (drop[i]) {
             continue;
         }
@@ -1132,9 +1126,57 @@ void hk_runtime_apply_backend_policy(hk_runtime_t *runtime) {
         runtime->engine_testing[k] = new_testing[k];
     }
     runtime->engine_count = kept;
+}
 
-    free(order_owned);
-    free(disable_owned);
+void hk_runtime_apply_backend_policy(hk_runtime_t *runtime) {
+    if (!runtime || runtime->engine_count == 0) {
+        return;
+    }
+
+    const char *order = getenv("HOOKKIT_BACKENDS");
+    const char *disable = getenv("HOOKKIT_DISABLE_BACKENDS");
+    if ((!order || !*order) && (!disable || !*disable)) {
+        return;
+    }
+
+    size_t n = runtime->engine_count;
+    const char *ids[HK_RUNTIME_MAX_ENGINES];
+    bool drop[HK_RUNTIME_MAX_ENGINES];
+    size_t survivors = 0;
+    for (size_t i = 0; i < n; i++) {
+        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
+                     ? runtime->engines[i]->describe().engine_id
+                     : NULL;
+        drop[i] = disable && hk_backend_token_index(disable, ids[i]) >= 0;
+        if (!drop[i]) {
+            survivors++;
+        }
+    }
+    if (survivors == 0) {  // never let a disable set empty the registry
+        for (size_t i = 0; i < n; i++) {
+            drop[i] = false;
+        }
+    }
+
+    hk_runtime_retain_ordered_engines(runtime, drop, order);
+}
+
+void hk_runtime_apply_backend_override(hk_runtime_t *runtime,
+                                       const char *backend_ids) {
+    if (!runtime || runtime->engine_count == 0 || !backend_ids) {
+        return;
+    }
+    bool drop[HK_RUNTIME_MAX_ENGINES];
+    for (size_t i = 0; i < runtime->engine_count; i++) {
+        const hk_engine_vtable_t *engine = runtime->engines[i];
+        const char *id = engine && engine->describe
+            ? engine->describe().engine_id : NULL;
+        // ObjC messages are a facade-native operation, never a selected
+        // provider route, so an explicit function backend must not disable it.
+        drop[i] = !id || (strcmp(id, "objc") != 0 &&
+                          hk_backend_token_index(backend_ids, id) < 0);
+    }
+    hk_runtime_retain_ordered_engines(runtime, drop, backend_ids);
 }
 
 // hk_runtime_drain_pending now lives in HKPlan.c, next to the per-hook

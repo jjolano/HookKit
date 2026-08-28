@@ -25,7 +25,13 @@ int hk_legacy_hook_objc(void *dispatch_class, void *selector,
                          void *replacement, void **out_original);
 int hk_legacy_hook_function(void *function, void *replacement,
                              void **out_original);
+int hk_legacy_hook_function_with_backend_ids(void *function, void *replacement,
+                                              void **out_original,
+                                              const char *backend_ids);
 int hk_legacy_hook_memory(void *target, const void *data, size_t size);
+int hk_legacy_hook_memory_with_backend_ids(void *target, const void *data,
+                                            size_t size,
+                                            const char *backend_ids);
 int hk_legacy_hook_swift_method(void *metadata, const char *name,
                                  void *replacement, void **out_original);
 int hk_legacy_hook_swift_slot(void *metadata, uint32_t index,
@@ -53,6 +59,11 @@ int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
                            void **const *originals,
                            size_t count,
                            int *out_results);
+int hk_legacy_apply_specs_with_backend_ids(const hk_hook_spec_t *specs,
+                                            void **const *originals,
+                                            size_t count,
+                                            int *out_results,
+                                            const char *backend_ids);
 
 #ifdef __cplusplus
 }

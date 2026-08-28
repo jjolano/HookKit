@@ -156,20 +156,21 @@ int main(void) {
         setenv("HOOKKIT_DISABLE_BACKENDS",
                "provider-dobby,provider-gum,provider-ellekit,provider-substitute", 1);
 
-        HKSubstitutor *dobby = [HKSubstitutor substitutorWithTypes:HK_LIB_DOBBY];
+        HKSubstitutor *dobby = [HKSubstitutor
+            substitutorWithBackendIDs:@[@"inline-relocating", @"memory"]];
         hookkit_status_t status = [dobby hookFunction:(void *)dobbyTarget
             withReplacement:(void *)dobbyReplacement outOldPtr:(void **)&dobbyOriginal];
         int dobbyValue = dobbyTarget(argument);
-        // activeType is intentionally HK_LIB_NONE in the HookKit 3 facade — the
-        // 2.x backend-type router is retired — so it is no longer asserted here;
-        // the hook is verified by its observable effect instead.
+        // This raw-ID override deliberately pins the built-in engines, so the
+        // hook is verified by its observable effect rather than activeType.
         BOOL dobbyOK = status == HK_OK &&
             dobbyOriginal && dobbyHits == 1 && dobbyValue == 155 && dobbyOriginal(argument) == 55;
         printf("Dobby: %s status=%d original=%p hits=%d value=%d\n",
             dobbyOK ? "PASS" : "FAIL", status, dobbyOriginal, dobbyHits, dobbyValue);
         failures += !dobbyOK;
 
-        HKSubstitutor *native = [HKSubstitutor substitutorWithTypes:HK_LIB_NATIVE];
+        HKSubstitutor *native = [HKSubstitutor
+            substitutorWithBackendIDs:@[@"inline-relocating", @"memory"]];
         status = [native hookFunction:(void *)nativeTarget
             withReplacement:(void *)nativeReplacement outOldPtr:(void **)&nativeOriginal];
         int nativeValue = nativeTarget(argument);
@@ -215,7 +216,8 @@ int main(void) {
         printf("Entry patch: %s insn=0x%08x\n",
             (entry & 0xFC000000u) == 0x14000000u ? "atomic B" : "16-byte fallback", entry);
 
-        HKSubstitutor *stress = [HKSubstitutor substitutorWithTypes:HK_LIB_NATIVE];
+        HKSubstitutor *stress = [HKSubstitutor
+            substitutorWithBackendIDs:@[@"inline-relocating", @"memory"]];
         int installed = 0;
         BOOL stressOK = YES;
 

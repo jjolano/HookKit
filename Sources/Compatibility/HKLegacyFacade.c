@@ -5,6 +5,7 @@
 #include "HKLegacyFacade.h"
 
 #include "../../Headers/HookKit/HookKit.h"
+#include "../Core/HKRuntimeInternal.h"
 #include "../../native/hk_swift.h"
 #include "../../native/hk_native.h"
 
@@ -72,7 +73,86 @@ static int map_result(const hk_hook_t *hook, void **out_original,
     }
 }
 
-static int apply_plan(const hk_hook_spec_t *spec, void **out_original) {
+static bool hk_legacy_backend_ids_are_only(const char *backend_ids,
+                                           const char *wanted) {
+    if (!backend_ids || !wanted || !wanted[0]) {
+        return false;
+    }
+    bool found = false;
+    const char *cursor = backend_ids;
+    while (*cursor) {
+        while (*cursor == ',' || *cursor == ' ' || *cursor == '\t' ||
+               *cursor == '\n' || *cursor == '\r') {
+            cursor++;
+        }
+        const char *token = cursor;
+        while (*cursor && *cursor != ',' && *cursor != ' ' &&
+               *cursor != '\t' && *cursor != '\n' && *cursor != '\r') {
+            cursor++;
+        }
+        size_t length = (size_t)(cursor - token);
+        if (length == 0) {
+            continue;
+        }
+        if (found || strlen(wanted) != length ||
+            strncmp(token, wanted, length) != 0) {
+            return false;
+        }
+        found = true;
+    }
+    return found;
+}
+
+// HookKit v1's fishhook module accepted a function address, used dladdr to
+// recover its exported name, then rebound that name. Preserve exactly that
+// adapter behavior when the v1 picker selects current rebind.
+static int hk_legacy_route_function_spec(const hk_hook_spec_t *spec,
+                                         const char *backend_ids,
+                                         hk_hook_spec_t *out_spec) {
+    if (!spec || !out_spec) {
+        return HK_LEGACY_ERR_INVALID_ARGUMENT;
+    }
+    *out_spec = *spec;
+    if (!hk_legacy_backend_ids_are_only(backend_ids, "rebind") ||
+        spec->target_kind != HK_TARGET_FUNCTION_ADDRESS) {
+        return HK_LEGACY_OK;
+    }
+#if defined(__APPLE__)
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (!dladdr((const void *)spec->target.address.address, &info) ||
+        !info.dli_sname || !info.dli_sname[0]) {
+        return HK_LEGACY_ERR_NOT_SUPPORTED;
+    }
+
+    out_spec->target_kind = HK_TARGET_FUNCTION_SYMBOL;
+    out_spec->required_reach = HK_REACH_EXISTING_IMPORTS;
+    out_spec->preferred_reach = HK_REACH_EXISTING_IMPORTS;
+    if (out_spec->original_requirement == HK_ORIGINAL_CALLABLE_CONTINUATION) {
+        out_spec->original_requirement = HK_ORIGINAL_DIRECT_PREDECESSOR;
+    }
+    hk_symbol_target_t *symbol = &out_spec->target.symbol;
+    memset(symbol, 0, sizeof(*symbol));
+    symbol->struct_size = sizeof(*symbol);
+    symbol->struct_version = HK_ABI_VERSION_3_0;
+    symbol->name = info.dli_sname;
+    symbol->name_convention = HK_SYMBOL_NAME_C;
+    symbol->visibility = HK_SYMBOL_VISIBILITY_EXPORTED_ONLY;
+    symbol->defining_image.struct_size = sizeof(symbol->defining_image);
+    symbol->defining_image.struct_version = HK_ABI_VERSION_3_0;
+    symbol->defining_image.kind = HK_IMAGE_ANY_LOADED;
+    symbol->caller_image_scope.struct_size = sizeof(symbol->caller_image_scope);
+    symbol->caller_image_scope.struct_version = HK_ABI_VERSION_3_0;
+    symbol->caller_image_scope.kind = HK_IMAGE_ANY_LOADED;
+    symbol->alias_policy = HK_SYMBOL_ALIAS_EXACT_ONLY;
+    return HK_LEGACY_OK;
+#else
+    return HK_LEGACY_ERR_NOT_SUPPORTED;
+#endif
+}
+
+static int apply_plan(const hk_hook_spec_t *spec, void **out_original,
+                      const char *backend_ids) {
     if (out_original) {
         *out_original = NULL;
     }
@@ -89,13 +169,21 @@ static int apply_plan(const hk_hook_spec_t *spec, void **out_original) {
     runtime_config.struct_size = sizeof(runtime_config);
     runtime_config.struct_version = HK_ABI_VERSION_3_0;
     runtime_config.install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS;
-    if (hk_runtime_create(&runtime_config, &runtime) != HK_STATUS_OK || !runtime) {
+    if (hk_runtime_create_with_backend_override(&runtime_config, backend_ids,
+                                                &runtime) != HK_STATUS_OK ||
+        !runtime) {
         return HK_LEGACY_ERR_NOT_SUPPORTED;
     }
     if (hk_plan_create(runtime, NULL, &plan) != HK_STATUS_OK || !plan) {
         goto done;
     }
-    hk_status_t status = hk_plan_add_hook(plan, spec, &hook);
+    hk_hook_spec_t routed_spec;
+    int route = hk_legacy_route_function_spec(spec, backend_ids, &routed_spec);
+    if (route != HK_LEGACY_OK) {
+        result = route;
+        goto done;
+    }
+    hk_status_t status = hk_plan_add_hook(plan, &routed_spec, &hook);
     if (status != HK_STATUS_OK || !hook) {
         result = map_status(status);
         goto done;
@@ -206,10 +294,11 @@ int hk_legacy_build_function_spec(void *function, void *replacement,
     return HK_LEGACY_OK;
 }
 
-int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
-                           void **const *originals,
-                           size_t count,
-                           int *out_results) {
+int hk_legacy_apply_specs_with_backend_ids(const hk_hook_spec_t *specs,
+                                            void **const *originals,
+                                            size_t count,
+                                            int *out_results,
+                                            const char *backend_ids) {
     if (count == 0) {
         return HK_LEGACY_OK;
     }
@@ -233,7 +322,8 @@ int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
     runtime_config.struct_size = sizeof(runtime_config);
     runtime_config.struct_version = HK_ABI_VERSION_3_0;
     runtime_config.install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS;
-    if (hk_runtime_create(&runtime_config, &runtime) != HK_STATUS_OK ||
+    if (hk_runtime_create_with_backend_override(&runtime_config, backend_ids,
+                                                &runtime) != HK_STATUS_OK ||
         !runtime) {
         free(hooks);
         for (size_t i = 0; i < count; i++) {
@@ -253,7 +343,14 @@ int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
     // not block its siblings.
     for (size_t i = 0; i < count; i++) {
         hooks[i] = NULL;
-        hk_status_t status = hk_plan_add_hook(plan, &specs[i], &hooks[i]);
+        hk_hook_spec_t routed_spec;
+        int route = hk_legacy_route_function_spec(&specs[i], backend_ids,
+                                                   &routed_spec);
+        if (route != HK_LEGACY_OK) {
+            out_results[i] = route;
+            continue;
+        }
+        hk_status_t status = hk_plan_add_hook(plan, &routed_spec, &hooks[i]);
         out_results[i] = map_status(status);
     }
 
@@ -304,6 +401,14 @@ int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
     return succeeded ? HK_LEGACY_ERR_PARTIAL : HK_LEGACY_ERR;
 }
 
+int hk_legacy_apply_specs(const hk_hook_spec_t *specs,
+                           void **const *originals,
+                           size_t count,
+                           int *out_results) {
+    return hk_legacy_apply_specs_with_backend_ids(specs, originals, count,
+                                                   out_results, NULL);
+}
+
 static void init_spec(hk_hook_spec_t *spec, const char *stable_id,
                       hk_target_kind_t kind, void *replacement,
                       hk_reachability_t reach,
@@ -335,11 +440,18 @@ int hk_legacy_hook_objc(void *dispatch_class, void *selector,
     if (build != HK_LEGACY_OK) {
         return build;
     }
-    return apply_plan(&spec, out_original);
+    return apply_plan(&spec, out_original, NULL);
 }
 
 int hk_legacy_hook_function(void *function, void *replacement,
                              void **out_original) {
+    return hk_legacy_hook_function_with_backend_ids(function, replacement,
+                                                     out_original, NULL);
+}
+
+int hk_legacy_hook_function_with_backend_ids(void *function, void *replacement,
+                                              void **out_original,
+                                              const char *backend_ids) {
     if (out_original) {
         *out_original = NULL;
     }
@@ -351,10 +463,16 @@ int hk_legacy_hook_function(void *function, void *replacement,
     if (build != HK_LEGACY_OK) {
         return build;
     }
-    return apply_plan(&spec, out_original);
+    return apply_plan(&spec, out_original, backend_ids);
 }
 
 int hk_legacy_hook_memory(void *target, const void *data, size_t size) {
+    return hk_legacy_hook_memory_with_backend_ids(target, data, size, NULL);
+}
+
+int hk_legacy_hook_memory_with_backend_ids(void *target, const void *data,
+                                            size_t size,
+                                            const char *backend_ids) {
     if (!target || !data || size == 0) {
         return HK_LEGACY_ERR_INVALID_ARGUMENT;
     }
@@ -389,7 +507,7 @@ int hk_legacy_hook_memory(void *target, const void *data, size_t size) {
     spec.target.memory.expected_bytes.data = expected;
     spec.target.memory.expected_bytes.size = size;
     spec.target.memory.kind = HK_MEMORY_KIND_DATA;
-    int result = apply_plan(&spec, NULL);
+    int result = apply_plan(&spec, NULL, backend_ids);
     free(expected);
     return result;
 }

@@ -185,7 +185,8 @@ int main(void) {
            linked_framework_version(), loadavg[0]);
 
     int (*original)(int) = NULL;
-    HKSubstitutor *substitutor = [HKSubstitutor substitutorWithTypes:HK_LIB_NATIVE];
+    HKSubstitutor *substitutor = [HKSubstitutor
+        substitutorWithBackendIDs:@[@"inline-relocating", @"memory"]];
     uint64_t hook_start = mach_absolute_time();
     hookkit_status_t status = [substitutor hookFunction:(void *)perfTarget
         withReplacement:(void *)perfReplacement outOldPtr:(void **)&original];

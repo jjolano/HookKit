@@ -55,6 +55,15 @@ typedef void (*hk_diagnostic_callback_fn)(
     void *diagnostic_context,
     hk_string_view_t message);
 
+// Called once for each engine currently registered with a runtime and passing
+// its side-effect-free discovery probe. `backend_id` is suitable for
+// HKSubstitutor's direct backend-selection API. Its storage is borrowed from
+// the runtime and is valid only for the duration of the call.
+// Return false to stop enumeration early; that is still a successful call.
+typedef bool (*hk_backend_enumerator_fn)(
+    void *context,
+    hk_string_view_t backend_id);
+
 typedef struct {
     HK_STRUCT_HEADER;
 
@@ -78,6 +87,14 @@ void hk_runtime_shutdown(hk_runtime_t *runtime);
 void hk_runtime_release(hk_runtime_t *runtime);
 
 hk_id_t hk_runtime_owner_id(const hk_runtime_t *runtime);
+
+// Enumerates backend engines that are discoverable and supported by this
+// runtime's platform, in routing order. Discovery never activates a provider
+// or mutates a target.
+hk_status_t hk_runtime_enumerate_backends(
+    hk_runtime_t *runtime,
+    hk_backend_enumerator_fn enumerator,
+    void *context);
 
 // Applies queued late-image delta work (Milestone 12). A request requiring
 // autonomous late application cannot claim that reach unless the runtime

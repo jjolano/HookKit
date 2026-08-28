@@ -1,9 +1,5 @@
-// Host test for hk_runtime_apply_backend_policy (HKRuntime.c): the backend
-// override that reorders/trims the registered engines[] from
-// HOOKKIT_BACKENDS / HOOKKIT_DISABLE_BACKENDS (and, on iOS, the
-// me.jjolano.hookkit preferences -- not exercised here). This is the v1
-// "pick the backend" knob rebuilt without Modulous: the choosable names are
-// exactly the engines this build registered.
+// Host test for backend ordering and strict per-substitutor selection. The
+// latter is the dynamic API Shadow uses; it does not read a plist.
 #define _POSIX_C_SOURCE 200809L  // setenv/unsetenv under -std=c11 on glibc
 
 #include <assert.h>
@@ -30,6 +26,7 @@ FAKE_ENGINE(eng_alpha, "alpha");
 FAKE_ENGINE(eng_beta, "beta");
 FAKE_ENGINE(eng_gamma, "gamma");
 FAKE_ENGINE(eng_ellekit, "provider-ellekit");
+FAKE_ENGINE(eng_objc, "objc");
 
 static const char *id_at(hk_runtime_t *rt, size_t i) {
     return rt->engines[i]->describe().engine_id;
@@ -123,6 +120,39 @@ int main(void) {
     assert(strcmp(id_at(rt, 1), "beta") == 0);
     hk_runtime_release(rt);
     printf("PASS order+disable, case-insensitive, space-separated\n");
+
+    // 7) A direct list is strict and ordered. ObjC stays only for its
+    // facade-native message route; it is never a function/memory fallback.
+    const hk_engine_vtable_t *with_objc[] = {
+        &eng_objc, &eng_alpha, &eng_beta, &eng_gamma,
+    };
+    rt = make_runtime(with_objc, 4);
+    hk_runtime_apply_backend_override(rt, "gamma,alpha");
+    assert(rt->engine_count == 3);
+    assert(strcmp(id_at(rt, 0), "gamma") == 0);
+    assert(strcmp(id_at(rt, 1), "alpha") == 0);
+    assert(strcmp(id_at(rt, 2), "objc") == 0);
+    hk_runtime_release(rt);
+    printf("PASS direct selection is strict and ordered\n");
+
+    // 8) Prefix aliases work for the direct API too, while an empty or bad
+    // selection deliberately leaves no function/memory engine to fall back to.
+    rt = make_runtime(with_ek, 3);
+    hk_runtime_apply_backend_override(rt, "ellekit");
+    assert(rt->engine_count == 1);
+    assert(strcmp(id_at(rt, 0), "provider-ellekit") == 0);
+    hk_runtime_release(rt);
+
+    rt = make_runtime(abc, 3);
+    hk_runtime_apply_backend_override(rt, "");
+    assert(rt->engine_count == 0);
+    hk_runtime_release(rt);
+
+    rt = make_runtime(abc, 3);
+    hk_runtime_apply_backend_override(rt, "missing");
+    assert(rt->engine_count == 0);
+    hk_runtime_release(rt);
+    printf("PASS direct empty/invalid selection has no fallback\n");
 
     set_env(NULL, NULL);
     printf("ALL backend-policy tests passed\n");

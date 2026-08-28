@@ -76,12 +76,16 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 
 /*
  * HookKit 3.0 compatibility behavior (authoritative): this header preserves
- * the 2.x ABI, but HKSubstitutor now translates calls into HookKit 3 plans.
- * Provider/category inputs are accepted and ignored; discovery reports none,
- * activeType is HK_LIB_NONE, activeStrategy is HKStrategyDefault, and
- * getLibErrno: reports a normalized HookKit status with HK_LIB_NONE. The
- * historical backend-selection narrative below is retained only to document
- * old source spellings; it does not describe canonical execution.
+ * the 2.x ABI, and HKSubstitutor translates calls into HookKit 3 plans. Its
+ * v1-style discovery contract remains for consumers such as Shadow 3.7.6:
+ * every discoverable current engine receives an opaque type bit and metadata
+ * row, and setTypes: turns that returned bit into a strict per-instance
+ * engine-ID selection. Do not assign meaning to the bit names in this header;
+ * obtain an id/type pair from getSubstitutorTypeInfo:. getAvailableBackendIDs
+ * plus substitutorWithBackendIDs: is the direct current API. Category routing
+ * remains retired; activeStrategy is HKStrategyDefault. No backend plist is
+ * read. The historical backend-selection narrative below is retained only to
+ * document old source spellings; it does not describe canonical execution.
  */
 
 /*
@@ -222,26 +226,46 @@ typedef NS_ENUM(NSUInteger, HKStrategy) {
 @property (assign, nonatomic) hookkit_lib_t types;
 @property (assign, nonatomic) BOOL batching;
 
-// The pinned backend used by explicit instances and by image/symbol APIs on
-// Always HK_LIB_NONE in the canonical 3.0 compatibility facade.
+// The opaque v1 type token selected from getSubstitutorTypeInfo:, or
+// HK_LIB_NONE for automatic and raw-ID instances.
 @property (readonly, nonatomic) hookkit_lib_t activeType;
 
 // Always HKStrategyDefault in the canonical 3.0 compatibility facade.
 @property (readonly, nonatomic) HKStrategy activeStrategy;
 
-// Compatibility no-op. HookKit runtime creation happens only for an operation.
+// Compatibility no-op. setTypes: resolves the v1 ID/type pair; HookKit runtime
+// creation still happens only for an operation.
 - (void)initLibraries;
 
-// Always HK_LIB_NONE; legacy provider discovery is retired.
+// Dynamically discoverable v1 type tokens: one for every current engine
+// returned by getAvailableBackendIDs. The bit values are opaque; obtain the
+// matching id/name/type row from getSubstitutorTypeInfo:.
 + (hookkit_lib_t)getAvailableSubstitutorTypes;
 
 // Always HK_CAT_NONE; legacy category routing is retired.
 + (hookkit_cat_t)getAvailableCategories;
 
-// Returns an array of dictionaries containing information on given substitutor types, as supported by the running version of HookKit.
+// Returns dynamically discovered v1 picker dictionaries. Each has id, name,
+// type, and selectable keys. The type is valid only for this enumeration.
 + (NSArray<NSDictionary *> *)getSubstitutorTypeInfo:(hookkit_lib_t)types;
 
-// Creates an instance of HKSubstitutor with given substitutor types.
+// Returns currently discoverable HookKit 3 backend engine IDs, in the same
+// routing order the runtime will use. Pass these exact engine IDs to
+// substitutorWithBackendIDs:. The v1 methods above expose the same engines as
+// id/type picker rows for unmodified legacy consumers.
++ (NSArray<NSString *> *)getAvailableBackendIDs;
+
+// Creates a substitutor with a strict, per-instance backend override. Pass
+// IDs returned by getAvailableBackendIDs in preferred order; only those
+// function/memory engines may route this substitutor's hooks. An empty or
+// invalid list deliberately leaves no function/memory route. ObjC message
+// hooks remain facade-native and are unaffected. No plist configuration is
+// involved.
++ (instancetype)substitutorWithBackendIDs:(NSArray<NSString *> *)backendIDs;
+
+// Creates an instance using v1 type tokens returned by
+// getSubstitutorTypeInfo:. The named HK_LIB_* constants are retained for ABI,
+// not stable current-backend selection; use backend IDs for new code.
 + (instancetype)substitutorWithTypes:(hookkit_lib_t)types;
 
 // Creates an instance of HKSubstitutor with the given substitutor types tried
