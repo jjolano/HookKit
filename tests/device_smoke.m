@@ -145,16 +145,8 @@ int main(void) {
         int failures = 0;
         volatile int argument = 10;
 
-        // This lane exists to observe HookKit's OWN native engines — above all
-        // the one-page-per-trampoline allocator the page check below asserts.
-        // When a provider (ElleKit/Substrate/Gum) is installed it wins the
-        // function-inline route and serves the hook from its own packed arena,
-        // so the check would measure the provider's layout, not HookKit's, and
-        // report "the old arena is back" on a perfectly healthy build. Pin the
-        // built-in engines for the whole run; the provider path has its own
-        // dedicated device-provider*-smoke coverage.
-        setenv("HOOKKIT_DISABLE_BACKENDS",
-               "provider-dobby,provider-gum,provider-ellekit,provider-substitute", 1);
+        // These explicit raw IDs pin the built-in engines for this probe; the
+        // provider path has its own dedicated device-provider*-smoke coverage.
 
         HKSubstitutor *dobby = [HKSubstitutor
             substitutorWithBackendIDs:@[@"inline-relocating", @"memory"]];

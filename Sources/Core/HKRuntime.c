@@ -709,8 +709,6 @@ static hk_status_t hk_runtime_create_impl(
     hk_runtime_register_platform_engines(runtime);
     if (backend_override) {
         hk_runtime_apply_backend_override(runtime, backend_override);
-    } else {
-        hk_runtime_apply_backend_policy(runtime);
     }
 
     *out_runtime = runtime;
@@ -1014,12 +1012,9 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
 #endif
 }
 
-// --- Backend-selection override -----------------------------------------
-// Reorders/trims engines[] from an ordered preference and a disable set. The
-// choosable names are the engines this build registered (their engine_id);
-// nothing external is loaded, so this replaces v1's Modulous priority without
-// its plugin machinery. Strict C11 on purpose (no strtok_r/strdup/strcasecmp)
-// so the -std=c11 -Werror host tests compile it unchanged.
+// --- Explicit backend selection ------------------------------------------
+// Strict C11 on purpose (no strtok_r/strdup/strcasecmp) so the -std=c11
+// -Werror host tests compile it unchanged.
 
 #define HK_BACKEND_UNRANKED (1L << 30)  // sorts after any real token index
 
@@ -1126,39 +1121,6 @@ static void hk_runtime_retain_ordered_engines(hk_runtime_t *runtime,
         runtime->engine_testing[k] = new_testing[k];
     }
     runtime->engine_count = kept;
-}
-
-void hk_runtime_apply_backend_policy(hk_runtime_t *runtime) {
-    if (!runtime || runtime->engine_count == 0) {
-        return;
-    }
-
-    const char *order = getenv("HOOKKIT_BACKENDS");
-    const char *disable = getenv("HOOKKIT_DISABLE_BACKENDS");
-    if ((!order || !*order) && (!disable || !*disable)) {
-        return;
-    }
-
-    size_t n = runtime->engine_count;
-    const char *ids[HK_RUNTIME_MAX_ENGINES];
-    bool drop[HK_RUNTIME_MAX_ENGINES];
-    size_t survivors = 0;
-    for (size_t i = 0; i < n; i++) {
-        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
-                     ? runtime->engines[i]->describe().engine_id
-                     : NULL;
-        drop[i] = disable && hk_backend_token_index(disable, ids[i]) >= 0;
-        if (!drop[i]) {
-            survivors++;
-        }
-    }
-    if (survivors == 0) {  // never let a disable set empty the registry
-        for (size_t i = 0; i < n; i++) {
-            drop[i] = false;
-        }
-    }
-
-    hk_runtime_retain_ordered_engines(runtime, drop, order);
 }
 
 void hk_runtime_apply_backend_override(hk_runtime_t *runtime,
