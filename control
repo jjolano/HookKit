@@ -7,7 +7,7 @@ Provides: me.jjolano.hkmodule.dobby, me.jjolano.hkmodule.ellekit, me.jjolano.hkm
 Version: 3.0.0-1
 Architecture: iphoneos-arm
 Description: An iOS developer framework for unified hooking methods.
-Maintainer: HookKit maintainers
-Author: HookKit contributors
+Maintainer: jjolano <jjolano@me.com>
+Author: jjolano <jjolano@me.com>
 Section: Development
 Tag: role::developer

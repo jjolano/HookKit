@@ -199,8 +199,8 @@ write_gum_control() {
         "Version: $PACKAGE_VERSION" \
         "Architecture: $arch" \
         'Description: Optional Frida Gum provider for HookKit.' \
-        'Maintainer: HookKit maintainers' \
-        'Author: HookKit contributors' \
+        'Maintainer: jjolano <jjolano@me.com>' \
+        'Author: jjolano <jjolano@me.com>' \
         'Section: Development' \
         'Tag: role::developer' > "build/control.$profile.gum"
 }
