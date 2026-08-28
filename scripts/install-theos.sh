@@ -128,15 +128,34 @@ cd "$ROOT"
 
 # Optional lane argument: build and install only that lane, so a CI runner that
 # can build only some lanes (Linux old-ABI legacy vs macOS new-ABI modern lanes)
-# does not have to produce the others' .debs. No argument builds+installs all.
+# does not have to produce the others' .debs. No argument builds+installs all
+# *possible* lanes — skips lanes whose toolchain is missing rather than failing the
+# whole install (see `build.sh` per-lane requirements).
 case "${1:-all}" in
     all)
-        ./build.sh all
-        install_one_lane rootful-modern
-        install_one_lane rootful-legacy
-        install_one_lane rootless
-        install_one_lane roothide
+        failures=0
+        installed=0
+        for lane in rootful-legacy rootful-modern rootless roothide; do
+            if ./build.sh "$lane"; then
+                if install_one_lane "$lane"; then
+                    installed=$((installed+1))
+                else
+                    echo "warning: failed to install $lane (skipping)" >&2
+                    failures=$((failures+1))
+                fi
+            else
+                echo "warning: failed to build $lane (skipping)" >&2
+                failures=$((failures+1))
+            fi
+        done
         install_logos_generator
+        if [ "$installed" -eq 0 ]; then
+            echo "error: no lanes installed" >&2
+            exit 1
+        fi
+        if [ "$failures" -gt 0 ]; then
+            echo "Installed $installed lane(s), $failures lane(s) skipped (toolchain missing)" >&2
+        fi
         ;;
     rootful-legacy|rootful-modern|rootless|roothide)
         ./build.sh "$1"
