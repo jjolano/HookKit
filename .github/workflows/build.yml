@@ -99,6 +99,9 @@ jobs:
       - name: Build and verify
         run: ./build.sh rootful-legacy
 
+      - name: Verify Dobby provenance
+        run: bash scripts/rebuild-dobby.sh --check
+
       - uses: actions/upload-artifact@v4
         with:
           name: hookkit-rootful-legacy
@@ -134,4 +137,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hookkit-${{ matrix.flavor }}
-          path: build/hookkit-${{ matrix.flavor }}.deb
+          path: |
+            build/hookkit-${{ matrix.flavor }}.deb
+            build/hookkit-${{ matrix.flavor }}-gum.deb

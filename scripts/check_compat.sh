@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Verify packaged slices and deployment targets without modifying Mach-O files.
+# Verify packaged products, slices, deployment targets, and notices without
+# modifying Mach-O files.
 set -euo pipefail
 
+ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 PROFILE=${1:-}
 ARTIFACT=${2:-}
+GUM_ARTIFACT=${3:-}
 
 case "$PROFILE" in
     rootful-legacy)
@@ -12,7 +15,9 @@ case "$PROFILE" in
         floor=9.0
         ceiling=14.0
         hookkit_expected='armv7=9.0,armv7s=9.0,arm64=9.0,arm64e=12.0'
-        hkgum_expected=
+        gum_package=
+        gum_arch=
+        gum_expected=
         arm64e_abi=00
         ;;
     rootful-modern)
@@ -21,7 +26,9 @@ case "$PROFILE" in
         floor=14.0
         ceiling=
         hookkit_expected='arm64=14.0,arm64e=14.0'
-        hkgum_expected="$hookkit_expected"
+        gum_package=me.jjolano.fmwk.hookkit.gum
+        gum_arch=iphoneos-arm
+        gum_expected="$hookkit_expected"
         arm64e_abi=80
         ;;
     rootless)
@@ -30,7 +37,9 @@ case "$PROFILE" in
         floor=15.0
         ceiling=
         hookkit_expected='arm64=15.0,arm64e=15.0'
-        hkgum_expected="$hookkit_expected"
+        gum_package=me.jjolano.fmwk.hookkit.gum
+        gum_arch=iphoneos-arm64
+        gum_expected="$hookkit_expected"
         arm64e_abi=80
         ;;
     roothide)
@@ -39,13 +48,21 @@ case "$PROFILE" in
         floor=15.0
         ceiling=18.0
         hookkit_expected='arm64=15.0,arm64e=15.0'
-        hkgum_expected="$hookkit_expected"
+        gum_package=me.jjolano.fmwk.hookkit.gum
+        gum_arch=iphoneos-arm64e
+        gum_expected="$hookkit_expected"
         arm64e_abi=80
         ;;
-    *) echo "usage: $0 rootful-legacy|rootful-modern|rootless|roothide ARTIFACT.deb" >&2; exit 2 ;;
+    *) echo "usage: $0 rootful-legacy|rootful-modern|rootless|roothide CORE.deb [GUM.deb]" >&2; exit 2 ;;
 esac
 
 [ -f "$ARTIFACT" ] || { echo "error: artifact not found: $ARTIFACT" >&2; exit 2; }
+if [ -n "$gum_package" ]; then
+    [ -f "$GUM_ARTIFACT" ] || { echo "error: Gum artifact not found: $GUM_ARTIFACT" >&2; exit 2; }
+elif [ -n "$GUM_ARTIFACT" ]; then
+    echo "error: legacy package must not have a Gum artifact" >&2
+    exit 2
+fi
 
 # Tool lookup, in order: PATH, Xcode, then any Theos toolchain. The toolchain
 # layout varies per install (darwin/iphone/bin, linux/iphone/bin, and the
@@ -83,6 +100,45 @@ OBJDUMP=$(find_tool llvm-objdump \
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-compat.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 "$DPKG_DEB" -x "$ARTIFACT" "$tmp/root"
+
+if [ "$PROFILE" = rootless ]; then
+    notice_prefix=var/jb
+else
+    notice_prefix=
+fi
+NOTICE_FILES=(
+    LICENSE
+    THIRD_PARTY_NOTICES
+    Frida-Gum-17.17.0-SBOM.md
+    licenses/Apache-2.0-Dobby.txt
+    licenses/Capstone-BSD-3-Clause.txt
+    licenses/Frida-Gum-wxWindows-3.1.txt
+    licenses/GLib-LGPL-2.1-or-later.txt
+    licenses/libffi-MIT.txt
+    licenses/PCRE2-BSD-3-Clause.txt
+    licenses/XZ-Utils.txt
+    licenses/zlib.txt
+)
+
+check_notice_tree() {
+    local package_root=$1 rel source installed
+    for rel in "${NOTICE_FILES[@]}"; do
+        source="$ROOT/layout/usr/share/doc/hookkit/$rel"
+        installed="$package_root/$notice_prefix/usr/share/doc/hookkit/$rel"
+        [ -s "$source" ] || {
+            echo "FAIL release notice source is missing: $source" >&2
+            return 1
+        }
+        [ -s "$installed" ] || {
+            echo "FAIL package is missing release notice: $installed" >&2
+            return 1
+        }
+        cmp -s "$source" "$installed" || {
+            echo "FAIL packaged release notice differs: $rel" >&2
+            return 1
+        }
+    done
+}
 
 actual_package=$("$DPKG_DEB" -f "$ARTIFACT" Package)
 actual_arch=$("$DPKG_DEB" -f "$ARTIFACT" Architecture)
@@ -142,14 +198,12 @@ framework=$(dirname "$HOOKKIT")
     echo "FAIL package contains a retired HookKit3 bundle plist" >&2; exit 1;
 }
 HKGUM=$(find "$tmp/root" -name HKGum.dylib -type f -print)
-if [ -n "$hkgum_expected" ]; then
-    [ "$(printf '%s\n' "$HKGUM" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || {
-        echo "FAIL package must contain exactly one HKGum.dylib" >&2; exit 1;
-    }
-elif [ -n "$HKGUM" ]; then
-    echo "FAIL legacy package must not contain HKGum.dylib" >&2
+if [ -n "$HKGUM" ]; then
+    echo "FAIL core package must not contain HKGum.dylib" >&2
     exit 1
 fi
+
+check_notice_tree "$tmp/root"
 
 load_commands() {
     local slice=$1 raw
@@ -178,7 +232,7 @@ load_commands() {
 }
 
 check_binary() {
-    local bin=$1 expected=$2 actual_archs expected_archs old_ifs item arch wanted slice output actual sdk abi
+    local bin=$1 expected=$2 scratch=${3:-$tmp} actual_archs expected_archs old_ifs item arch wanted slice output actual sdk abi
     echo "lipo -info $bin"
     "$LIPO" -info "$bin"
     actual_archs=$("$LIPO" -archs "$bin" | tr ' ' '\n' | sort | xargs)
@@ -193,7 +247,7 @@ check_binary() {
     for item in $expected; do
         arch=${item%%=*}
         wanted=${item#*=}
-        slice="$tmp/$arch-$(basename "$bin")"
+        slice="$scratch/$arch-$(basename "$bin")"
         "$LIPO" -thin "$arch" "$bin" -output "$slice"
         output=$(load_commands "$slice")
         echo "$bin [$arch]"
@@ -232,7 +286,65 @@ check_binary() {
     IFS=$old_ifs
 }
 
+check_gum_package() {
+    local gum_root actual_package actual_arch actual_version depends field expected_path hkgum_rel doc_rel count actual_files expected_files rel
+    [ -n "$gum_package" ] || return 0
+
+    gum_root="$tmp/gum"
+    "$DPKG_DEB" -x "$GUM_ARTIFACT" "$gum_root"
+    actual_package=$("$DPKG_DEB" -f "$GUM_ARTIFACT" Package)
+    actual_arch=$("$DPKG_DEB" -f "$GUM_ARTIFACT" Architecture)
+    actual_version=$("$DPKG_DEB" -f "$GUM_ARTIFACT" Version)
+    depends=$("$DPKG_DEB" -f "$GUM_ARTIFACT" Depends)
+    [ "$actual_package" = "$gum_package" ] || {
+        echo "FAIL Gum package '$actual_package' != '$gum_package'" >&2; return 1;
+    }
+    [ "$actual_arch" = "$gum_arch" ] || {
+        echo "FAIL Gum architecture '$actual_arch' != '$gum_arch'" >&2; return 1;
+    }
+    [ "$actual_version" = 3.0.0-1 ] || {
+        echo "FAIL Gum version '$actual_version' != '3.0.0-1'" >&2; return 1;
+    }
+    printf '%s\n' "$depends" | grep -Fq 'me.jjolano.fmwk.hookkit (= 3.0.0-1)' || {
+        echo "FAIL Gum package must depend on the matching HookKit package" >&2; return 1;
+    }
+    printf '%s\n' "$depends" | grep -Fq 'firmware (>= 15.0)' || {
+        echo "FAIL Gum package must require firmware >= 15.0" >&2; return 1;
+    }
+    for field in Recommends Conflicts Replaces Provides; do
+        [ -z "$("$DPKG_DEB" -f "$GUM_ARTIFACT" "$field" 2>/dev/null || true)" ] || {
+            echo "FAIL Gum package must not declare $field" >&2; return 1;
+        }
+    done
+    [ -z "$(find "$gum_root" -path '*/HookKit.framework/*' -print)" ] || {
+        echo "FAIL Gum package must not contain HookKit.framework" >&2; return 1;
+    }
+    hkgum_rel="${notice_prefix:+$notice_prefix/}usr/lib/HKGum.dylib"
+    doc_rel="${notice_prefix:+$notice_prefix/}usr/share/doc/hookkit"
+    expected_path="$gum_root/$hkgum_rel"
+    [ -f "$expected_path" ] || {
+        echo "FAIL Gum package is missing $expected_path" >&2; return 1;
+    }
+    count=$(find "$gum_root" -name HKGum.dylib -type f -print | sed '/^$/d' | wc -l | tr -d ' ')
+    [ "$count" = 1 ] || {
+        echo "FAIL Gum package must contain exactly one HKGum.dylib" >&2; return 1;
+    }
+    actual_files=$(find "$gum_root" -type f -print | sed "s|^$gum_root/||" | sort)
+    expected_files=$({
+        printf '%s\n' "$hkgum_rel"
+        for rel in "${NOTICE_FILES[@]}"; do printf '%s/%s\n' "$doc_rel" "$rel"; done
+    } | sort)
+    [ "$actual_files" = "$expected_files" ] || {
+        echo "FAIL Gum package must contain only HKGum.dylib and release notices" >&2; return 1;
+    }
+    check_notice_tree "$gum_root"
+    echo "Gum package: $actual_package ($actual_arch), firmware >= 15.0"
+    check_binary "$expected_path" "$gum_expected" "$gum_root"
+    bash "$ROOT/scripts/check_exports.sh" "$expected_path"
+}
+
 echo "Package: $actual_package ($actual_arch), firmware >= $floor"
 check_binary "$HOOKKIT" "$hookkit_expected"
-[ -z "$hkgum_expected" ] || check_binary "$HKGUM" "$hkgum_expected"
-echo "OK: $PROFILE artifact has exactly the expected products, slices, and deployment targets"
+bash "$ROOT/scripts/check_exports.sh" "$HOOKKIT"
+check_gum_package
+echo "OK: $PROFILE artifacts have exactly the expected products, metadata, notices, slices, and exports"

@@ -147,7 +147,7 @@ check-exports:
 # Release compatibility check. build.sh supplies the package profile.
 .PHONY: check-compat
 check-compat:
-	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT)$(ECHO_END)
+	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT) $(COMPAT_GUM_ARTIFACT)$(ECHO_END)
 
 # Shadow 3.7.6 vendors a historical HookKit commit. Keep its retained facade
 # contract checked without making the sibling Shadow checkout a normal CI input.

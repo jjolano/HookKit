@@ -1,0 +1,24 @@
+--- a/source/InterceptRouting/InlineHookRouting.h
++++ b/source/InterceptRouting/InlineHookRouting.h
+@@ -51,6 +51,10 @@
+ 
+   auto routing = new InlineHookRouting(entry, (addr_t)fake_func);
+   routing->BuildRouting();
++  if (out_origin_func) {
++    *out_origin_func = (void *)entry->relocated.addr();
++    features::apple::arm64e_pac_strip_and_sign(*out_origin_func);
++  }
+   routing->Active();
+   entry->routing = routing;
+ 
+@@ -59,10 +63,6 @@
+     return -1;
+   }
+ 
+-  if (out_origin_func) {
+-    *out_origin_func = (void *)entry->relocated.addr();
+-  }
+-  features::apple::arm64e_pac_strip_and_sign(*out_origin_func);
+ 
+   gInterceptor.add(entry);
+ 

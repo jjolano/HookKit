@@ -42,9 +42,22 @@ fi
 
 command -v curl >/dev/null || die "curl is required to fetch Frida Gum"
 command -v tar >/dev/null || die "tar with xz support is required"
-command -v lipo >/dev/null || die "Xcode's lipo is required"
 command -v shasum >/dev/null || command -v sha256sum >/dev/null ||
     die "shasum or sha256sum is required"
+
+find_lipo() {
+    local candidate dir
+    candidate=$(command -v lipo 2>/dev/null || true)
+    [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+    for dir in "${THEOS:-/nonexistent}"/toolchain/*/bin \
+               "${THEOS:-/nonexistent}"/toolchain/*/*/bin \
+               "${THEOS:-/nonexistent}"/toolchain/*/*/*/bin; do
+        [ -x "$dir/lipo" ] && { printf '%s\n' "$dir/lipo"; return; }
+    done
+    return 1
+}
+
+LIPO=$(find_lipo) || die "Xcode's or Theos's lipo is required"
 
 sha256() {
     if command -v shasum >/dev/null; then
@@ -85,7 +98,7 @@ ARM64_LIBRARY="$(find_devkit_file arm64 libfrida-gum.a)"
 ARM64E_LIBRARY="$(find_devkit_file arm64e libfrida-gum.a)"
 cmp -s "$ARM64_HEADER" "$ARM64E_HEADER" ||
     die "Frida Gum headers differ between devkits"
-lipo -create "$ARM64_LIBRARY" "$ARM64E_LIBRARY" -output "$TMP/libfrida-gum.a"
+"$LIPO" -create "$ARM64_LIBRARY" "$ARM64E_LIBRARY" -output "$TMP/libfrida-gum.a"
 
 cp "$ARM64_HEADER" "$GUM_DIR/frida-gum.h.tmp"
 mv "$GUM_DIR/frida-gum.h.tmp" "$GUM_DIR/frida-gum.h"

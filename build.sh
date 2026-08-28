@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 : "${THEOS:?THEOS must point to Theos}"
+PACKAGE_VERSION=3.0.0-1
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-build.XXXXXX")
 MAKE_ARGS=("THEOS_LIBRARY_PATH=$STAGE/lib")
 trap 'rm -rf "$STAGE"' EXIT
@@ -165,12 +166,49 @@ write_control() {
         -e "s/^(Conflicts:.*)/\\1$conflicts/" \
         -e "s/^(Replaces:.*)/\\1$replaces/" \
         -e "s/^(Provides:.*)/\\1$provides/" \
-        -e "s/^Version:.*/Version: 3.0.0-1/" \
+        -e "s/^Version:.*/Version: $PACKAGE_VERSION/" \
         control > "build/control.$profile"
 
     if [ -z "$conflicts" ]; then drop_field "build/control.$profile" Conflicts; fi
     if [ -z "$replaces" ]; then drop_field "build/control.$profile" Replaces; fi
     if [ -z "$provides" ]; then drop_field "build/control.$profile" Provides; fi
+}
+
+write_gum_control() {
+    local profile=$1 name arch
+    case "$profile" in
+        rootful-modern)
+            name='Modern Rootful'
+            arch=iphoneos-arm
+            ;;
+        rootless)
+            name='Rootless'
+            arch=iphoneos-arm64
+            ;;
+        roothide)
+            name='RootHide'
+            arch=iphoneos-arm64e
+            ;;
+        *) echo "error: no Gum package profile for $profile" >&2; return 1 ;;
+    esac
+
+    printf '%s\n' \
+        'Package: me.jjolano.fmwk.hookkit.gum' \
+        "Name: HookKit Frida Gum Provider ($name)" \
+        "Depends: me.jjolano.fmwk.hookkit (= $PACKAGE_VERSION), firmware (>= 15.0)" \
+        "Version: $PACKAGE_VERSION" \
+        "Architecture: $arch" \
+        'Description: Optional Frida Gum provider for HookKit.' \
+        'Maintainer: HookKit maintainers' \
+        'Author: HookKit contributors' \
+        'Section: Development' \
+        'Tag: role::developer' > "build/control.$profile.gum"
+}
+
+copy_release_artifact() {
+    local artifact=$1 name=$2
+    cp -p "$artifact" "build/$name.deb"
+    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 check_legacy_abi() {
@@ -199,65 +237,62 @@ build_rootful_legacy() {
     legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    legacy_make HOOKKIT_LANE="$lane" check-exports
     check_legacy_abi
-    cp -p "$artifact" build/hookkit-rootful-legacy.deb
-    # Canonical name too: the release step must upload the theos-produced
-    # <package>_<version>_<arch>.deb name, not the short lane alias above.
-    cp -p "$artifact" "build/$(basename "$artifact")"
+    copy_release_artifact "$artifact" hookkit-rootful-legacy
+}
+
+package_modern_lane() {
+    local lane=$1 artifact gum_artifact
+    write_control "$lane"
+    write_gum_control "$lane"
+
+    # The framework has no link-time dependency on HKGum. Ask Theos for the
+    # framework product alone first so the core package stays small and does
+    # not fetch the Gum devkit.
+    modern_make HOOKKIT_LANE="$lane" LIBRARY_NAME= package FINALPACKAGE=1 \
+        _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
+    artifact=$(cat .theos/last_package)
+    copy_release_artifact "$artifact" "hookkit-$lane"
+
+    # Then stage just HKGum with its own package metadata. Theos clears its
+    # stage between package runs, while the already-built framework object
+    # remains available for the ABI check below.
+    modern_make HOOKKIT_LANE="$lane" FRAMEWORK_NAME= package FINALPACKAGE=1 \
+        _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane.gum"
+    gum_artifact=$(cat .theos/last_package)
+    copy_release_artifact "$gum_artifact" "hookkit-$lane-gum"
+
+    run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact" \
+        COMPAT_GUM_ARTIFACT="$gum_artifact"
 }
 
 build_rootful_modern() {
-    local lane=rootful-modern artifact
+    local lane=rootful-modern
     require_modern_toolchain "$lane"
-    write_control "$lane"
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
-    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
-    artifact=$(cat .theos/last_package)
-    run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    modern_make HOOKKIT_LANE="$lane" check-exports
+    package_modern_lane "$lane"
     check_legacy_abi
-    cp -p "$artifact" build/hookkit-rootful-modern.deb
-    # Canonical name too: the release step must upload the theos-produced
-    # <package>_<version>_<arch>.deb name, not the short lane alias above.
-    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 build_rootless() {
-    local lane=rootless artifact
+    local lane=rootless
     require_modern_toolchain "$lane"
-    write_control "$lane"
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
-    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
-    artifact=$(cat .theos/last_package)
-    run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    modern_make HOOKKIT_LANE="$lane" check-exports
+    package_modern_lane "$lane"
     check_legacy_abi
-    cp -p "$artifact" build/hookkit-rootless.deb
-    # Canonical name too: the release step must upload the theos-produced
-    # <package>_<version>_<arch>.deb name, not the short lane alias above.
-    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 # Existing roothide profile; it shares the modern/rootless compatibility floor.
 build_roothide() {
-    local lane=roothide artifact
+    local lane=roothide
     require_modern_toolchain roothide
     test -d "${THEOS:?}/vendor/mod/roothide"
-    write_control "$lane"
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
-    modern_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
-    artifact=$(cat .theos/last_package)
-    run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    modern_make HOOKKIT_LANE="$lane" check-exports
+    package_modern_lane "$lane"
     check_legacy_abi '@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
-    cp -p "$artifact" build/hookkit-roothide.deb
-    # Canonical name too: the release step must upload the theos-produced
-    # <package>_<version>_<arch>.deb name, not the short lane alias above.
-    cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
 case ${1:-all} in

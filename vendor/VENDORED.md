@@ -12,11 +12,11 @@ relevant.
 | Directory | Contents | Upstream | Version/SHA | License | Local patches |
 |---|---|---|---|---|---|
 | `vendor/fishhook/` | fishhook.c, fishhook.h | https://github.com/facebook/fishhook | `aadc161ac3b80db07a9908851839a17ba63a9eb1` (2021-10-12); base byte-identical to that commit, recorded in commit 51e1c7b | BSD-3-Clause (header comment, 2013 Facebook) | yes — heavy fork, see below |
-| `vendor/litehook/` | litehook.c, litehook.h, dyld_cache_format.h, fixup-chains.h, LICENSE | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); vendored copies byte-identical to pristine upstream at that commit (verified against every upstream commit) | MIT (LICENSE, Lars Fröder 2022-2024); dyld_cache_format.h carries Apple APSL 2.0 header | yes — see below |
-| `vendor/dobby/` | dobby.h, libdobby.a, LICENSE | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); release "latest" ships dobby-iphoneos-all.tar.gz (URL in dobby.h comment); in-tree dobby.h = upstream include/dobby.h + one provenance comment line, otherwise byte-identical | Apache-2.0 (LICENSE vendored) | yes — binary rebuilt from source with one reorder patch (publication-before-activation), see below; dobby.h unchanged |
-| `vendor/gum/` | hkgum.c, COPYING, gum.lock (generated devkit ignored) | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; official arm64/arm64e devkits are pinned by URL and SHA-256 in gum.lock | wxWindows Library Licence 3.1 (LGPL-2.1 + wxWindows exception; COPYING vendored) | hkgum.c wrapper only — see below |
+| `vendor/litehook/` | litehook.c, litehook.h, dyld_cache_format.h, fixup-chains.h, LICENSE, APSL-2.0.txt | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); vendored copies byte-identical to pristine upstream at that commit (verified against every upstream commit) | MIT (LICENSE, Lars Fröder 2022-2024); dyld_cache_format.h carries Apple APSL 2.0 header | yes — see below |
+| `vendor/dobby/` | dobby.h, libdobby.a, LICENSE, dobby.lock, patches/0001-publish-original-before-activation.patch | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); lock records source and archive SHA-256 values | Apache-2.0 (LICENSE vendored) | yes — binary rebuilt from source with one reorder patch (publication-before-activation), see below; dobby.h unchanged |
+| `vendor/gum/` | hkgum.c, COPYING, gum.lock (generated devkit ignored) | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; official arm64/arm64e devkits are pinned by URL and SHA-256 in gum.lock | wxWindows Library Licence 3.1 (`COPYING` vendored; GNU Library GPL v2-or-later text plus wxWindows exception) | hkgum.c wrapper only — see below |
 | `vendor/libhooker/` | libhooker.h, libblackjack.h, LICENSE | https://github.com/coolstar/libhooker | master; only milestone is OSS 1.6.9 commit `4f85a68dae` (2023-04-17); in-tree headers predate that release (unchanged since HookKit's initial commit 75cdb22) | BSD-4-Clause (LICENSE vendored) | small header deltas — see below |
-| `vendor/substitute/` | substitute.h | https://github.com/comex/substitute | master; header frozen since `83442f9005` (2015-07-16); no v2 git tag exists upstream | public domain / CC0 1.0 (header comment; upstream has no LICENSE file — fetch of master/LICENSE 404s) | 2 small deltas — see below |
+| `vendor/substitute/` | substitute.h | https://github.com/comex/substitute | master; header frozen since `83442f9005` (2015-07-16); no v2 git tag exists upstream | public domain / CC0 1.0 for this header (header comment; upstream `LICENSE.txt` expressly places substitute.h and generated files in the public domain) | 2 small deltas — see below |
 | `vendor/substrate/` | substrate.h | no canonical upstream repo (saurik/substrate and saurik/CydiaSubstrate 404; newest mobilesubstrate deb is 0.9.6301, 2017) | 0.9.7101-era header (copyright 2008-2019 saurik), byte-identical to `https://github.com/opa334/Dopamine` BaseBin `_external/include/substrate.h` @ `e89072adc591881146c9513a616fa68b7323d6a7` — pin = that mirror commit | 3-clause BSD (header text) | none (header only) |
 
 ## Local patches
@@ -40,7 +40,8 @@ fork:
 - `a066270` (2026-08-07) — arm64e PAC fix, no-op reporting.
 - `5b9d973` (2026-08-07) — symbol matching and batching kind guards.
 
-Rebuild: none; compiled from source by the Makefile (`HookKit_FILES`).
+Rebuild: none; retained source-only and not compiled or packaged by the
+current Makefile.
 
 ### litehook (heavily modified fork)
 
@@ -63,7 +64,8 @@ upstream commit). Committed local patches:
   `litehook_locate_dsc` / `litehook_find_dsc_symbol`; `native/hk_symbols.c`
   replaces it.
 
-Rebuild: none; compiled from source by the Makefile.
+Rebuild: none; retained source-only and not compiled or packaged by the
+current Makefile.
 
 ### dobby (binary rebuilt from source, one internal reorder patch)
 
@@ -85,9 +87,12 @@ and the patch touches no public symbol or signature — ABI unchanged.
   (upstream: `blr` at 0x300 before `str` at 0x334); arm64e `str` at 0x3a8
   before `blraa` at 0x3d4 (upstream: `blraa` at 0x394 before `str` at 0x3c4).
 
-Rebuild: `libdobby.a` from source (arm64 iOS 9.0 rebuilt 2026-08-15;
-arm64e iOS 14.0 slice preserved from the 2026-08-11 build, theos clang
-13.0.0) — see Rebuild commands below.
+Rebuild/verify: `scripts/rebuild-dobby.sh --check` verifies the pinned source
+archive, machine-applicable patch, checked-in archive SHA-256, slices, member
+count, arm64e ABI, and required exports. `--rebuild` requires explicit
+`DOBBY_SDK` and `DOBBY_TOOLCHAIN` paths and writes an ignored candidate under
+`build/dobby-rebuild/`; it never replaces the checked-in archive. The lock
+records iOS 14.0 for both arm64 and arm64e.
 
 ### gum (wrapper only; devkit binary is pristine)
 
@@ -122,8 +127,10 @@ Base https://github.com/comex/substitute, master; header frozen since
 - `__has_include("substitute-internal.h")` seam added at the top.
 - `void *dlhandle;` removed from `struct substitute_image`.
 
-License: public domain / CC0 1.0 per the header comment. No LICENSE file is
-vendored — upstream has none (fetch of master/LICENSE 404s).
+License: public domain / CC0 1.0 per the header comment. Upstream has a
+`LICENSE.txt`: its repository-wide default is LGPL-2.1-or-later, but it
+expressly places `substitute.h` and generated files in the public domain. The
+file is not vendored because HookKit copies only this header.
 
 Rebuild: none — header only.
 
@@ -162,28 +169,11 @@ License: 3-clause BSD per the header text. Rebuild: none — header only.
 
 ## Rebuild commands
 
-- fishhook, litehook: none — built from source by `make`.
-- dobby: arm64 rebuilt 2026-08-15 and arm64e preserved from the 2026-08-11
-  build, both at upstream commit `5dfc854` with the publication-before-activation
-  patch (see Local patches). Commands, per arch
-  (`SDK=$HOME/theos/sdks/iPhoneOS16.5.sdk`, `TC=$HOME/theos/toolchain/linux/iphone/bin`,
-  `$ARCH`/`$MIN` = `arm64`/`9.0` and `arm64e`/`14.0`):
-
-  ```
-  cmake -S . -B build-$ARCH -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64 \
-    -DCMAKE_OSX_ARCHITECTURES=$ARCH -DCMAKE_OSX_SYSROOT=$SDK \
-    -DCMAKE_C_COMPILER=$TC/clang -DCMAKE_CXX_COMPILER=$TC/clang++ -DCMAKE_ASM_COMPILER=$TC/clang \
-    -DCMAKE_AR=$TC/ar -DCMAKE_RANLIB=$TC/ranlib -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-    -DCMAKE_BUILD_TYPE=Release -DDOBBY_BUILD_EXAMPLE=OFF -DDOBBY_BUILD_TEST=OFF \
-    "-DCMAKE_C_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK" \
-    "-DCMAKE_CXX_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK" \
-    "-DCMAKE_ASM_FLAGS=-target $ARCH-apple-ios$MIN -isysroot $SDK -x assembler-with-cpp"
-  cmake --build build-$ARCH --target dobby_static -j8
-  lipo -create build-arm64/libdobby.a build-arm64e/libdobby.a -output libdobby.a
-  ```
-
-  Re-fetch from https://github.com/jmpews/Dobby/releases only to re-base the
-  patch on a newer upstream commit.
+- fishhook, litehook: source-only; no release build or package consumes them.
+- dobby: run `bash scripts/rebuild-dobby.sh --check` before release. To build
+  a reviewed candidate, set `DOBBY_SDK` and `DOBBY_TOOLCHAIN`, then run
+  `bash scripts/rebuild-dobby.sh --rebuild`. Replacing `libdobby.a` requires
+  a deliberate SHA update in `dobby.lock`.
 - gum: none — run `bash scripts/fetch-gum.sh`; it downloads the two
   Frida 17.17.0 devkits recorded in `vendor/gum/gum.lock`, verifies them,
   and lipo-merges the two static-library slices. Update the lock together

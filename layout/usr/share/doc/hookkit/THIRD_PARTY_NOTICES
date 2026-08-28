@@ -1,0 +1,21 @@
+HookKit third-party notices
+===========================
+
+This package contains HookKit, licensed under BSD-3-Clause; see LICENSE.
+
+Modern HookKit core packages link Dobby.  Its Apache-2.0 license is in
+licenses/Apache-2.0-Dobby.txt.  The legacy core package does not link Dobby,
+but includes the same notice tree so package documentation is consistent.
+
+Frida Gum is not contained in the HookKit core package.  It is shipped only
+by the separately installed, manual-opt-in `me.jjolano.fmwk.hookkit.gum`
+package.  That package contains HKGum.dylib and the corresponding component
+inventory and license texts in this directory.  See
+Frida-Gum-17.17.0-SBOM.md and licenses/.
+
+The source tree also vendors fishhook, LiteHook, libhooker, Substitute, and
+Substrate compatibility material.  Those source-only components are not
+installed by these packages and are therefore not represented as packaged
+binary contents here.
+
+This is an attribution and source-inventory notice, not a legal conclusion.
