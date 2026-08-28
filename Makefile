@@ -141,6 +141,11 @@ check-exports:
 check-compat:
 	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT) $(COMPAT_GUM_ARTIFACT)$(ECHO_END)
 
+# Build and stage every package-verified HookKit framework in Theos.
+.PHONY: install-theos
+install-theos:
+	$(ECHO_NOTHING)MAKEFLAGS= MAKELEVEL= bash scripts/install-theos.sh$(ECHO_END)
+
 # HookKit 3.0 rebind engine (Milestone 6). The first engine: rewrites import
 # slots (both LC_DYSYMTAB and chained-fixup mechanisms) to redirect an
 # imported symbol. Two-phase (prepare mutates nothing, commit revalidates and

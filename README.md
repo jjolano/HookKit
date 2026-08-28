@@ -85,6 +85,36 @@ OS-support lane, not a pre-3.0 API package. Modern lanes build the optional
 Gum provider package separately. Every lane runs host tests, package checks,
 and exact export checks.
 
+## Install into Theos
+
+Run `make install-theos` to build all lanes and install their verified
+frameworks beneath `$THEOS/lib`:
+
+| Lane | Framework path | Consumer setup |
+| --- | --- | --- |
+| `rootful-modern` | `$THEOS/lib/HookKit.framework` | Default/rootful Theos scheme; no extra search path. |
+| `rootful-legacy` | `$THEOS/lib/iphone/rootful-legacy/HookKit.framework` | Use the legacy library-root override below. |
+| `rootless` | `$THEOS/lib/iphone/rootless/HookKit.framework` | `THEOS_PACKAGE_SCHEME=rootless`; resolved automatically. |
+| `roothide` | `$THEOS/lib/iphone/roothide/HookKit.framework` | `THEOS_PACKAGE_SCHEME=roothide`; resolved automatically. |
+
+Link every lane with `MyTweak_EXTRA_FRAMEWORKS += HookKit`. Modern rootful owns
+the default path. Legacy deliberately lives separately: its old arm64e ABI
+cannot share a framework with the modern rootful binary. Put this before the
+consumer's `common.mk` include:
+
+```make
+override THEOS_LIBRARY_PATH := $(THEOS)/lib/iphone/rootful-legacy
+include $(THEOS)/makefiles/common.mk
+
+# Keep ordinary local frameworks available after HookKit is selected.
+ADDITIONAL_CFLAGS += -F$(THEOS)/lib
+ADDITIONAL_LDFLAGS += -F$(THEOS)/lib
+```
+
+Rootful, modern, and rootless binaries use
+`@rpath/HookKit.framework/HookKit`; Roothide uses its required
+`@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit` identity.
+
 ## Verification
 
 ```sh

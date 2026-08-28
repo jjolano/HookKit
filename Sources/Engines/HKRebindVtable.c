@@ -54,6 +54,8 @@ static hk_engine_capabilities_t rebind_describe(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "fishhook";
+    caps.backend_group = "native";
+    caps.display_name = "native";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_SYMBOL);
     caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                          HK_ENGINE_ARCHITECTURE_ARM64E;

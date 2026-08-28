@@ -11,10 +11,14 @@
 // Minimal engines: only describe() matters to the policy. abi_version/
 // struct_size left 0 so hk_runtime_register_engine skips its strict check.
 #define FAKE_ENGINE(fn, id_literal)                                     \
+    FAKE_ENGINE_GROUP(fn, id_literal, NULL)
+
+#define FAKE_ENGINE_GROUP(fn, id_literal, group_literal)                \
     static hk_engine_capabilities_t fn##_describe(void) {              \
         hk_engine_capabilities_t caps;                                \
         memset(&caps, 0, sizeof(caps));                               \
         caps.engine_id = id_literal;                                  \
+        caps.backend_group = group_literal;                           \
         return caps;                                                  \
     }                                                                 \
     static const hk_engine_vtable_t fn = { .describe = fn##_describe }
@@ -24,6 +28,9 @@ FAKE_ENGINE(eng_beta, "beta");
 FAKE_ENGINE(eng_gamma, "gamma");
 FAKE_ENGINE(eng_ellekit, "provider-ellekit");
 FAKE_ENGINE(eng_objc, "objc");
+// Two engines behind one group token, as the built-in "native" family is.
+FAKE_ENGINE_GROUP(eng_native_a, "inline-x", "native");
+FAKE_ENGINE_GROUP(eng_native_b, "inline-y", "native");
 
 static const char *id_at(hk_runtime_t *rt, size_t i) {
     return rt->engines[i]->describe().engine_id;
@@ -81,6 +88,25 @@ int main(void) {
     assert(rt->engine_count == 0);
     hk_runtime_release(rt);
     printf("PASS direct empty/invalid selection has no fallback\n");
+
+    // A group token selects every engine in that group and drops the rest;
+    // a specific engine_id still selects just that engine.
+    const hk_engine_vtable_t *mixed[] = {
+        &eng_native_a, &eng_ellekit, &eng_native_b,
+    };
+    rt = make_runtime(mixed, 3);
+    hk_runtime_apply_backend_override(rt, "native");
+    assert(rt->engine_count == 2);
+    assert(strcmp(id_at(rt, 0), "inline-x") == 0);
+    assert(strcmp(id_at(rt, 1), "inline-y") == 0);
+    hk_runtime_release(rt);
+
+    rt = make_runtime(mixed, 3);
+    hk_runtime_apply_backend_override(rt, "inline-y");
+    assert(rt->engine_count == 1);
+    assert(strcmp(id_at(rt, 0), "inline-y") == 0);
+    hk_runtime_release(rt);
+    printf("PASS group token selects the whole group\n");
 
     printf("ALL backend-policy tests passed\n");
     return 0;

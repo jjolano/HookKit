@@ -12,6 +12,8 @@ static hk_engine_capabilities_t reloc_describe(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-relocating";
+    caps.backend_group = "native";
+    caps.display_name = "native";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                          HK_ENGINE_ARCHITECTURE_ARM64E;
@@ -214,6 +216,8 @@ static hk_engine_capabilities_t static_describe(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "inline-static";
+    caps.backend_group = "native";
+    caps.display_name = "native";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     caps.architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                          HK_ENGINE_ARCHITECTURE_ARM64E;

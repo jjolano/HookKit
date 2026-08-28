@@ -55,14 +55,18 @@ typedef void (*hk_diagnostic_callback_fn)(
     void *diagnostic_context,
     hk_string_view_t message);
 
-// Called once for each engine currently registered with a runtime and passing
-// its side-effect-free discovery probe. `backend_id` is suitable for
-// hk_runtime_create_with_backend_override(). Its storage is borrowed from the
-// runtime and is valid only for the duration of the call.
+// Called once for each selectable backend group discoverable on a runtime.
+// Engines that share a group (for example every built-in function/memory
+// engine, which reports "native") are collapsed to a single call. `backend_id`
+// is the group token, suitable as-is for
+// hk_runtime_create_with_backend_override(); `display_name` is its
+// human-readable label (falls back to the token). Both strings are borrowed
+// from the runtime and valid only for the duration of the call.
 // Return false to stop enumeration early; that is still a successful call.
 typedef bool (*hk_backend_enumerator_fn)(
     void *context,
-    hk_string_view_t backend_id);
+    hk_string_view_t backend_id,
+    hk_string_view_t display_name);
 
 typedef struct {
     HK_STRUCT_HEADER;

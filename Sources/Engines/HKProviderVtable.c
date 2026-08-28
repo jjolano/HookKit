@@ -12,6 +12,8 @@ typedef struct {
     hk_provider_kind_t kind;
     const char *engine_id;
     const char *mechanism_id;
+    const char *backend_group;
+    const char *display_name;
     size_t inspection_size;
     hk_engine_architecture_mask_t architectures;
     hk_engine_architecture_mask_t certified_architectures;
@@ -28,6 +30,8 @@ static const provider_profile_t g_dobby_profile = {
     .kind = HK_PROVIDER_DOBBY,
     .engine_id = "provider-dobby",
     .mechanism_id = "DobbyHook",
+    .backend_group = "dobby",
+    .display_name = "Dobby",
     .inspection_size = 16,
     .architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                      HK_ENGINE_ARCHITECTURE_ARM64E,
@@ -54,6 +58,8 @@ static const provider_profile_t g_gum_profile = {
     .kind = HK_PROVIDER_GUM,
     .engine_id = "provider-gum",
     .mechanism_id = "hkgum_hook_function",
+    .backend_group = "gum",
+    .display_name = "Frida Gum",
     .inspection_size = 4,
     .architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                      HK_ENGINE_ARCHITECTURE_ARM64E,
@@ -79,6 +85,8 @@ static const provider_profile_t g_ellekit_profile = {
     .kind = HK_PROVIDER_ELLEKIT,
     .engine_id = "provider-ellekit",
     .mechanism_id = "LHHookFunctions",
+    .backend_group = "ellekit",
+    .display_name = "ElleKit",
     .inspection_size = 4,
     .architectures = HK_ENGINE_ARCHITECTURE_ARM64 |
                      HK_ENGINE_ARCHITECTURE_ARM64E,
@@ -107,6 +115,8 @@ static const provider_profile_t g_substitute_profile = {
     .kind = HK_PROVIDER_SUBSTITUTE,
     .engine_id = "provider-substitute",
     .mechanism_id = "substitute_hook_functions/MSHookFunction",
+    .backend_group = "substitute",
+    .display_name = "Substitute",
     .inspection_size = 4,
     .architectures = HK_ENGINE_ARCHITECTURE_ARMV7 |
                      HK_ENGINE_ARCHITECTURE_ARMV7S |
@@ -169,6 +179,8 @@ static hk_engine_capabilities_t provider_describe(const provider_profile_t *prof
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = profile->engine_id;
+    caps.backend_group = profile->backend_group;
+    caps.display_name = profile->display_name;
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_FUNCTION_ADDRESS);
     // The provider ABIs are identical across the two AArch64 slices; the
     // late-publishing ElleKit mode is safe only when analysis selects the

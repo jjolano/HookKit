@@ -19,6 +19,7 @@ case "$PROFILE" in
         gum_arch=
         gum_expected=
         arm64e_abi=00
+        hookkit_install_name='@rpath/HookKit.framework/HookKit'
         ;;
     rootful-modern)
         package=me.jjolano.fmwk.hookkit
@@ -30,6 +31,7 @@ case "$PROFILE" in
         gum_arch=iphoneos-arm
         gum_expected="$hookkit_expected"
         arm64e_abi=80
+        hookkit_install_name='@rpath/HookKit.framework/HookKit'
         ;;
     rootless)
         package=me.jjolano.fmwk.hookkit
@@ -41,6 +43,7 @@ case "$PROFILE" in
         gum_arch=iphoneos-arm64
         gum_expected="$hookkit_expected"
         arm64e_abi=80
+        hookkit_install_name='@rpath/HookKit.framework/HookKit'
         ;;
     roothide)
         package=me.jjolano.fmwk.hookkit
@@ -52,6 +55,7 @@ case "$PROFILE" in
         gum_arch=iphoneos-arm64e
         gum_expected="$hookkit_expected"
         arm64e_abi=80
+        hookkit_install_name='@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
         ;;
     *) echo "usage: $0 rootful-legacy|rootful-modern|rootless|roothide CORE.deb [GUM.deb]" >&2; exit 2 ;;
 esac
@@ -96,6 +100,7 @@ OBJDUMP=$(find_tool llvm-objdump \
     || find ~/.local/share/mise/installs/swift -path '*/usr/bin/llvm-objdump' -type f 2>/dev/null | sort | tail -n 1 \
     || true)
 [ -n "$VTOOL$OTOOL$OBJDUMP" ] || { echo "error: vtool, otool, or llvm-objdump is required" >&2; exit 1; }
+[ -n "$OTOOL$OBJDUMP" ] || { echo "error: otool or llvm-objdump is required to verify LC_ID_DYLIB" >&2; exit 1; }
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-compat.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -232,7 +237,7 @@ load_commands() {
 }
 
 check_binary() {
-    local bin=$1 expected=$2 scratch=${3:-$tmp} actual_archs expected_archs old_ifs item arch wanted slice output actual sdk abi
+    local bin=$1 expected=$2 scratch=${3:-$tmp} expected_install_name=${4:-} actual_archs expected_archs old_ifs item arch wanted slice output actual sdk abi install_name
     echo "lipo -info $bin"
     "$LIPO" -info "$bin"
     actual_archs=$("$LIPO" -archs "$bin" | tr ' ' '\n' | sort | xargs)
@@ -280,6 +285,25 @@ check_binary() {
                 return 1
             }
             echo "PASS $bin [$arch] arm64e ABI $abi"
+        fi
+        if [ -n "$expected_install_name" ]; then
+            if [ -n "$OTOOL" ]; then
+                install_name=$("$OTOOL" -l "$slice" | awk '
+                    /cmd LC_ID_DYLIB/ { found = 1; next }
+                    found && $1 == "name" { print $2; exit }
+                ')
+            else
+                install_name=$("$OBJDUMP" --macho --all-headers "$slice" | awk '
+                    /cmd LC_ID_DYLIB/ { found = 1; next }
+                    found && $1 == "name" { print $2; exit }
+                ')
+            fi
+            [ "$install_name" = "$expected_install_name" ] || {
+                echo "FAIL $bin [$arch] LC_ID_DYLIB '$install_name' != '$expected_install_name'" >&2
+                IFS=$old_ifs
+                return 1
+            }
+            echo "PASS $bin [$arch] LC_ID_DYLIB $install_name"
         fi
         echo "PASS $bin [$arch] iOS $actual+"
     done
@@ -339,7 +363,7 @@ check_gum_package() {
 }
 
 echo "Package: $actual_package ($actual_arch), firmware >= $floor"
-check_binary "$HOOKKIT" "$hookkit_expected"
+check_binary "$HOOKKIT" "$hookkit_expected" "$tmp" "$hookkit_install_name"
 bash "$ROOT/scripts/check_exports.sh" "$HOOKKIT"
 check_gum_package
 echo "OK: $PROFILE artifacts have exactly the expected products, metadata, notices, slices, and exports"

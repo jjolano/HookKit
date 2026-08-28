@@ -774,6 +774,14 @@ static bool hk_runtime_vtable_has_field(const hk_engine_vtable_t *vtable,
            vtable->struct_size >= offset + size;
 }
 
+// The selectable group token an engine belongs to. Falls back to engine_id
+// so an engine that declares no group enumerates and pins as itself.
+static const char *hk_engine_group_token(const hk_engine_capabilities_t *caps) {
+    return caps->backend_group && caps->backend_group[0]
+               ? caps->backend_group
+               : caps->engine_id;
+}
+
 hk_status_t hk_runtime_enumerate_backends(
     hk_runtime_t *runtime,
     hk_backend_enumerator_fn enumerator,
@@ -782,6 +790,8 @@ hk_status_t hk_runtime_enumerate_backends(
     if (!runtime || !enumerator) {
         return HK_STATUS_INVALID_ARGUMENT;
     }
+    const char *seen[HK_RUNTIME_MAX_ENGINES];
+    size_t seen_count = 0;
     for (size_t i = 0; i < runtime->engine_count; i++) {
         const hk_engine_vtable_t *engine = runtime->engines[i];
         if (!engine || !engine->describe) {
@@ -805,11 +815,27 @@ hk_status_t hk_runtime_enumerate_backends(
                 continue;
             }
         }
-        hk_string_view_t backend_id = {
-            .data = capabilities.engine_id,
-            .length = strlen(capabilities.engine_id),
+        const char *group = hk_engine_group_token(&capabilities);
+        bool already = false;
+        for (size_t s = 0; s < seen_count; s++) {
+            if (strcmp(seen[s], group) == 0) {
+                already = true;
+                break;
+            }
+        }
+        if (already) {
+            continue;
+        }
+        seen[seen_count++] = group;
+        const char *label = capabilities.display_name
+                                ? capabilities.display_name
+                                : group;
+        hk_string_view_t backend_id = { .data = group, .length = strlen(group) };
+        hk_string_view_t display_name = {
+            .data = label,
+            .length = strlen(label),
         };
-        if (!enumerator(context, backend_id)) {
+        if (!enumerator(context, backend_id, display_name)) {
             break;
         }
     }
@@ -1073,22 +1099,36 @@ static int hk_backend_token_index(const char *list, const char *id) {
     return -1;
 }
 
+// Lowest list position at which an engine is named, by its group token or its
+// own engine_id (whichever appears earlier). -1 when the list names neither.
+static int hk_engine_token_rank(const hk_engine_vtable_t *engine,
+                                const char *list) {
+    if (!engine || !engine->describe) {
+        return -1;
+    }
+    hk_engine_capabilities_t caps = engine->describe();
+    if (!caps.engine_id) {
+        return -1;
+    }
+    int a = hk_backend_token_index(list, hk_engine_group_token(&caps));
+    int b = hk_backend_token_index(list, caps.engine_id);
+    if (a < 0) return b;
+    if (b < 0) return a;
+    return a < b ? a : b;
+}
+
 static void hk_runtime_retain_ordered_engines(hk_runtime_t *runtime,
                                               const bool *drop,
                                               const char *order) {
     size_t n = runtime->engine_count;
-    const char *ids[HK_RUNTIME_MAX_ENGINES];
     size_t idx_order[HK_RUNTIME_MAX_ENGINES];
     long keys[HK_RUNTIME_MAX_ENGINES];
     size_t kept = 0;
     for (size_t i = 0; i < n; i++) {
-        ids[i] = runtime->engines[i] && runtime->engines[i]->describe
-                     ? runtime->engines[i]->describe().engine_id
-                     : NULL;
         if (drop[i]) {
             continue;
         }
-        int rank = order ? hk_backend_token_index(order, ids[i]) : -1;
+        int rank = order ? hk_engine_token_rank(runtime->engines[i], order) : -1;
         idx_order[kept] = i;
         keys[kept] = rank >= 0 ? (long)rank : HK_BACKEND_UNRANKED + (long)i;
         kept++;
@@ -1136,7 +1176,7 @@ void hk_runtime_apply_backend_override(hk_runtime_t *runtime,
         // ObjC messages are a facade-native operation, never a selected
         // provider route, so an explicit function backend must not disable it.
         drop[i] = !id || (strcmp(id, "objc") != 0 &&
-                          hk_backend_token_index(backend_ids, id) < 0);
+                          hk_engine_token_rank(engine, backend_ids) < 0);
     }
     hk_runtime_retain_ordered_engines(runtime, drop, backend_ids);
 }

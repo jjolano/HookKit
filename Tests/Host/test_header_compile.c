@@ -109,8 +109,10 @@ static void exercise_swift_target(void) {
     assert(t.slot_index == 3);
 }
 
-static bool backend_enumerator(void *context, hk_string_view_t backend_id) {
+static bool backend_enumerator(void *context, hk_string_view_t backend_id,
+                               hk_string_view_t display_name) {
     (void)context;
+    (void)display_name;
     return backend_id.data != NULL;
 }
 

@@ -61,6 +61,17 @@ typedef uint32_t hk_engine_architecture_mask_t;
 
 typedef struct {
     const char *engine_id;
+    // The selectable backend this engine belongs to, as a machine token
+    // suitable for hk_runtime_create_with_backend_override(). Several engines
+    // may share one group (all built-in function/memory engines report
+    // "native"); the enumerator collapses a group to a single entry. NULL
+    // means "declares nothing" and falls back to engine_id -- the same safe
+    // default as the other optional fields, so a pre-existing engine still
+    // enumerates as its own group.
+    const char *backend_group;
+    // Human-readable label for the group, for UI/diagnostics. NULL falls back
+    // to the group token.
+    const char *display_name;
     hk_target_kind_mask_t target_kinds;
     // Target kinds for which the engine can enforce the request's image
     // selector when a populated catalog is available. This is narrower than
