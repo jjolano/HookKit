@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Build every lane and stage its package-verified framework in Theos.
+# Build lane(s) and stage each package-verified framework in Theos.
+# Usage: install-theos.sh [lane]
+#   no argument  -> build and install all four lanes (unchanged default)
+#   <lane>       -> build and install only that lane
+#                   (rootful-legacy | rootful-modern | rootless | roothide)
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -85,10 +89,39 @@ install_lane() {
     printf 'Installed %s: %s\n' "$lane" "$THEOS_LIB/$destination"
 }
 
-cd "$ROOT"
-./build.sh all
+# Single source of truth for lane -> (deb, deb payload path, $THEOS/lib
+# destination). Shadow resolves the destination at link time, so it must not
+# drift from build.sh's packaging.
+install_one_lane() {
+    case "$1" in
+    rootful-modern) install_lane rootful-modern hookkit-rootful-modern.deb Library/Frameworks/HookKit.framework HookKit.framework ;;
+    rootful-legacy) install_lane rootful-legacy hookkit-rootful-legacy.deb Library/Frameworks/HookKit.framework iphone/rootful-legacy/HookKit.framework ;;
+    rootless)       install_lane rootless hookkit-rootless.deb var/jb/Library/Frameworks/HookKit.framework iphone/rootless/HookKit.framework ;;
+    roothide)       install_lane roothide hookkit-roothide.deb Library/Frameworks/HookKit.framework iphone/roothide/HookKit.framework ;;
+    *) echo "error: unknown lane: $1" >&2; return 1 ;;
+    esac
+}
 
-install_lane rootful-modern hookkit-rootful-modern.deb Library/Frameworks/HookKit.framework HookKit.framework
-install_lane rootful-legacy hookkit-rootful-legacy.deb Library/Frameworks/HookKit.framework iphone/rootful-legacy/HookKit.framework
-install_lane rootless hookkit-rootless.deb var/jb/Library/Frameworks/HookKit.framework iphone/rootless/HookKit.framework
-install_lane roothide hookkit-roothide.deb Library/Frameworks/HookKit.framework iphone/roothide/HookKit.framework
+cd "$ROOT"
+
+# Optional lane argument: build and install only that lane, so a CI runner that
+# can build only some lanes (Linux old-ABI legacy vs macOS new-ABI modern lanes)
+# does not have to produce the others' .debs. No argument builds+installs all.
+case "${1:-all}" in
+    all)
+        ./build.sh all
+        install_one_lane rootful-modern
+        install_one_lane rootful-legacy
+        install_one_lane rootless
+        install_one_lane roothide
+        ;;
+    rootful-legacy|rootful-modern|rootless|roothide)
+        ./build.sh "$1"
+        install_one_lane "$1"
+        ;;
+    *)
+        echo "usage: $0 [rootful-legacy|rootful-modern|rootless|roothide]" >&2
+        echo "       (no argument builds and installs all four lanes)" >&2
+        exit 2
+        ;;
+esac
