@@ -89,15 +89,6 @@ struct hk_runtime {
     hk_artifact_ledger_t *artifacts;
 };
 
-// Compatibility-only construction seam. A non-NULL list is a strict,
-// per-runtime override: only matching engines (plus the facade-native ObjC
-// engine) remain eligible. An empty list leaves no function/memory route.
-// Normal public creation passes NULL.
-hk_status_t hk_runtime_create_with_backend_override(
-    const hk_runtime_config_t *config,
-    const char *backend_ids,
-    hk_runtime_t **out_runtime);
-
 // Deferred-hook queue (Milestone 12). Both are implemented in HKPlan.c, which
 // is where hk_hook_t's guts and hk_hook_free live.
 

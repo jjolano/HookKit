@@ -57,8 +57,8 @@ typedef void (*hk_diagnostic_callback_fn)(
 
 // Called once for each engine currently registered with a runtime and passing
 // its side-effect-free discovery probe. `backend_id` is suitable for
-// HKSubstitutor's direct backend-selection API. Its storage is borrowed from
-// the runtime and is valid only for the duration of the call.
+// hk_runtime_create_with_backend_override(). Its storage is borrowed from the
+// runtime and is valid only for the duration of the call.
 // Return false to stop enumeration early; that is still a successful call.
 typedef bool (*hk_backend_enumerator_fn)(
     void *context,
@@ -78,6 +78,16 @@ typedef struct {
 
 hk_status_t hk_runtime_create(
     const hk_runtime_config_t *config,
+    hk_runtime_t **out_runtime);
+
+// Creates a runtime with a strict per-runtime backend override. A non-NULL,
+// comma/space-separated `backend_ids` list leaves only the named
+// function/memory engines, plus the facade-native ObjC engine, eligible.
+// An empty or all-invalid list leaves no function/memory route; NULL uses
+// normal automatic routing. IDs are returned by hk_runtime_enumerate_backends().
+hk_status_t hk_runtime_create_with_backend_override(
+    const hk_runtime_config_t *config,
+    const char *backend_ids,
     hk_runtime_t **out_runtime);
 
 // Does not generically unhook active targets -- installed hooks and

@@ -1,6 +1,7 @@
 _OBJC_CLASS_$_HKSubstitutor
 _OBJC_METACLASS_$_HKSubstitutor
 _hk_runtime_create
+_hk_runtime_create_with_backend_override
 _hk_runtime_shutdown
 _hk_runtime_release
 _hk_runtime_owner_id

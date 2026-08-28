@@ -5,7 +5,6 @@
 #include "HKLegacyFacade.h"
 
 #include "../../Headers/HookKit/HookKit.h"
-#include "../Core/HKRuntimeInternal.h"
 #include "../../native/hk_swift.h"
 #include "../../native/hk_native.h"
 
