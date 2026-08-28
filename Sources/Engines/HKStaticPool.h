@@ -70,6 +70,11 @@ void hk_static_pool_release(hk_static_pool_t *pool, uintptr_t slot);
 
 unsigned hk_static_pool_free_count(const hk_static_pool_t *pool);
 
+// True when `addr` falls inside the pool's region. Lets one free seam serve a
+// mix of pool slots and dynamically allocated pages: a pool address is
+// released, anything else is deallocated.
+bool hk_static_pool_contains(const hk_static_pool_t *pool, uintptr_t addr);
+
 #ifdef __cplusplus
 }
 #endif

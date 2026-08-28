@@ -77,3 +77,11 @@ unsigned hk_static_pool_free_count(const hk_static_pool_t *pool) {
     }
     return n;
 }
+
+bool hk_static_pool_contains(const hk_static_pool_t *pool, uintptr_t addr) {
+    if (!pool || pool->base == 0) {
+        return false;
+    }
+    return addr >= pool->base &&
+           addr < pool->base + (uintptr_t)pool->slot_size * pool->slot_count;
+}

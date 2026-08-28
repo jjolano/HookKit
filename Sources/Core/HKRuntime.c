@@ -13,6 +13,7 @@
 #include "HKIDs.h"
 #include "HKRuntimeInternal.h"
 #include "../../native/hk_native.h"
+#include "../../native/hk_arm64.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -546,39 +547,25 @@ static bool hk_platform_write_pointer(void *ctx, uintptr_t address,
                                    (void *)(uintptr_t)value);
 }
 
-static uintptr_t hk_platform_reloc_alloc(void *ctx, size_t size, uintptr_t near) {
-    (void)ctx;
-    return hk_native_reloc_alloc(size, near);
-}
-
-static bool hk_platform_reloc_seal(void *ctx, uintptr_t page, size_t size) {
-    (void)ctx;
-    return hk_native_reloc_seal(page, size);
-}
-
-static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
-    (void)ctx;
-    hk_native_reloc_free(page, size);
-}
-
 // Static-continuation backing: a fixed executable region carved into the
 // HookKit image's own __TEXT. A continuation built here lives inside an
 // already-mapped, code-signed executable region rather than a fresh anonymous
-// page -- removing the anonymous-executable signal a hooking scan keys on.
+// page -- removing the anonymous-executable signal a hooking scan keys on. The
+// relocating engine prefers it by DEFAULT (see hk_platform_reloc_alloc), so
+// the stealthy continuation needs no caller opt-in.
 //
 // Slots are ONE PAGE each, not packed: seal/unprotect act at page granularity,
 // so two continuations sharing a page would flip each other's protection --
 // making a sealed, possibly-executing slot writable (a W^X fault). Page
 // isolation is a correctness requirement here, not waste.
 //
-// Trades the caller accepts: the section is (slots x page) bytes of real,
-// file-backed dylib size (a page-granular pool cannot be zero-fill in __TEXT
-// without a custom linker segment); writing a slot dirties a signed __TEXT
-// page (an integrity check vs disk still sees the divergence); and the region's
-// fixed location bounds a 4-byte atomic entry patch to targets within a B's
-// reach -- a far target falls to the non-atomic form, which the engine refuses
-// by default. SLOTS is deliberately small to bound the size cost; raise it
-// only if a consumer really installs more concurrent static continuations.
+// Trades: the section is (slots x page) bytes of real, file-backed dylib size
+// (a page-granular pool cannot be zero-fill in __TEXT without a custom linker
+// segment); writing a slot dirties a signed __TEXT page (an integrity check vs
+// disk still sees the divergence); and the fixed location means only a target
+// within a B's +/-128MB gets the pool -- a far one falls to a near page, so the
+// pool mostly serves near targets. SLOTS is deliberately small to bound the
+// size cost; raise it if a consumer installs more concurrent near hooks.
 #define HK_STATIC_TRAMP_PAGE  16384u  // iOS arm64 kernel page
 #define HK_STATIC_TRAMP_SLOTS 8u
 __attribute__((section("__TEXT,__hktramp"), used, aligned(HK_STATIC_TRAMP_PAGE)))
@@ -599,41 +586,75 @@ static void hk_static_pool_setup(void) {
                               HK_STATIC_TRAMP_PAGE, HK_STATIC_TRAMP_SLOTS);
 }
 
-// Pool alloc: claim a slot and make it writable. Unlike a fresh vm_allocate
-// page (which arrives R-W), a pool slot was mapped executable at load, so the
-// engine cannot build in it until it is unprotected. seal restores R-X.
-static uintptr_t hk_platform_static_alloc(void *ctx, size_t size, uintptr_t near) {
-    (void)ctx;
+static void hk_static_pool_return(uintptr_t slot) {
+    pthread_mutex_lock(&g_hk_static_pool_lock);
+    hk_static_pool_release(&g_hk_static_pool, slot);
+    pthread_mutex_unlock(&g_hk_static_pool_lock);
+}
+
+// Claim a writable pool slot, or 0. Pool slots arrive R-X (mapped at load), so
+// unlike a fresh R-W vm_allocate page they must be unprotected before the
+// engine builds in them; seal restores R-X. `require_reach` gates the claim on
+// the slot being within a 4-byte B of `near`: the default engine wants that (an
+// out-of-range slot would force the non-atomic entry patch it refuses) and can
+// fall back to a near page, while the forbid-dynamic engine passes false and
+// serves near targets only, failing honestly on a far one rather than allocating.
+static uintptr_t hk_static_pool_take(size_t size, uintptr_t near,
+                                     bool require_reach) {
     pthread_once(&g_hk_static_pool_once, hk_static_pool_setup);
     pthread_mutex_lock(&g_hk_static_pool_lock);
     uintptr_t slot = hk_static_pool_claim(&g_hk_static_pool, size, near);
     pthread_mutex_unlock(&g_hk_static_pool_lock);
     if (slot == 0) {
-        return 0;  // pool exhausted -- an honest fixed-budget outcome
+        return 0;  // exhausted -- an honest fixed-budget outcome
     }
-    if (!hk_native_reloc_unprotect(slot, size)) {
-        pthread_mutex_lock(&g_hk_static_pool_lock);
-        hk_static_pool_release(&g_hk_static_pool, slot);
-        pthread_mutex_unlock(&g_hk_static_pool_lock);
+    // hk_arm64_branch_size is the engine's own reach test, so the gate can
+    // never disagree with what the engine will accept at prepare.
+    if ((require_reach && hk_arm64_branch_size((uint64_t)near, (uint64_t)slot) != 4) ||
+        !hk_native_reloc_unprotect(slot, size)) {
+        hk_static_pool_return(slot);
         return 0;
     }
     return slot;
 }
 
-static bool hk_platform_static_seal(void *ctx, uintptr_t slot, size_t size) {
+// Default relocating-inline backing: prefer the in-image pool -- no anonymous
+// executable region for a hooking scan to flag -- whenever it can serve this
+// target atomically, and fall back to a near, tagged anonymous page otherwise.
+// This makes the stealthy continuation the default with no caller opt-in.
+static uintptr_t hk_platform_reloc_alloc(void *ctx, size_t size, uintptr_t near) {
     (void)ctx;
-    return hk_native_reloc_seal(slot, size);
+    uintptr_t slot = hk_static_pool_take(size, near, true);
+    if (slot) {
+        return slot;
+    }
+    return hk_native_reloc_alloc(size, near);
 }
 
-static void hk_platform_static_free(void *ctx, uintptr_t slot, size_t size) {
+static bool hk_platform_reloc_seal(void *ctx, uintptr_t page, size_t size) {
     (void)ctx;
-    (void)size;
-    // The slot is permanent section memory, never vm_deallocated. Returning it
-    // to the pool is the whole reclaim; a later claim re-unprotects it. Only
-    // an unpublished slot reaches here, same contract as the dynamic free.
-    pthread_mutex_lock(&g_hk_static_pool_lock);
-    hk_static_pool_release(&g_hk_static_pool, slot);
-    pthread_mutex_unlock(&g_hk_static_pool_lock);
+    return hk_native_reloc_seal(page, size);  // R-X + icache flush, pool or page
+}
+
+// One free seam for both origins: a pool slot is permanent section memory
+// returned to the bitmap; anything else was vm_allocated and is deallocated.
+// Only an unpublished trampoline ever reaches here.
+static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
+    (void)ctx;
+    pthread_once(&g_hk_static_pool_once, hk_static_pool_setup);
+    if (hk_static_pool_contains(&g_hk_static_pool, page)) {
+        hk_static_pool_return(page);
+        return;
+    }
+    hk_native_reloc_free(page, size);
+}
+
+// Forbid-dynamic backing: the same pool, but pool-only -- no anonymous
+// fallback, because the request refused dynamic executable memory outright. A
+// far or exhausted pool fails the hook honestly rather than allocating.
+static uintptr_t hk_platform_static_alloc(void *ctx, size_t size, uintptr_t near) {
+    (void)ctx;
+    return hk_static_pool_take(size, near, false);
 }
 #endif
 #endif
@@ -1100,9 +1121,9 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
         // memory, which filters the dynamic one out and leaves this eligible.
         pthread_once(&g_hk_static_pool_once, hk_static_pool_setup);
         runtime->static_engine = runtime->reloc_engine;
-        runtime->static_engine.alloc = hk_platform_static_alloc;
-        runtime->static_engine.seal = hk_platform_static_seal;
-        runtime->static_engine.free_page = hk_platform_static_free;
+        runtime->static_engine.alloc = hk_platform_static_alloc;  // pool-only, no anon
+        runtime->static_engine.seal = hk_platform_reloc_seal;     // shared (pool or page)
+        runtime->static_engine.free_page = hk_platform_reloc_free;  // address-discriminated
         runtime->static_engine.seam_ctx = NULL;  // seams use the process-global pool
         runtime->static_engine.static_continuation = true;
         (void)hk_runtime_register_engine_with_context(

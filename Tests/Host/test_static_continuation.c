@@ -337,9 +337,24 @@ static void test_failed_preparation_returns_its_slot(void) {
     printf("  failed-preparation-returns-its-slot: PASS\n");
 }
 
+// The unified free seam uses hk_static_pool_contains to tell a pool slot (which
+// gets returned to the bitmap) from a dynamically allocated page (deallocated).
+static void test_pool_contains_bounds(void) {
+    uint8_t region[64 * 4];
+    hk_static_pool_t pool;
+    assert(hk_static_pool_init(&pool, (uintptr_t)region, 64, 4));
+    assert(hk_static_pool_contains(&pool, (uintptr_t)region));          // first byte
+    assert(hk_static_pool_contains(&pool, (uintptr_t)region + 64 * 4 - 1)); // last byte
+    assert(!hk_static_pool_contains(&pool, (uintptr_t)region - 1));     // just below
+    assert(!hk_static_pool_contains(&pool, (uintptr_t)region + 64 * 4)); // just past end
+    assert(!hk_static_pool_contains(NULL, (uintptr_t)region));
+    printf("  pool-contains-bounds: PASS\n");
+}
+
 int main(void) {
     test_pool_claim_release_and_exhaustion();
     test_pool_rejects_bad_input_and_stray_releases();
+    test_pool_contains_bounds();
     test_static_continuation_allocates_nothing();
     test_static_is_eligible_where_dynamic_is_not();
     test_pool_exhaustion_fails_cleanly();
