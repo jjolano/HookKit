@@ -18,6 +18,7 @@
 #include "../Engines/HKProviderVtable.h"
 #include "../Engines/HKRebindVtable.h"
 #include "../Engines/HKRelocInlineVtable.h"
+#include "../Engines/HKStaticPool.h"
 
 // Fixed-size, not grown dynamically: the real production engine set
 // (Milestone 6+) is small and compiled-in, and test code registering fake
@@ -69,6 +70,15 @@ struct hk_runtime {
     hk_memory_engine_ctx_t memory_engine;
     hk_inline_engine_ctx_t inline_engine;
     hk_reloc_engine_ctx_t reloc_engine;
+    // Same engine as reloc_engine, but its alloc/seal/free are backed by a
+    // process-global executable pool (a HookKit-owned __TEXT section, see
+    // HKRuntime.c) instead of anonymous vm_allocate. Registered so a request
+    // forbidding dynamic executable memory routes here -- the continuation
+    // then lives in an already-mapped, signed region rather than an anonymous
+    // executable page a hooking scan would flag. The pool is process-global,
+    // not per-runtime, because chained owners share one section. See
+    // HKRelocInlineVtable.h / HKStaticPool.h.
+    hk_reloc_engine_ctx_t static_engine;
     hk_provider_engine_ctx_t dobby_provider;
     hk_provider_engine_ctx_t gum_provider;
     hk_provider_engine_ctx_t ellekit_provider;

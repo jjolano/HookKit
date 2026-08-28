@@ -100,6 +100,12 @@ HK_INTERNAL uintptr_t hk_native_reloc_alloc(size_t size, uintptr_t near);
 HK_INTERNAL bool hk_native_reloc_seal(uintptr_t page, size_t size);
 HK_INTERNAL void hk_native_reloc_free(uintptr_t page, size_t size);
 
+// Make an already-mapped executable region writable (R-X -> R-W) so a
+// trampoline can be built in place. Used by the static continuation pool,
+// whose slots arrive executable (mapped at load) rather than R-W like a fresh
+// vm_allocate page. Pairs with hk_native_reloc_seal to restore R-X.
+HK_INTERNAL bool hk_native_reloc_unprotect(uintptr_t page, size_t size);
+
 // Symbol lookup. Images must already be loaded -- an unloaded image has no
 // runtime addresses to report.
 typedef struct hk_image hk_image;

@@ -43,10 +43,17 @@ static uint32_t a64_set_imm14(uint32_t insn, int64_t delta) {
     return (insn & ~(0x3FFFu << 5)) | ((uint32_t)((delta >> 2) & 0x3FFFu) << 5);
 }
 
-// LDR X16, #8 / BR X16 / .quad target
+// LDR Xn, #8 / BR Xn / .quad target
 static size_t emit_abs_jump(uint32_t *dst, uint64_t target) {
-    dst[0] = a64_ldr_lit64(A64_SCRATCH_JUMP, 8);
-    dst[1] = a64_br(A64_SCRATCH_JUMP);
+    // Vary the veneer scratch between IP0 (X16) and IP1 (X17) by target, so
+    // the LDR/BR pair is not one fixed byte signature across every hook site.
+    // Both are call-clobbered scratch, so either is a valid veneer temp -- the
+    // same safety class as the fixed X16 this replaces. Deterministic by target
+    // so prepare and commit encode the entry patch identically.
+    // ponytail: token anti-signature; a semantic scan still sees a branch.
+    uint32_t scratch = (target >> 2) & 1u ? A64_SCRATCH_LOAD : A64_SCRATCH_JUMP;
+    dst[0] = a64_ldr_lit64(scratch, 8);
+    dst[1] = a64_br(scratch);
     memcpy(&dst[2], &target, sizeof(target));
     return 16;
 }

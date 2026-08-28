@@ -560,6 +560,81 @@ static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
     (void)ctx;
     hk_native_reloc_free(page, size);
 }
+
+// Static-continuation backing: a fixed executable region carved into the
+// HookKit image's own __TEXT. A continuation built here lives inside an
+// already-mapped, code-signed executable region rather than a fresh anonymous
+// page -- removing the anonymous-executable signal a hooking scan keys on.
+//
+// Slots are ONE PAGE each, not packed: seal/unprotect act at page granularity,
+// so two continuations sharing a page would flip each other's protection --
+// making a sealed, possibly-executing slot writable (a W^X fault). Page
+// isolation is a correctness requirement here, not waste.
+//
+// Trades the caller accepts: the section is (slots x page) bytes of real,
+// file-backed dylib size (a page-granular pool cannot be zero-fill in __TEXT
+// without a custom linker segment); writing a slot dirties a signed __TEXT
+// page (an integrity check vs disk still sees the divergence); and the region's
+// fixed location bounds a 4-byte atomic entry patch to targets within a B's
+// reach -- a far target falls to the non-atomic form, which the engine refuses
+// by default. SLOTS is deliberately small to bound the size cost; raise it
+// only if a consumer really installs more concurrent static continuations.
+#define HK_STATIC_TRAMP_PAGE  16384u  // iOS arm64 kernel page
+#define HK_STATIC_TRAMP_SLOTS 8u
+__attribute__((section("__TEXT,__hktramp"), used, aligned(HK_STATIC_TRAMP_PAGE)))
+static uint8_t g_hk_static_tramp[HK_STATIC_TRAMP_SLOTS * HK_STATIC_TRAMP_PAGE];
+
+// One pool per PROCESS, not per runtime: chained owners run separate runtimes
+// in one process and all share this single fixed section, so a per-runtime
+// pool would hand the same slots out twice. The mutex guards the slot bitmap;
+// the vm ops below touch distinct slots and need no lock.
+static hk_static_pool_t g_hk_static_pool;
+static pthread_mutex_t g_hk_static_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t g_hk_static_pool_once = PTHREAD_ONCE_INIT;
+
+static void hk_static_pool_setup(void) {
+    // Slot size is a full page so each slot's seal/unprotect is page-isolated;
+    // the engine only uses the first HK_RELOC_PAGE_BYTES of it.
+    (void)hk_static_pool_init(&g_hk_static_pool, (uintptr_t)g_hk_static_tramp,
+                              HK_STATIC_TRAMP_PAGE, HK_STATIC_TRAMP_SLOTS);
+}
+
+// Pool alloc: claim a slot and make it writable. Unlike a fresh vm_allocate
+// page (which arrives R-W), a pool slot was mapped executable at load, so the
+// engine cannot build in it until it is unprotected. seal restores R-X.
+static uintptr_t hk_platform_static_alloc(void *ctx, size_t size, uintptr_t near) {
+    (void)ctx;
+    pthread_once(&g_hk_static_pool_once, hk_static_pool_setup);
+    pthread_mutex_lock(&g_hk_static_pool_lock);
+    uintptr_t slot = hk_static_pool_claim(&g_hk_static_pool, size, near);
+    pthread_mutex_unlock(&g_hk_static_pool_lock);
+    if (slot == 0) {
+        return 0;  // pool exhausted -- an honest fixed-budget outcome
+    }
+    if (!hk_native_reloc_unprotect(slot, size)) {
+        pthread_mutex_lock(&g_hk_static_pool_lock);
+        hk_static_pool_release(&g_hk_static_pool, slot);
+        pthread_mutex_unlock(&g_hk_static_pool_lock);
+        return 0;
+    }
+    return slot;
+}
+
+static bool hk_platform_static_seal(void *ctx, uintptr_t slot, size_t size) {
+    (void)ctx;
+    return hk_native_reloc_seal(slot, size);
+}
+
+static void hk_platform_static_free(void *ctx, uintptr_t slot, size_t size) {
+    (void)ctx;
+    (void)size;
+    // The slot is permanent section memory, never vm_deallocated. Returning it
+    // to the pool is the whole reclaim; a later claim re-unprotects it. Only
+    // an unpublished slot reaches here, same contract as the dynamic free.
+    pthread_mutex_lock(&g_hk_static_pool_lock);
+    hk_static_pool_release(&g_hk_static_pool, slot);
+    pthread_mutex_unlock(&g_hk_static_pool_lock);
+}
 #endif
 #endif
 
@@ -1015,6 +1090,23 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
         (void)hk_runtime_register_engine_with_context(runtime,
                                                        hk_reloc_inline_vtable(),
                                                        &runtime->reloc_engine);
+
+        // The same engine backed by the fixed __TEXT pool. Registered AFTER
+        // the dynamic one so an unconstrained request still prefers the
+        // dynamic page (equal reach/rank -> first registered wins): the router
+        // picks ONE engine and does not fall back at prepare, so preempting
+        // here would fail every hook once the fixed pool exhausts. This engine
+        // is instead reached only when the request forbids dynamic executable
+        // memory, which filters the dynamic one out and leaves this eligible.
+        pthread_once(&g_hk_static_pool_once, hk_static_pool_setup);
+        runtime->static_engine = runtime->reloc_engine;
+        runtime->static_engine.alloc = hk_platform_static_alloc;
+        runtime->static_engine.seal = hk_platform_static_seal;
+        runtime->static_engine.free_page = hk_platform_static_free;
+        runtime->static_engine.seam_ctx = NULL;  // seams use the process-global pool
+        runtime->static_engine.static_continuation = true;
+        (void)hk_runtime_register_engine_with_context(
+            runtime, hk_static_inline_vtable(), &runtime->static_engine);
     }
 #endif
 #if defined(HOOKKIT_CANONICAL_3)

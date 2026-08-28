@@ -14,6 +14,18 @@
 #define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
 #define hk_sign_code(p)  ((void *)hk_pac_make_callable((uintptr_t)(p)))
 
+// Tag the anonymous trampoline mapping so a vm_region walk sees a named,
+// expected owner -- a JIT executable allocator, the kind ubiquitous JS engines
+// create -- rather than an untagged anonymous executable region, which is the
+// shape a hooking scan keys on. This only relabels the mapping; it is still
+// anonymous, which is exactly why the static-continuation pool exists for
+// callers that must avoid an anonymous executable region altogether.
+#if defined(VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR)
+#define HK_TRAMP_VM_TAG VM_MEMORY_JAVASCRIPT_JIT_EXECUTABLE_ALLOCATOR
+#else
+#define HK_TRAMP_VM_TAG VM_MEMORY_APPLICATION_SPECIFIC_1
+#endif
+
 static int hk_errno = 0;
 
 bool hk_native_supported(void) {
@@ -391,7 +403,8 @@ static vm_address_t tramp_map_near(uint64_t anchor, size_t size) {
         if(kr != KERN_SUCCESS || region >= probe + size) {
             addr = probe;
 
-            if(vm_allocate(task, &addr, size, VM_FLAGS_FIXED) == KERN_SUCCESS) {
+            if(vm_allocate(task, &addr, size,
+                           VM_FLAGS_FIXED | VM_MAKE_TAG(HK_TRAMP_VM_TAG)) == KERN_SUCCESS) {
                 return addr;
             }
 
@@ -405,7 +418,8 @@ static vm_address_t tramp_map_near(uint64_t anchor, size_t size) {
 
     addr = 0;
 
-    if(vm_allocate(task, &addr, size, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) {
+    if(vm_allocate(task, &addr, size,
+                   VM_FLAGS_ANYWHERE | VM_MAKE_TAG(HK_TRAMP_VM_TAG)) != KERN_SUCCESS) {
         return 0;
     }
 
@@ -492,6 +506,19 @@ void hk_native_reloc_free(uintptr_t page, size_t size) {
         (void)vm_deallocate(mach_task_self(), (vm_address_t)page,
                             (vm_size_t)getpagesize());
     }
+}
+
+bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
+    (void)size;
+    if (!page) {
+        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
+        return false;
+    }
+    kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)page,
+                                  (vm_size_t)getpagesize(), FALSE,
+                                  VM_PROT_READ | VM_PROT_WRITE);
+    hk_errno = kr == KERN_SUCCESS ? 0 : kr;
+    return kr == KERN_SUCCESS;
 }
 
 #pragma mark - Hooking
@@ -759,6 +786,11 @@ bool hk_native_reloc_seal(uintptr_t page, size_t size) {
 
 void hk_native_reloc_free(uintptr_t page, size_t size) {
     (void)page; (void)size;
+}
+
+bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
+    (void)page; (void)size;
+    return false;
 }
 
 #endif
