@@ -325,8 +325,7 @@ static bool read_segment(const uint8_t *base, size_t offset, uint32_t cmdsize,
 }
 
 // A segment's section array lives inside the segment command itself, so it
-// must fit within that command's cmdsize. 2.x omits this check because it
-// only runs on dyld-validated images; a parser handed arbitrary bytes cannot.
+// must fit within that command's cmdsize when parsing arbitrary bytes.
 static bool sections_fit(const hk_macho_segment_t *seg) {
     uint64_t need = (uint64_t)HK_SEGMENT_COMMAND_64_SIZE +
                     (uint64_t)seg->nsects * (uint64_t)HK_SECTION_64_SIZE;

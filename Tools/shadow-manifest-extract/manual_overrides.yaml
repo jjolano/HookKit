@@ -6,7 +6,7 @@
 # from source, it does not invent new targets. Any field present here is
 # shallow-merged onto the extracted target and the target's
 # extraction_method is set to "manual_override", so validate.py and the
-# route-feasibility tool both know this row's precision came from a human,
+# extractor knows this row's precision came from a human,
 # not a parse.
 #
 # Empty for now -- extract.py's structured_table pass hasn't needed a

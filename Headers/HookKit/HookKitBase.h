@@ -2,8 +2,7 @@
 //
 // Pure C, no Foundation, no Objective-C. Milestone 3 (ABI freeze candidate)
 // per docs/3.0/PUBLIC_C_ABI.md and docs/3.0/IMPLEMENTATION_STATUS.md.
-// Packaged by canonical HookKit beneath <HookKit/>, alongside the retained
-// Objective-C compatibility facade at <HookKit.h>.
+// Packaged by canonical HookKit beneath <HookKit/>.
 
 #ifndef HOOKKIT_BASE_H
 #define HOOKKIT_BASE_H

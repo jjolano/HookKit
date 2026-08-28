@@ -7,14 +7,12 @@ see `IMPLEMENTATION_STATUS.md`.
 
 Companion docs: `ARCHITECTURE.md` (invariants this ABI exists to encode),
 `REACHABILITY_VECTOR.md`, `ORIGINAL_AND_CONTINUATION_MODEL.md`,
-`ARTIFACT_MANIFEST.md`, `ENGINE_CONTRACT.md` (pending), `LEGACY_ABI.md`
-(pending).
+`ARTIFACT_MANIFEST.md`, and `ENGINE_CONTRACT.md` (pending).
 
 ## Naming and versioning
 
-New API uses the `hk_` prefix exclusively — never reuses legacy
-`hookkit_status_t` for new calls. Every extensible public structure opens
-with:
+The public API uses the `hk_` prefix exclusively. Every extensible public
+structure opens with:
 
 ```c
 uint32_t struct_size;
@@ -337,9 +335,8 @@ instance class first.
 
 **Memory target**: target address or image-relative location; replacement
 bytes; expected bytes; expected-byte mask; size; expected image identity
-where applicable; whether the target is code or data. A compatibility-only
-internal mode captures expected bytes at preparation time for legacy
-`hookMemory:` calls that never supplied them.
+where applicable; whether the target is code or data. Expected bytes are
+required so commit can revalidate before writing.
 
 **Swift target** (`HookKitSwift.h`): class/metadata pointer; class name
 where resolvable; exact mangled method name; demangled substring lookup;

@@ -29,7 +29,7 @@ static hk_engine_capabilities_t describe_hidden(void) {
 static hk_engine_capabilities_t describe_legacy(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
-    caps.engine_id = "legacy";
+    caps.engine_id = "unversioned";
     return caps;
 }
 
@@ -96,7 +96,7 @@ static void test_skips_undiscoverable_engine(void) {
            HK_STATUS_OK);
     assert(collected.count == 2);
     assert(strcmp(collected.ids[0], "alpha") == 0);
-    assert(strcmp(collected.ids[1], "legacy") == 0);
+    assert(strcmp(collected.ids[1], "unversioned") == 0);
     hk_runtime_release(runtime);
     printf("  skips-undiscoverable-engine: PASS\n");
 }

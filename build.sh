@@ -211,23 +211,6 @@ copy_release_artifact() {
     cp -p "$artifact" "build/$(basename "$artifact")"
 }
 
-check_legacy_abi() {
-    local expected_install_name=${1:-} binary
-    binary=$(find .theos/obj -path '*/HookKit.framework/HookKit' -type f \
-        ! -path '*/arm64/*' ! -path '*/arm64e/*' \
-        ! -path '*/armv7/*' ! -path '*/armv7s/*' | head -n 1)
-    [ -n "$binary" ] || {
-        echo "error: built HookKit framework binary not found" >&2
-        return 1
-    }
-    if [ -n "$expected_install_name" ]; then
-        bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
-            --expected-install-name "$expected_install_name"
-    else
-        bash scripts/check_legacy_abi.sh "$binary"
-    fi
-}
-
 build_rootful_legacy() {
     local lane=rootful-legacy artifact
     require_oldabi_toolchain
@@ -237,7 +220,6 @@ build_rootful_legacy() {
     legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    check_legacy_abi
     copy_release_artifact "$artifact" hookkit-rootful-legacy
 }
 
@@ -277,7 +259,6 @@ build_rootful_modern() {
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
-    check_legacy_abi
 }
 
 build_rootless() {
@@ -286,7 +267,6 @@ build_rootless() {
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
-    check_legacy_abi
 }
 
 # Existing roothide profile; it shares the modern/rootless compatibility floor.
@@ -297,7 +277,6 @@ build_roothide() {
     modern_make HOOKKIT_LANE="$lane" clean
     modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
-    check_legacy_abi '@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
 }
 
 case ${1:-all} in

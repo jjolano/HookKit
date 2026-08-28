@@ -34,10 +34,10 @@
 #include "../../vendor/dobby/dobby.h"
 #include "../../vendor/libhooker/libhooker.h"
 
-// HKInlinePreflight.h is intentionally Objective-C-facing because the 2.x
-// backends import Foundation. The two C entry points below have no ObjC types;
-// declare that tiny internal seam here so the C-first runtime never imports
-// Foundation merely to read a function prologue.
+// HKInlinePreflight.h is Objective-C-facing because provider headers import
+// Foundation. The two C entry points below have no ObjC types; declare that
+// tiny internal seam here so the C-first runtime never imports Foundation
+// merely to read a function prologue.
 extern int hk_inline_preflight_basic(void *function, void *replacement,
                                      int *out_error);
 extern int hk_inline_preflight(void *function, void *replacement,
@@ -992,8 +992,8 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
     }
 #endif
 #if defined(HOOKKIT_CANONICAL_3)
-    // Older devices rely on the installed provider's relocator. This remains
-    // an HookKit engine lifecycle, not a re-entry into the retired 2.x router.
+    // Older devices rely on the installed provider's relocator within the
+    // same HookKit engine lifecycle.
     memset(&runtime->substitute_provider, 0,
            sizeof(runtime->substitute_provider));
     runtime->substitute_provider.kind = HK_PROVIDER_SUBSTITUTE;

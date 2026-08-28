@@ -15,8 +15,8 @@ Milestone 2). Two layers, both from real parsed source, neither fabricated:
 2. Per-hook decomposition, best-effort: for every install function this
    script can locate and read, scans the body for direct
    `[receiver hookFunction:TARGET withReplacement:R outOldPtr:O]` call sites —
-   HKSubstitutor's real function-hook API, including local category-specific
-   receivers such as `rebindOnly` — and emits one child target per call,
+   Shadow's `SHDWHookSession` boundary, including local receivers such as
+   `rebindOnly` — and emits one child target per call,
    linked via `parent_install_unit`. Resolves the common
    dlsym-then-hook pattern (`sym = [hooks findSymbolInImage:...
    symbolName:@"..."]; if(sym) [hooks hookFunction:sym ...]`) back to the
@@ -32,7 +32,7 @@ Milestone 2). Two layers, both from real parsed source, neither fabricated:
 
 What this does NOT do by default: Logos `%hook`/`%init` blocks (7+ files
 confirmed to still use them), or
-non-`hookFunction:` HKSubstitutor calls (`hookMessage:`, batching) yield
+non-`hookFunction:` session calls (`hookMessage:`, batching) yield
 zero pattern_scan children and stay unit-level, with an explicit note in
 that unit's known_compatibility_risks saying so — never silently implied
 as covered. `--include-logos` adds the source-level Logos pass; the separate
@@ -299,7 +299,7 @@ def find_coordinator_installers_source(shadow_repo: str):
     return None
 
 
-# Matches a simple receiver's real HKSubstitutor hookFunction send -- not any
+# Matches a simple receiver's SHDWHookSession hookFunction send -- not any
 # bracket expression. Restricting the receiver to an identifier keeps the
 # source scan precise while covering both the usual `hooks` parameter and
 # current category-specific locals such as `rebindOnly`.
@@ -317,7 +317,7 @@ LOGOS_INIT_RE = re.compile(
 def find_hook_function_calls(body_text: str, body_start_line: int):
     """Scans an already comment-stripped function body for
     `[receiver hookFunction:TARGET withReplacement:REPL outOldPtr:OUT]` sends --
-    HKSubstitutor's real function-hook API (Headers/HookKit.h) -- and returns
+    Shadow's native HookKit-boundary function-hook API -- and returns
     one dict per call. Depth-aware from the opening '[' to its matching ']',
     so multi-line calls and nested `(void **)&x` casts inside outOldPtr: are
     handled correctly, not just single-line ones."""
@@ -423,10 +423,9 @@ def unit_to_manifest_target(unit, source_file_rel):
         "commit_domain": domain,
         "required_reach": required_reach,
         # Reasoned default, not verified: Shadow's hooks filter/modify
-        # results rather than replace behavior outright, and the coordinator
-        # builds its substitutors from HK_CAT_FUNCTION_REBIND/HK_CAT_MESSAGE
-        # auto-cover (HookCoordinator.m) -- both direct-predecessor-oriented
-        # lanes in HookKit's own model. Needs per-hook verification before
+        # results rather than replace behavior outright, and its native HK3
+        # calls request a predecessor when they pass an outOldPtr. Needs
+        # per-hook verification before
         # Milestone 3 freeze; override in manual_overrides.yaml if wrong for
         # a specific unit.
         "original_requirement": "direct_predecessor" if target_kind else "none",

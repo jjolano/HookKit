@@ -98,9 +98,8 @@ hk_objc_status_t hk_objc_prepare(const hk_objc_runtime_t *rt,
     out_plan->sel = sel;
     out_plan->method = method;
     out_plan->original_imp = imp;
-    // The encoding is metadata for forwarding. A method with none gets the
-    // same minimal placeholder 2.x uses rather than NULL, which some runtime
-    // paths treat as "untyped" and refuse.
+    // The encoding is metadata for forwarding. A method with none gets a
+    // minimal non-NULL placeholder, which some runtime paths require.
     out_plan->types = rt->method_get_types(rt->ctx, method);
     if (!out_plan->types) {
         out_plan->types = "@:@";

@@ -15,8 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Internal to the framework: HookKit's only exported symbol is _HKSubstitutor
-// (see HookKit.tbd), and these must not join the dynamic export table.
+// Internal to the framework: these must not join the public hk_* export table.
 #ifndef HK_INTERNAL
 #define HK_INTERNAL __attribute__((visibility("hidden")))
 #endif

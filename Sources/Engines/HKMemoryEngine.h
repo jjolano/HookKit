@@ -17,10 +17,10 @@
 // (expected & mask)); replacement_bytes is always written in full. A caller
 // wanting to preserve some bits must reflect them in replacement_bytes.
 //
-// Reuse survey: 2.x patches memory via native/hk_native.c's
-// hk_native_patch_memory (VM protection change + write, with arm64e handling).
-// That is the reference for the device seam, not reusable here: it is the
-// store itself, device-only, and carries none of the precondition /
+// native/hk_native.c's hk_native_patch_memory performs the device-side VM
+// protection change and write, including arm64e handling. It is the reference
+// for this engine's store seam, not reusable here: it is device-only and
+// carries none of the precondition /
 // revalidation / artifact contract this engine exists to provide. On device
 // it is exactly what backs hk_mempatch_write_fn.
 
@@ -64,9 +64,9 @@ typedef struct {
 } hk_mempatch_plan_t;
 
 // Phase 1. Reads the region and enforces the precondition. Mutates nothing.
-// `expected.data == NULL` skips the precondition (the legacy path captures the
-// original at prepare instead of asserting it). A non-NULL `mask` must be the
-// same length as `expected`; a NULL mask means compare every bit.
+// `expected.data == NULL` skips the precondition for internal callers. A
+// non-NULL `mask` must be the same length as `expected`; a NULL mask means
+// compare every bit.
 hk_mempatch_status_t hk_mempatch_prepare(uintptr_t address, size_t size,
                                          hk_bytes_view_t expected,
                                          hk_bytes_view_t mask,

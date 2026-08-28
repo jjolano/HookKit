@@ -1,9 +1,5 @@
-// HookKit 3.0 -- new C API umbrella. Pure C: including this must not pull
-// in Foundation or the Objective-C runtime (spec section 16.4). The
-// historical Objective-C facade is available only through <HookKit.h>, never
-// from here.
-//
-// Canonical HookKit packages this C-only umbrella at <HookKit/HookKit.h>.
+// HookKit 3.0 C API umbrella. Pure C: including this must not pull in
+// Foundation or the Objective-C runtime (spec section 16.4).
 
 #ifndef HOOKKIT_H
 #define HOOKKIT_H

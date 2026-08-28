@@ -82,7 +82,7 @@ hk_status_t hk_runtime_create(
 
 // Creates a runtime with a strict per-runtime backend override. A non-NULL,
 // comma/space-separated `backend_ids` list leaves only the named
-// function/memory engines, plus the facade-native ObjC engine, eligible.
+// function/memory engines, plus the built-in ObjC engine, eligible.
 // An empty or all-invalid list leaves no function/memory route; NULL uses
 // normal automatic routing. IDs are returned by hk_runtime_enumerate_backends().
 hk_status_t hk_runtime_create_with_backend_override(

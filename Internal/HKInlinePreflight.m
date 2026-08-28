@@ -25,7 +25,7 @@ HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len);
 // hk_shared_inline_preflight_ok), and the front of hk_inline_preflight for
 // the fixed-window backends. The checks below read only the first instruction
 // of each address and never write, so a reject leaves the target untouched.
-hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, int *outErrno) {
+hk_status_t hk_inline_preflight_basic(void *function, void *replacement, int *outErrno) {
     if(outErrno) {
         *outErrno = 0;
     }
@@ -45,7 +45,7 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
             *outErrno = EINVAL;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
     // The replacement is jumped to, never inspected: its mapping only needs to
@@ -58,7 +58,7 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
             *outErrno = EFAULT;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
     // The target's entry instruction is inspected by the engine's relocator;
@@ -75,17 +75,17 @@ hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, in
             *outErrno = EFAULT;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
-    return HK_OK;
+    return HK_STATUS_OK;
 #else
     // Not arm64/arm64e: no AArch64 decoder is compiled in here. Pass through
     // — the MS providers (Substrate, Substitute) validate their own Thumb
     // prologues, and the fixed-window inline backends are arm64-only.
     (void)function;
     (void)replacement;
-    return HK_OK;
+    return HK_STATUS_OK;
 #endif
 }
 
@@ -114,7 +114,7 @@ bool hk_inline_target_is_trap_stub(void *function) {
 #endif
 }
 
-hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
+hk_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
     // Thread gate, first because it is the cheapest check. The two backends
     // behind this validator (Dobby, litehook) patch a fixed prologue window
     // with no atomicity and no peer-thread quiescing, so a hook installed
@@ -133,15 +133,15 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
             *outErrno = EPERM;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
     // The fixed-window rules below apply on top of the generic checks: the
     // window scanners dereference the prologue, and the generic checks make
     // sure a bogus address fails cleanly first.
-    hookkit_status_t status = hk_inline_preflight_basic(function, replacement, outErrno);
+    hk_status_t status = hk_inline_preflight_basic(function, replacement, outErrno);
 
-    if(status != HK_OK) {
+    if(status != HK_STATUS_OK) {
         return status;
     }
 
@@ -168,7 +168,7 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
             *outErrno = EFAULT;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
     // A terminator in the final fully-overwritten instruction is not "early":
@@ -185,7 +185,7 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
             *outErrno = EOPNOTSUPP;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
     if(hk_arm64_has_aarch64_literal_load(function, window)) {
@@ -195,15 +195,15 @@ hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t w
             *outErrno = EOPNOTSUPP;
         }
 
-        return HK_ERR_NOT_SUPPORTED;
+        return HK_STATUS_UNAVAILABLE;
     }
 
-    return HK_OK;
+    return HK_STATUS_OK;
 #else
     // Not arm64/arm64e: no AArch64 decoder is compiled in here. Pass through
     // — the MS providers (Substrate, Substitute) validate their own Thumb
     // prologues, and the fixed-window inline backends are arm64-only.
     (void)window;
-    return HK_OK;
+    return HK_STATUS_OK;
 #endif
 }

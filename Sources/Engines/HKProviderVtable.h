@@ -18,8 +18,7 @@ typedef enum {
     HK_PROVIDER_DOBBY = 1,
     HK_PROVIDER_GUM = 2,
     HK_PROVIDER_ELLEKIT = 3,
-    // Cydia Substrate / libsubstitute's audited function-hook ABI.  This is
-    // a 3.0 engine adapter, not the retired 2.x backend router.
+    // Cydia Substrate / libsubstitute's audited function-hook ABI.
     HK_PROVIDER_SUBSTITUTE = 4,
 } hk_provider_kind_t;
 

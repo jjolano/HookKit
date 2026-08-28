@@ -23,7 +23,7 @@
 // precisely the hidden fallback the whole design forbids.
 //
 // THE DIFFERENCE FROM THE RELOCATING ENGINE, stated because it is the single
-// most likely thing to get wrong by copying 2.x: `hk_arm64_has_aarch64_literal_load`
+// most likely thing to get wrong: `hk_arm64_has_aarch64_literal_load`
 // exists to refuse ADR/ADRP and load-literal forms whose RELOCATION is fragile.
 // Terminal inline relocates nothing, so a literal load inside the overwrite
 // window is harmless -- it is being replaced and will never run. Applying that

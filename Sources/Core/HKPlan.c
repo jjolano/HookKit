@@ -818,10 +818,6 @@ static hk_status_t hk_plan_add_hook_impl(
     // whatever is there -- a different build, an already-patched region, or
     // simply the wrong address. Rejected here rather than at prepare, because
     // it is a malformed REQUEST and not a runtime condition.
-    //
-    // 2.x's hookMemory: has no parameter for it and never did, so the legacy
-    // entry point permits omission and the engine captures at preparation
-    // instead. That is weaker -- it catches a change during the invariant #3
     if (spec->target_kind == HK_TARGET_MEMORY_PATCH &&
         spec->target.memory.expected_bytes.data == NULL) {
         return HK_STATUS_INVALID_ARGUMENT;

@@ -7,13 +7,9 @@
 // arithmetic over bytes; only *obtaining* the bytes (mmap, dyld) is
 // device-only. So all of this is host-tested against synthetic images.
 //
-// Relationship to native/hk_symbols.c (surveyed before writing): 2.x walks
-// load commands twice -- once bounded against a mmap'd file size
-// (bind_ondisk_symbols) and once unbounded over a live dyld-validated header
-// (collect_section_flags). Both are inside `#if defined(__arm64__)`, both use
-// Apple's headers, and neither can run here. This is the single bounded walk,
-// host-testable, with the structure layouts declared locally so it builds
-// off-Apple. The 2.x path is untouched and still serves the 2.x runtime.
+// native/hk_symbols.c performs device-side symbol work through Apple headers.
+// This is the single bounded, host-testable load-command walk, with the
+// structure layouts declared locally so it also builds off-Apple.
 //
 // Two robustness properties, both tested:
 //   - Every read is bounded by the caller-declared size. A truncated or
@@ -89,7 +85,7 @@ typedef enum {
     HK_MACHO_NOT_MACHO,               // no recognized magic
     HK_MACHO_FAT_UNSUPPORTED,         // universal binary: pick a slice first
     HK_MACHO_BYTE_ORDER_UNSUPPORTED,  // byte-swapped image; no swapping is done
-    HK_MACHO_NOT_64_BIT,              // 32-bit Mach-O (the legacy armv7 lane's 2.x path handles those)
+    HK_MACHO_NOT_64_BIT,              // 32-bit Mach-O; this resolver has no 32-bit parser
     HK_MACHO_MALFORMED,               // structurally invalid: commands overrun, bad cmdsize, bad symtab offsets
     HK_MACHO_NOT_FOUND,               // well-formed, but the requested command is absent
 } hk_macho_status_t;
@@ -156,7 +152,7 @@ hk_macho_status_t hk_macho_find_load_command(const void *image, size_t size,
 //
 // FILE-IMAGE LAYOUT ONLY, stated because it is a real limitation: LC_SYMTAB's
 // symoff/stroff are file offsets, so this is correct for an image laid out as
-// on disk (what 2.x's bind_ondisk_symbols mmaps). A *loaded* image is
+// on disk. A *loaded* image is
 // scattered at segment VM addresses, where the offsets must be translated
 // through the __LINKEDIT segment instead. That translation needs segment
 // parsing and is deliberately not done here rather than guessed at.
@@ -197,14 +193,11 @@ hk_macho_status_t hk_macho_find_segment(const void *image, size_t size,
                                         hk_macho_segment_t *out_segment);
 
 // Section flags for a 1-based section index, numbered across all segments in
-// load-command order -- exactly the numbering an nlist's `n_sect` uses, and
-// the same ordering HookKit 2.x's collect_section_flags builds. n_sect 0 is
-// NO_SECT and is rejected.
+// load-command order -- exactly the numbering an nlist's `n_sect` uses.
+// n_sect 0 is NO_SECT and is rejected.
 //
-// Unlike the 2.x version this is fully bounded: a segment's section array
-// must fit inside the segment command's own cmdsize, so a corrupt `nsects`
-// cannot walk off the end. (2.x reads sections without that check because it
-// only ever runs on a live, dyld-validated image.)
+// A segment's section array must fit inside the segment command's own cmdsize,
+// so a corrupt `nsects` cannot walk off the end.
 hk_macho_status_t hk_macho_section_flags(const void *image, size_t size,
                                          uint8_t n_sect, uint32_t *out_flags);
 

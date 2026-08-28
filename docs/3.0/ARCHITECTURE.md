@@ -2,10 +2,8 @@
 
 ## Mission
 
-HookKit 3.0 is a major in-place rewrite of HookKit, the C-first runtime
-underneath the `HKSubstitutor` API. It stays the same product under the same
-name — this is not a new framework replacing HookKit, it is HookKit's next
-major version.
+HookKit 3.0 is the C-first next major version of HookKit. It stays the same
+product under the same name — this is not a replacement framework.
 
 It delivers:
 
@@ -19,12 +17,7 @@ It delivers:
    (ElleKit-compatible/libhooker, Substrate, Substitute, Dobby, Gum/Frida).
 6. Deferred image and class lifecycle support.
 7. Immutable per-hook and process-wide artifact snapshots.
-8. Full HookKit 2.x binary ABI compatibility through `HKSubstitutor`.
-9. Binary compatibility with the `HKSubstitutor` subset present in HookKit
-   1.x.
-10. A reverse-dependency-audited decision on the v1.x Modulous/module API
-    (see `V1_MODULE_COMPATIBILITY_AUDIT.md`).
-11. A Shadow rewrite using one HookKit runtime and one complete
+8. A Shadow rewrite using the native HookKit runtime and one complete
     startup-qualified manifest (Milestone 14, gated on explicit sign-off —
     see `IMPLEMENTATION_STATUS.md`).
 
@@ -90,7 +83,7 @@ error code is never the fallback signal.
 ### 5. Original publication precedes activation
 
 When an original or predecessor is required, HookKit owns a stable original
-slot, publishes it (and mirrors it to any legacy cell) before the
+slot and publishes it before the
 replacement becomes reachable. An engine that cannot guarantee
 publication-before-activation is ineligible for that request.
 
@@ -105,8 +98,8 @@ by caller identity.
 
 Loading `HookKit.framework` does nothing: no provider activation, image
 traversal, callback registration, thread creation, hook installation, log
-emission, or executable allocation. All work begins from an explicit
-runtime or legacy-facade call.
+emission, or executable allocation. All work begins from an explicit runtime
+call.
 
 ## Repository layout
 
@@ -114,7 +107,7 @@ The rewrite moves toward:
 
 ```text
 Headers/
-  HookKit.h                    # historical umbrella; imports new + legacy API
+  HookKit.h                    # C API include-path shim
   HookKit/
     HookKit.h                  # new C API only — no Foundation pulled in
     HookKitBase.h
@@ -134,37 +127,15 @@ Sources/
   Resolvers/     # export/import/private-symbol/shared-cache/ObjC/Swift resolvers
   Engines/
     ObjC/ Rebind/ NativeInline/ Memory/ Swift/ Providers/
-  Compatibility/ # HKLegacyRuntime, HKLegacyRequestTranslator,
-                 # HKLegacyResultMapper, HKLegacyImage, HKSubstitutor
-  CompatibilityV1/ # only if the v1 module audit finds it's needed
-
 Schemas/         # hookkit-artifact, hookkit-provider-evidence,
                  # shadow-hook-manifest, shadow-route-report
 
 ProviderEvidence/ # libhooker/ ellekit/ substrate/ substitute/ dobby/ gum/
 
-Tests/            # Host/ Device/ Holdout/ LegacyABI/ Fuzz/ Fixtures/
+Tests/            # Host/ Device/ Holdout/ Fuzz/ Fixtures/
 Tools/            # abi/ shadow-manifest-extract/ route-feasibility/ provider-audit/
 docs/3.0/
 ```
 
-The former 2.x router/backend implementation was removed after the canonical
-facade moved entirely to the new runtime. The retained compatibility surface
-lives in `Sources/Compatibility/`; Git history preserves the retired source
-for forensic reference without leaving a second implementation in-tree.
-
-## Relationship to HookKit 2.x
-
-The 2.x audit informed the HK3 engine contracts, but HK3 now owns the only
-in-tree implementation. Its versioned ABI, lifecycle tests, provider
-evidence, and historical binary fixtures are the compatibility contract.
-
-## Compatibility policy
-
-Full policy: `LEGACY_ABI.md` and `V1_MODULE_COMPATIBILITY_AUDIT.md`.
-
-Summary: HookKit 2.1.1 through 2.5.0 fixture binaries must run against
-HookKit 3 unrecompiled. The v1.0.1 `HKSubstitutor` subset must run
-unrecompiled. The full v1.x module ABI (`HookKitCore`, `HookKitModule`,
-Modulous bundle loading) is preserved only if the reverse-dependency audit
-finds real surviving consumers — see the audit doc for current findings.
+HookKit 3 ships only this runtime and its `hk_*` public API. Pre-3.0 source
+and ABI commitments are retained in Git history, not in the framework.

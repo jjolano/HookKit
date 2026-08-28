@@ -668,7 +668,7 @@ kern_return_t litehook_rebind_symbol(const mach_header_u *targetHeader, void *re
 			// is a silent no-op. Do not register it — a zero-match global
 			// rebind must apply to NO image, past or future, so the caller
 			// can report a side-effect-free, retryable failure
-			// (HK_ERR_NOT_SUPPORTED). The caller reads the match tally below
+			// (a clean unavailable result). The caller reads the match tally below
 			// under this same lock, so this stays race-free. HookKit: upstream
 			// appended the record regardless of the scan result, leaking the
 			// rebind into every future image load. The capacity grown above

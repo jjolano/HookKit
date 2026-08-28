@@ -11,14 +11,9 @@
 //   - the result is the symbol's UNSLID n_value plus its n_sect,
 //   - applying the slide and any PAC signing is the caller's job (n_sect is
 //     returned precisely so the device side can look up section flags to
-//     decide whether the address is code, as HookKit 2.x already does).
-// That split is what makes the search host-testable at all, and it is the
-// reason this is a new file rather than a change to native/hk_symbols.c:
-// 2.x's hk_native_find_symbol does the same table walk but fused with
-// mmap/dlsym/PAC/slide and a single hardcoded name rule, so none of it can
-// run on this host and none of it implements the convention/visibility model
-// below. The 2.x path stays as-is during migration; the eventual device-side
-// HookKit.0 image reader will supply a view here instead of re-walking.
+//     decide whether the address is code).
+// That split makes the search host-testable. The device-side reader supplies
+// a view here instead of coupling table walking to mmap/dlsym/PAC/slide.
 //
 // Robustness is a requirement, not a nicety: a symbol table can be malformed
 // (a truncated string table, an unterminated final string, an out-of-range

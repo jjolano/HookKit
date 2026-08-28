@@ -26,7 +26,7 @@
 #ifndef hookkit_inline_preflight_h
 #define hookkit_inline_preflight_h
 
-#import <HookKit.h>
+#import <HookKit/HookKit.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,20 +37,20 @@
 #define HK_INLINE_PREFLIGHT_LITEHOOK_WINDOW 20
 
 // Validates `function`/`replacement` for an inline overwrite on any backend.
-// Returns HK_OK when the target may be handed to the engine's own relocator;
-// otherwise HK_ERR_NOT_SUPPORTED with *outErrno (may be NULL) set to the
+// Returns HK_STATUS_OK when the target may be handed to the engine's own
+// relocator; otherwise HK_STATUS_UNAVAILABLE with *outErrno (may be NULL) set to the
 // reason (EINVAL: misaligned target or self-hook; EFAULT: replacement or
 // target entry unmapped or non-executable).
-hookkit_status_t hk_inline_preflight_basic(void *function, void *replacement, int *outErrno);
+hk_status_t hk_inline_preflight_basic(void *function, void *replacement, int *outErrno);
 
 // Validates `function`/`replacement` for an inline overwrite of `window`
-// bytes: hk_inline_preflight_basic plus the fixed-window scans. Returns HK_OK
+// bytes: hk_inline_preflight_basic plus the fixed-window scans. Returns HK_STATUS_OK
 // when the prologue can be overwritten safely; otherwise
-// HK_ERR_NOT_SUPPORTED with *outErrno (may be NULL) set to the reason
+// HK_STATUS_UNAVAILABLE with *outErrno (may be NULL) set to the reason
 // (EINVAL: misaligned target or self-hook; EFAULT: replacement or target
 // unmapped or non-executable; EOPNOTSUPP: the function ends inside the window
 // or a literal load / ADR(ADRP) sits in it).
-hookkit_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno);
+hk_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno);
 
 // True when the target's entry instruction is an unconditional trap
 // (BRK/HLT/UDF on arm64; dyld's shared-cache private-API stubs such as

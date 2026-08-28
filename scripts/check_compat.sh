@@ -186,7 +186,7 @@ HOOKKIT=$(find "$tmp/root" -path '*/HookKit.framework/HookKit' -type f -print)
 }
 framework=$(dirname "$HOOKKIT")
 [ -f "$framework/Headers/HookKit.h" ] || {
-    echo "FAIL package is missing historical <HookKit.h>" >&2; exit 1;
+    echo "FAIL package is missing <HookKit.h>" >&2; exit 1;
 }
 [ -f "$framework/Headers/HookKit/HookKit.h" ] || {
     echo "FAIL package is missing new <HookKit/HookKit.h>" >&2; exit 1;

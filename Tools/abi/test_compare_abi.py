@@ -4,25 +4,25 @@
 from compare_abi import compare
 
 
-def test_legacy_surface_passes():
+def test_additive_surface_passes():
     old = {
         "install_name": "@rpath/HookKit.framework/HookKit",
-        "compatibility_version": "2.5.0",
+        "compatibility_version": "3.0.0",
         "architectures": ["arm64"],
         "exported_symbols": {"arm64": ["_old"]},
         "header_checksums": {"Headers/HookKit.h": "old"},
-        "objc": {"classes": [{"name": "HKSubstitutor", "instance_methods": [
+        "objc": {"classes": [{"name": "HKFixture", "instance_methods": [
             {"selector": "init", "type_encoding": {"arm64": "@16@0:8"}}
         ]}]},
         "enum_values": {"HK_OK": 0},
     }
     new = {
         "install_name": "@rpath/HookKit.framework/HookKit",
-        "compatibility_version": "3.0.0",
+        "compatibility_version": "3.1.0",
         "architectures": ["arm64", "arm64e"],
         "exported_symbols": {"arm64": ["_old", "_new"]},
         "header_checksums": {"Headers/HookKit.h": "new"},
-        "objc": {"classes": [{"name": "HKSubstitutor", "instance_methods": [
+        "objc": {"classes": [{"name": "HKFixture", "instance_methods": [
             {"selector": "init", "type_encoding": {"arm64": "@16@0:8"}}
         ]}]},
         "enum_values": {"HK_OK": 0, "HK_ERR": 1},
@@ -68,7 +68,7 @@ def test_struct_fields_behind_pointer_do_not_break_abi():
         "architectures": ["arm64"],
         "exported_symbols": {"arm64": []},
         "header_checksums": {},
-        "objc": {"classes": [{"name": "HKSubstitutor", "instance_methods": [
+        "objc": {"classes": [{"name": "HKFixture", "instance_methods": [
             {"selector": "closeImage:", "type_encoding": {
                 "arm64": "v24@0:8^{HKImage=}16"
             }}
@@ -79,7 +79,7 @@ def test_struct_fields_behind_pointer_do_not_break_abi():
         "architectures": ["arm64"],
         "exported_symbols": {"arm64": []},
         "header_checksums": {},
-        "objc": {"classes": [{"name": "HKSubstitutor", "instance_methods": [
+        "objc": {"classes": [{"name": "HKFixture", "instance_methods": [
             {"selector": "closeImage:", "type_encoding": {
                 "arm64": "v24@0:8^{HKImage=Ii^v}16"
             }}

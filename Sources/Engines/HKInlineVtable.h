@@ -60,10 +60,9 @@ typedef struct {
     // race: a sibling session reproduced a deterministic
     // EXC_BAD_ACCESS/KERN_PROTECTION_FAILURE 3/3 launches by inline-patching
     // syscall()/csops() in a live multi-threaded app, with the faulting PC in
-    // the half-written page. That was HookKit 2.x's litehook path (a 20-byte
-    // non-atomic memcpy), but the hazard is the mechanism's, not that
-    // implementation's, and this engine has the same shape whenever the
-    // replacement is out of a B's reach.
+    // the half-written page. The hazard is inherent to a non-atomic
+    // multi-instruction patch, and this engine has the same shape whenever
+    // the replacement is out of a B's reach.
     //
     // Setting this true says the caller knows the target is not concurrently
     // executing -- a cold function, or a process whose other threads are

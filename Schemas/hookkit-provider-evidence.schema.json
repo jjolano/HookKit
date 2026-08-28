@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hookkit.dev/schemas/hookkit-provider-evidence.schema.json",
   "title": "HookKit Provider Evidence",
-  "description": "One JSON evidence record per (provider version, architecture) pair, per spec section 14.2. Lives under ProviderEvidence/<family>/. Consumed by Tools/route-feasibility and the engine certification process (spec section 8.7) — an engine mode backed by a provider without a matching, certified evidence record may not participate in automatic routing.",
+  "description": "One JSON evidence record per (provider version, architecture) pair, per spec section 14.2. Lives under ProviderEvidence/<family>/. Consumed by the engine certification process (spec section 8.7) — an engine mode backed by a provider without a matching, certified evidence record may not participate in automatic routing.",
   "type": "object",
   "required": [
     "provider_family", "version", "sha256", "architecture", "os_lane",

@@ -5,7 +5,7 @@
 // request analysis, and enough for hk_plan_prepare/commit to drive one hook or
 // a native grouped wave through preparation, revalidation, mutation,
 // verification, continuation inspection, and certified compensation. The
-// legacy zero-header form remains valid for the in-tree fake engines.
+// unversioned zero-header form remains valid for the in-tree fake engines.
 //
 // Not public API: no engine outside this codebase registers against this
 // contract. The production engines (Milestone 6+) are a fixed, compiled-in
@@ -115,7 +115,7 @@ typedef struct {
 
     // The engine can consume several same-engine operations in one phase.
     // This is a capability declaration, not a promise that every call will
-    // batch: the vtable callback may still be absent for a legacy adapter.
+    // batch: the vtable callback may still be absent for an older adapter.
     bool native_grouping;
     bool supports_compensation;
 
@@ -267,8 +267,8 @@ typedef struct {
 #define HK_ENGINE_VTABLE_ABI_VERSION_1 1u
 
 typedef struct hk_engine_vtable {
-    uint32_t abi_version; // 0: legacy in-tree shape; otherwise a known version
-    uint32_t struct_size; // 0: legacy in-tree shape; otherwise sizeof this vtable
+    uint32_t abi_version; // 0: unversioned in-tree shape; otherwise a known version
+    uint32_t struct_size; // 0: unversioned in-tree shape; otherwise sizeof this vtable
 
     hk_engine_capabilities_t (*describe)(void);
 
@@ -438,7 +438,7 @@ typedef struct hk_engine_vtable {
         hk_verify_diag_t *out_diag);
 } hk_engine_vtable_t;
 
-// A zero struct_size is the legacy in-tree form. Explicitly versioned
+// A zero struct_size is the unversioned in-tree form. Explicitly versioned
 // vtables must contain the requested member before the core reads it.
 static inline bool hk_engine_vtable_has_field(const hk_engine_vtable_t *vtable,
                                               size_t offset,
@@ -566,10 +566,10 @@ bool hk_runtime_register_engine_with_context(
     const hk_engine_vtable_t *vtable,
     void *engine_ctx);
 
-// Strict per-runtime selection used by the HKSubstitutor compatibility
-// facade. Matching IDs are kept in list order; nonmatching function/memory
-// engines are removed. The ObjC runtime engine remains so message hooks stay
-// facade-native. Unknown IDs intentionally leave no function/memory route.
+// Strict per-runtime selection for the public backend-override constructor.
+// Matching IDs are kept in list order; nonmatching function/memory engines
+// are removed. The built-in ObjC engine remains eligible. Unknown IDs
+// intentionally leave no function/memory route.
 void hk_runtime_apply_backend_override(hk_runtime_t *runtime,
                                        const char *backend_ids);
 

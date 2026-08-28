@@ -92,7 +92,7 @@ def test_target_mapping_reasoned_not_fabricated():
 
 
 REUSED_VAR_FIXTURE = '''
-void shadowhook_mach(HKSubstitutor* hooks) {
+void shadowhook_mach(SHDWHookSession* hooks) {
     void* sym = [hooks findSymbolInImage:NULL symbolName:@"_bootstrap_check_in2"];
     if(sym) [hooks hookFunction:sym withReplacement:replaced_a outOldPtr:(void **) &original_a];
 
@@ -136,7 +136,7 @@ def test_reused_variable_resolves_to_nearest_preceding_assignment():
 
 
 LIBSYSTEM_RESOLVER_FIXTURE = '''
-void shadowhook_sandbox(HKSubstitutor* hooks) {
+void shadowhook_sandbox(SHDWHookSession* hooks) {
     void* sym_signal = shdw_resolve_libsystem("_signal");
     if(sym_signal) [hooks hookFunction:sym_signal withReplacement:replaced_signal outOldPtr:(void **) &original_signal];
     sym_signal = shdw_resolve_libsystem("_bsd_signal");
@@ -152,10 +152,10 @@ def test_libsystem_resolver_uses_nearest_assignment():
             for c in calls] == ["_signal", "_bsd_signal"]
 
 
-def test_hook_function_scan_accepts_category_specific_receiver():
+def test_hook_function_scan_accepts_session_receiver():
     clean = strip_comments_preserve_lines('''
-void shadowhook_syscall(HKSubstitutor* hooks) {
-    HKSubstitutor* rebindOnly = [HKSubstitutor substitutorWithCategory:HK_CAT_FUNCTION_REBIND];
+void shadowhook_syscall(SHDWHookSession* hooks) {
+    SHDWHookSession* rebindOnly = hooks;
     [rebindOnly hookFunction:syscall withReplacement:replaced_syscall outOldPtr:(void **) &original_syscall];
 }
 ''')

@@ -52,8 +52,8 @@ byte-identical to pristine upstream at that commit (verified against every
 upstream commit). Committed local patches:
 
 - `8c267fd` (2026-08-09) — `litehook_rebind_symbol` commits the global rebind
-  record only on first match; reports `HK_ERR_NOT_SUPPORTED` on zero match
-  (upstream appended the record unconditionally).
+  record only on first match and reports a clean unavailable result on zero
+  matches (upstream appended the record unconditionally).
 - side-effect-free address-slot preflight used by automatic backend routing.
 - `d172b0f` (2026-08-09) — hardening: protection restore, locked rebinds,
   32-bit strategy gates.

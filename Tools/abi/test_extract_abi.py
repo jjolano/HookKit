@@ -19,28 +19,28 @@ REAL_OTOOL_SAMPLE = """Load command 4
       cmdsize 96
          name @loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit (offset 24)
    time stamp 1 Wed Dec 31 19:00:01 1969
-      current version 2.5.0
-compatibility version 2.5.0
+      current version 3.0.0
+compatibility version 3.0.0
 Load command 5
           cmd LC_SEGMENT_64
 """
 
-OBJC_OTOOL_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKSubstitutor
+OBJC_OTOOL_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKFixture
     data 0x200
-        name 0x20 HKSubstitutor
-        baseMethods 0x30 __OBJC_$_INSTANCE_METHODS_HKSubstitutor
+        name 0x20 HKFixture
+        baseMethods 0x30 __OBJC_$_INSTANCE_METHODS_HKFixture
             name 0x40 (0x50)
             types 0x60 v16@0:8
-            imp 0x70 -[HKSubstitutor init]
-        baseProperties 0x80 __OBJC_$_PROP_LIST_HKSubstitutor
+            imp 0x70 -[HKFixture init]
+        baseProperties 0x80 __OBJC_$_PROP_LIST_HKFixture
             name 0x90 (0xa0)
             attributes 0xb0 T@,N,Vvalue
 Meta Class
-        baseMethods 0xc0 __OBJC_$_CLASS_METHODS_HKSubstitutor
+        baseMethods 0xc0 __OBJC_$_CLASS_METHODS_HKFixture
             name 0xd0 (0xe0)
             types 0xf0 @16@0:8
-            imp 0x100 +[HKSubstitutor shared]
-0000000000001100 0x100 _OBJC_CLASS_$_HKSubstitutor
+            imp 0x100 +[HKFixture shared]
+0000000000001100 0x100 _OBJC_CLASS_$_HKFixture
 """
 
 
@@ -54,16 +54,16 @@ def _parse(text):
 def test_id_dylib_regex_against_real_otool_output():
     name, current, compat = _parse(REAL_OTOOL_SAMPLE)
     assert name == "@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit"
-    assert current == "2.5.0"
-    assert compat == "2.5.0"
+    assert current == "3.0.0"
+    assert compat == "3.0.0"
 
 
 def test_id_dylib_regex_stops_at_next_load_command():
     # Must not greedily match past a second LC_ID_DYLIB-shaped block --
     # DYLIB_ID and DYLIB_RPATH commands can appear more than once.
-    doubled = REAL_OTOOL_SAMPLE + REAL_OTOOL_SAMPLE.replace("2.5.0", "9.9.9")
+    doubled = REAL_OTOOL_SAMPLE + REAL_OTOOL_SAMPLE.replace("3.0.0", "9.9.9")
     name, current, compat = _parse(doubled)
-    assert current == "2.5.0", f"regex matched too greedily: got {current!r}"
+    assert current == "3.0.0", f"regex matched too greedily: got {current!r}"
 
 
 def test_id_dylib_regex_returns_none_when_absent():
@@ -83,15 +83,15 @@ def test_sha256_file_matches_hashlib_directly():
 
 
 def test_objc_parser_reads_address_only_selectors_and_deduplicates_refs():
-    parsed = _parse_objc_arch(OBJC_OTOOL_SAMPLE, "arm64e", {"HKSubstitutor"})
-    substitutor = parsed["HKSubstitutor"]
-    assert substitutor["instance_methods"] == [
+    parsed = _parse_objc_arch(OBJC_OTOOL_SAMPLE, "arm64e", {"HKFixture"})
+    fixture = parsed["HKFixture"]
+    assert fixture["instance_methods"] == [
         {"selector": "init", "type_encoding": {"arm64e": "v16@0:8"}}
     ]
-    assert substitutor["class_methods"] == [
+    assert fixture["class_methods"] == [
         {"selector": "shared", "type_encoding": {"arm64e": "@16@0:8"}}
     ]
-    assert substitutor["properties"] == [{"name": "(0xa0)"}]
+    assert fixture["properties"] == [{"name": "(0xa0)"}]
 
 
 # A method whose imp line ALSO has no -[Class sel] annotation, matching what
@@ -99,10 +99,10 @@ def test_objc_parser_reads_address_only_selectors_and_deduplicates_refs():
 # decoding (see _resolve_chained_selectors) -- neither in-parser fallback
 # can resolve this one, so it must survive filtering unresolved, carrying
 # its slot vmaddr for the caller to attempt next.
-OBJC_OTOOL_UNRESOLVABLE_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKSubstitutor
+OBJC_OTOOL_UNRESOLVABLE_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKFixture
     data 0x200
-        name 0x20 HKSubstitutor
-        baseMethods 0x30 __OBJC_$_INSTANCE_METHODS_HKSubstitutor
+        name 0x20 HKFixture
+        baseMethods 0x30 __OBJC_$_INSTANCE_METHODS_HKFixture
             name 0x40 (0x244f8)
             types 0x60 v16@0:8
             imp 0x70 (0x9d9c)
@@ -110,8 +110,8 @@ OBJC_OTOOL_UNRESOLVABLE_SAMPLE = """0000000000001000 0x100 _OBJC_CLASS_$_HKSubst
 
 
 def test_objc_parser_keeps_unresolved_vmaddr_when_no_fallback_resolves_it():
-    parsed = _parse_objc_arch(OBJC_OTOOL_UNRESOLVABLE_SAMPLE, "arm64e", {"HKSubstitutor"})
-    methods = parsed["HKSubstitutor"]["instance_methods"]
+    parsed = _parse_objc_arch(OBJC_OTOOL_UNRESOLVABLE_SAMPLE, "arm64e", {"HKFixture"})
+    methods = parsed["HKFixture"]["instance_methods"]
     assert methods == [
         {"selector": None, "type_encoding": {"arm64e": "v16@0:8"},
          "_unresolved_vmaddr": 0x244f8}
@@ -197,19 +197,19 @@ def test_chained_fixups_end_to_end_resolves_a_synthetic_selref():
         with open(lipo, "w", encoding="utf-8") as stream:
             stream.write('#!/bin/sh\n[ ! -e "$5" ] || exit 1\ncp "$3" "$5"\n')
         os.chmod(lipo, 0o755)
-        parsed = {"HKSubstitutor": {"instance_methods": [{
+        parsed = {"HKFixture": {"instance_methods": [{
             "selector": None, "_unresolved_vmaddr": image_base
         }]}}
         _resolve_chained_selectors(parsed, lipo, binary, "arm64e")
-    assert parsed["HKSubstitutor"]["instance_methods"][0]["selector"] == "hello"
+    assert parsed["HKFixture"]["instance_methods"][0]["selector"] == "hello"
 
 
 def test_objc_metadata_fallback_can_fill_unresolved_slice():
-    merged = {"HKSubstitutor": {"instance_methods": [{
+    merged = {"HKFixture": {"instance_methods": [{
         "selector": "init", "type_encoding": {"arm64": "v16@0:8"}
     }]}}
     _complete_objc_arches(merged, ["arm64", "arm64e"])
-    assert merged["HKSubstitutor"]["instance_methods"][0]["type_encoding"] == {
+    assert merged["HKFixture"]["instance_methods"][0]["type_encoding"] == {
         "arm64": "v16@0:8", "arm64e": "v16@0:8"
     }
 

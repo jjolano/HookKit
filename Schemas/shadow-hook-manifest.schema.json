@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hookkit.dev/schemas/shadow-hook-manifest.schema.json",
   "title": "Shadow Hook Manifest",
-  "description": "Output of Tools/shadow-manifest-extract (spec section 18), written to artifacts/shadow-current-manifest.json. One entry per concrete Shadow hook target, extracted from SHDWInstallUnits, shadowhook_* functions, direct HKSubstitutor calls, Logos %hook/%function, and the manual overlay for anything that can't be statically enumerated. This is the input Tools/route-feasibility reads against HookKit's engine capability descriptors and ProviderEvidence — see shadow-route-report.schema.json for its output.",
+  "description": "Output of Tools/shadow-manifest-extract (spec section 18), written to artifacts/shadow-current-manifest.json. One entry per concrete Shadow hook target, extracted from SHDWInstallUnits, SHDWHookSession calls, Logos %hook/%function, and the manual overlay for anything that can't be statically enumerated.",
   "type": "object",
   "required": ["manifest_version", "generated_at", "targets"],
   "properties": {
@@ -117,9 +117,9 @@
           "type": "string",
           "description": "Free-text pointer to the current Shadow implementation, e.g. \"ShadowCore.dylib/hooks/filesystem/stat.x:42\"."
         },
-        "current_hookkit_2_5_route": {
+        "current_hookkit_route": {
           "type": "string",
-          "description": "Which HK_LIB_*/HK_CAT_* the target currently resolves through, if known."
+          "description": "Which HookKit engine ID the target currently resolves through, if known."
         },
 
         "verification_method": { "type": "string" },

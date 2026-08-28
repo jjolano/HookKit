@@ -565,9 +565,8 @@ static void test_runtime_address_code_classification(void) {
 }
 
 static void test_section_array_must_fit_in_cmdsize(void) {
-    // The check HookKit 2.x omits (it only runs on dyld-validated images): a
-    // segment claiming more sections than its own cmdsize can hold would walk
-    // off the end of the command.
+    // A segment claiming more sections than its own cmdsize can hold would
+    // walk off the end of the command.
     uint8_t *img = (uint8_t *)aligned_alloc(8, SEG_IMG_SIZE);  // heap: over-reads are ASan-visible
     assert(img != NULL);
     build_segment_image(img, 0x100000000ull);

@@ -18,7 +18,7 @@ extern "C" {
 // No cross-process meaning is claimed: the nonce is time+pid+ASLR entropy,
 // not cryptographic -- process-lifetime uniqueness is all the ABI promises,
 // so there's no reason to pull in arc4random and its own availability
-// questions across the old-ABI legacy lane's older deployment floor.
+// questions across the iOS 9 lane's older deployment floor.
 hk_id_t hk_id_generate(void);
 
 #ifdef __cplusplus

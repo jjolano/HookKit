@@ -71,7 +71,7 @@
 extern "C" {
 #endif
 
-// Trampoline layout, matching 2.x's so the two agree on what a page holds:
+// Trampoline layout:
 //   [0 .. THUNK)  inbound thunk -- an absolute jump to the replacement
 //   [THUNK .. )   body -- the relocated prologue followed by a jump back
 #define HK_RELOC_THUNK_BYTES HK_A64_MAX_BRANCH_BYTES
