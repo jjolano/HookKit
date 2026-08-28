@@ -115,6 +115,17 @@ Rootful, modern, and rootless binaries use
 `@rpath/HookKit.framework/HookKit`; Roothide uses its required
 `@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit` identity.
 
+## Migrate an existing tweak
+
+```sh
+make install-theos                    # installs framework + hookkit Logos generator
+```
+
+* Pure Logos (`%hook`/`%orig`): add 2 lines to `Tweak.mk` — `Tweak_EXTRA_FRAMEWORKS += HookKit` + `Tweak_LOGOSFLAGS += -c generator=hookkit` — no source change.
+* Raw `MSHookFunction`/`LHHookFunctions`/`substitute_hook_functions`/`LBHookMessage`/`MSHookMemory`/`LHPatchMemory`: also `#import <HookKit/HookKitCompat.h>` before the provider header (`substrate.h` etc).
+
+See `MIGRATION.md` (quick-start, shim gates, `migrate.py`, revert).
+
 ## Verification
 
 ```sh

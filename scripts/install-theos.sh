@@ -89,6 +89,28 @@ install_lane() {
     printf 'Installed %s: %s\n' "$lane" "$THEOS_LIB/$destination"
 }
 
+install_logos_generator() {
+    local src="$ROOT/Tools/logos-hookkit/lib/Logos/Generator/hookkit"
+    local dst="$THEOS/vendor/logos/bin/lib/Logos/Generator/hookkit"
+    if [ ! -d "$src" ]; then
+        echo "warning: hookkit generator source not found at $src (skipping)" >&2
+        return 0
+    fi
+    mkdir -p "$dst"
+    for f in Generator.pm Method.pm Function.pm Class.pm Group.pm Subclass.pm; do
+        if [ ! -f "$src/$f" ]; then
+            echo "error: missing generator file $src/$f" >&2
+            return 1
+        fi
+        cp -p "$src/$f" "$dst/$f"
+        cmp -s "$src/$f" "$dst/$f" || {
+            echo "error: failed to verify $dst/$f" >&2
+            return 1
+        }
+    done
+    printf 'Installed hookkit generator: %s\n' "$dst"
+}
+
 # Single source of truth for lane -> (deb, deb payload path, $THEOS/lib
 # destination). Shadow resolves the destination at link time, so it must not
 # drift from build.sh's packaging.
@@ -114,10 +136,12 @@ case "${1:-all}" in
         install_one_lane rootful-legacy
         install_one_lane rootless
         install_one_lane roothide
+        install_logos_generator
         ;;
     rootful-legacy|rootful-modern|rootless|roothide)
         ./build.sh "$1"
         install_one_lane "$1"
+        install_logos_generator
         ;;
     *)
         echo "usage: $0 [rootful-legacy|rootful-modern|rootless|roothide]" >&2
