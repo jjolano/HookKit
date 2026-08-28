@@ -114,6 +114,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Restore Frida Gum devkit
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/gum/frida-gum.h
+            vendor/gum/libfrida-gum.a
+            vendor/gum/.devkit-*
+          key: frida-gum-${{ runner.os }}-${{ hashFiles('vendor/gum/gum.lock') }}
+
       - name: Install Theos
         run: |
           brew install dpkg ldid

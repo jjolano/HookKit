@@ -128,6 +128,11 @@ HKGum_ARCHS = arm64 arm64e
 HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/scripts/export-HKGum.list
 HKGum_INSTALL_PATH = /usr/lib
 include $(THEOS_MAKE_PATH)/library.mk
+
+# The 76 MB Gum devkit is intentionally not tracked. Fetch its pinned,
+# checksummed release assets only for a lane that builds HKGum.
+before-HKGum-all::
+	$(ECHO_NOTHING)bash scripts/fetch-gum.sh$(ECHO_END)
 endif
 
 # Release export check: verifies every built binary exports exactly its

@@ -1,11 +1,11 @@
 # Vendored components
 
-Everything under `vendor/` is third-party code or headers checked into this
-repository. This file records, per component, the upstream source, license,
-local modifications, and the gaps where provenance is unknown. All upstream
-pins below were byte-verified against upstream by the provenance research
-lane (2026-08-11); discrepancies from the pre-verification state are noted
-where relevant.
+Everything under `vendor/` is third-party code, headers, or pinned build-input
+metadata. This file records, per component, the upstream source, license, local
+modifications, and the gaps where provenance is unknown. All upstream pins
+below were byte-verified against upstream by the provenance research lane
+(2026-08-11); discrepancies from the pre-verification state are noted where
+relevant.
 
 ## Inventory
 
@@ -14,7 +14,7 @@ where relevant.
 | `vendor/fishhook/` | fishhook.c, fishhook.h | https://github.com/facebook/fishhook | `aadc161ac3b80db07a9908851839a17ba63a9eb1` (2021-10-12); base byte-identical to that commit, recorded in commit 51e1c7b | BSD-3-Clause (header comment, 2013 Facebook) | yes — heavy fork, see below |
 | `vendor/litehook/` | litehook.c, litehook.h, dyld_cache_format.h, fixup-chains.h, LICENSE | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); vendored copies byte-identical to pristine upstream at that commit (verified against every upstream commit) | MIT (LICENSE, Lars Fröder 2022-2024); dyld_cache_format.h carries Apple APSL 2.0 header | yes — see below |
 | `vendor/dobby/` | dobby.h, libdobby.a, LICENSE | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); release "latest" ships dobby-iphoneos-all.tar.gz (URL in dobby.h comment); in-tree dobby.h = upstream include/dobby.h + one provenance comment line, otherwise byte-identical | Apache-2.0 (LICENSE vendored) | yes — binary rebuilt from source with one reorder patch (publication-before-activation), see below; dobby.h unchanged |
-| `vendor/gum/` | frida-gum.h, libfrida-gum.a, hkgum.c, COPYING | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; devkit tarballs from frida/frida release 17.17.0 (2026-08-05); frida-gum.h byte-identical to devkit; libfrida-gum.a = lipo of both official devkit slices (SHA-256 verified per slice) | wxWindows Library Licence 3.1 (LGPL-2.1 + wxWindows exception; COPYING vendored) | hkgum.c wrapper only — see below |
+| `vendor/gum/` | hkgum.c, COPYING, gum.lock (generated devkit ignored) | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; official arm64/arm64e devkits are pinned by URL and SHA-256 in gum.lock | wxWindows Library Licence 3.1 (LGPL-2.1 + wxWindows exception; COPYING vendored) | hkgum.c wrapper only — see below |
 | `vendor/libhooker/` | libhooker.h, libblackjack.h, LICENSE | https://github.com/coolstar/libhooker | master; only milestone is OSS 1.6.9 commit `4f85a68dae` (2023-04-17); in-tree headers predate that release (unchanged since HookKit's initial commit 75cdb22) | BSD-4-Clause (LICENSE vendored) | small header deltas — see below |
 | `vendor/substitute/` | substitute.h | https://github.com/comex/substitute | master; header frozen since `83442f9005` (2015-07-16); no v2 git tag exists upstream | public domain / CC0 1.0 (header comment; upstream has no LICENSE file — fetch of master/LICENSE 404s) | 2 small deltas — see below |
 | `vendor/substrate/` | substrate.h | no canonical upstream repo (saurik/substrate and saurik/CydiaSubstrate 404; newest mobilesubstrate deb is 0.9.6301, 2017) | 0.9.7101-era header (copyright 2008-2019 saurik), byte-identical to `https://github.com/opa334/Dopamine` BaseBin `_external/include/substrate.h` @ `e89072adc591881146c9513a616fa68b7323d6a7` — pin = that mirror commit | 3-clause BSD (header text) | none (header only) |
@@ -94,10 +94,12 @@ arm64e iOS 14.0 slice preserved from the 2026-08-11 build, theos clang
 - `a99f14d` (2026-08-10) — `hkgum_begin_transaction`/`hkgum_end_transaction`
   return `void`: frida-gum 17.17's transaction API reports no failure, so the
   previous `int` wrappers faked a failure channel. Only `hkgum.c` is local;
-  `frida-gum.h` and `libfrida-gum.a` are unmodified devkit output (verified).
+  `scripts/fetch-gum.sh` obtains `frida-gum.h` and `libfrida-gum.a` from the
+  unmodified, checksum-pinned devkits when a modern package is built.
 
-Rebuild: none — devkit static lib from the frida 17.17.0 release; `hkgum.c`
-is compiled by the Makefile (`HKGum` product).
+Rebuild: none — `scripts/fetch-gum.sh` downloads the two Frida 17.17.0
+devkits, verifies their SHA-256 values from `gum.lock`, and lipo-merges their
+static libraries; `hkgum.c` is compiled by the Makefile (`HKGum` product).
 
 ### libhooker (headers only)
 
@@ -182,10 +184,10 @@ License: 3-clause BSD per the header text. Rebuild: none — header only.
 
   Re-fetch from https://github.com/jmpews/Dobby/releases only to re-base the
   patch on a newer upstream commit.
-- gum: none — `libfrida-gum.a`/`frida-gum.h` from the frida 17.17.0 devkit;
-  re-fetch from
-  https://github.com/frida/frida/releases/download/17.17.0/frida-gum-devkit-17.17.0-ios-arm64.tar.xz
-  and `...-ios-arm64e.tar.xz` (lipo the two slices) to update.
+- gum: none — run `bash scripts/fetch-gum.sh`; it downloads the two
+  Frida 17.17.0 devkits recorded in `vendor/gum/gum.lock`, verifies them,
+  and lipo-merges the two static-library slices. Update the lock together
+  with a Frida version bump.
 
 ## Known provenance gaps (honest remainder)
 

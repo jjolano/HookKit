@@ -194,6 +194,11 @@ Normative semantics — the symbol-name convention, status codes, the `HK_ERR_NO
 
 Requires [Theos](https://theos.dev). Jailbreak-root path resolution is compile-time per scheme via theos's bundled libroot (auto-linked as `-lroot`): the rootful package keeps paths as-is, the rootless package resolves via libroot (`/var/jb`), and the roothide target uses libroothide's `jbroot()`. There is no runtime root-detection dependency.
 
+Modern lanes fetch the pinned Frida Gum devkits on their first build, validate
+their SHA-256 digests, and combine the arm64/arm64e archives locally. The
+generated header and archive are ignored by Git; `curl`, `tar` with xz support,
+and Xcode's `lipo` are required. The legacy lane does not fetch Gum.
+
 ```sh
 # macOS
 OLDABI_DEVELOPER_DIR=/Applications/Xcode-11.7.app/Contents/Developer ./build.sh rootful-legacy
