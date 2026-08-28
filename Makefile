@@ -50,7 +50,7 @@ HookKit_FILES = \
 HookKit_FRAMEWORKS = Foundation
 HookKit_INSTALL_PATH = /Library/Frameworks
 HookKit_PUBLIC_HEADERS = Headers/HookKit.h
-HookKit_CFLAGS = -fobjc-arc -I. -IHeaders -Ivendor -Ivendor/litehook
+HookKit_CFLAGS = -fobjc-arc -I. -IHeaders -Ivendor
 HookKit_LDFLAGS =
 # Jailbreak-root seam is compile-time per scheme:
 # rootful = identity, rootless = libroot (auto-linked -lroot by theos),

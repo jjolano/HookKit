@@ -8,13 +8,12 @@
 // inline backend, whatever its relocator.
 //
 // hk_inline_preflight — the basic checks PLUS the fixed-window scans (early
-// terminator over window-4, ADR/LDR-literal over window) that only the
-// fixed-window relocators need. Dobby and litehook overwrite a fixed window
-// of the target's prologue (Dobby 16 bytes, litehook 20 bytes), and both
-// refuse — before any write — a target whose window would be unsafe to
-// clobber. Their hook paths and public preflightFunction: routes call the
-// same validator with the same overwrite size, so preflight agrees exactly
-// with execution. The strong engines (ElleKit, Substrate, Substitute, Frida)
+// terminator over window-4, ADR/LDR-literal over window) that a fixed-window
+// relocator needs. Dobby overwrites a fixed 16-byte window of the target's
+// prologue and refuses — before any write — a target whose window would be
+// unsafe to clobber. Its hook path and public preflightFunction: route call
+// the same validator with the same overwrite size, so preflight agrees
+// exactly with execution. The strong engines (ElleKit, Substrate, Substitute, Frida)
 // bring their own production relocators, which decide instruction eligibility
 // themselves: they are NOT window-gated, so their dispatches run the basic
 // checks only.
@@ -30,11 +29,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
-// Overwrite windows, in bytes: Dobby's relocator takes 16 bytes, litehook's
-// trampoline emits 5 instructions (4x MOVK + BR) = 20 bytes.
-#define HK_INLINE_PREFLIGHT_DOBBY_WINDOW    16
-#define HK_INLINE_PREFLIGHT_LITEHOOK_WINDOW 20
 
 // Validates `function`/`replacement` for an inline overwrite on any backend.
 // Returns HK_STATUS_OK when the target may be handed to the engine's own

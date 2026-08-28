@@ -1,10 +1,10 @@
 // Shared ARM64 prologue preflight for the inline backends — see
 // HKInlinePreflight.h. Two layers: hk_inline_preflight_basic carries the
 // backend-INDEPENDENT checks that gate every inline-capable dispatch;
-// hk_inline_preflight adds the fixed-window scans that only the Dobby and
-// litehook relocators need. Both backends call the full validator from their
-// hook paths and their public preflightFunction: routes with the same
-// overwrite size, so preflight agrees exactly with execution.
+// hk_inline_preflight adds the fixed-window scans that only the Dobby
+// relocator needs. Dobby calls the full validator from its hook path and its
+// public preflightFunction: route with the same overwrite size, so preflight
+// agrees exactly with execution.
 #import "HKInlinePreflight.h"
 
 #include <errno.h>
@@ -115,8 +115,8 @@ bool hk_inline_target_is_trap_stub(void *function) {
 }
 
 hk_status_t hk_inline_preflight(void *function, void *replacement, size_t window, int *outErrno) {
-    // Thread gate, first because it is the cheapest check. The two backends
-    // behind this validator (Dobby, litehook) patch a fixed prologue window
+    // Thread gate, first because it is the cheapest check. The backend
+    // behind this validator (Dobby) patches a fixed prologue window
     // with no atomicity and no peer-thread quiescing, so a hook installed
     // once other threads are running can catch one mid-prologue. The main
     // thread is the practical proxy for "still at load time" — the same
@@ -150,10 +150,8 @@ hk_status_t hk_inline_preflight(void *function, void *replacement, size_t window
     // short functions (it reads its overwrite window without recognizing
     // early exits, smashing whatever follows) nor handles literal loads (it
     // UNIMPLEMENTED()s on some LDR-literal encodings and mishandles SIMD
-    // literal loads); litehook copies the window to the trampoline verbatim,
-    // smashing the pool or address the instruction points at. The checks
-    // below read only the window and never write, so a reject leaves the
-    // target untouched. The strong engines (ElleKit, Substrate, Substitute,
+    // literal loads). The checks below read only the window and never write,
+    // so a reject leaves the target untouched. The strong engines (ElleKit, Substrate, Substitute,
     // Frida) have their own production relocators and are deliberately NOT
     // gated here — they dispatch through hk_inline_preflight_basic only.
 
