@@ -4,6 +4,17 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 : "${THEOS:?THEOS must point to Theos}"
+
+# A parent `make` that has already included Theos exports computed state for
+# its own target. Each lane below must calculate that state afresh.
+if [ "${HOOKKIT_THEOS_INSTALL_CLEAN_ENV:-}" != 1 ]; then
+    clean_env=(env -i "PATH=$PATH" "HOME=${HOME:-/tmp}" "THEOS=$THEOS"
+               "TMPDIR=${TMPDIR:-/tmp}" HOOKKIT_THEOS_INSTALL_CLEAN_ENV=1)
+    for variable in MODERN_TOOLCHAIN OLDABI_TOOLCHAIN OLDABI_SDKS OLDABI_DEVELOPER_DIR DEVELOPER_DIR; do
+        [ -z "${!variable:-}" ] || clean_env+=("$variable=${!variable}")
+    done
+    exec "${clean_env[@]}" bash "$0" "$@"
+fi
 THEOS_LIB="$THEOS/lib"
 
 DPKG_DEB=$(command -v dpkg-deb) || {

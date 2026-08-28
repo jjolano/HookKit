@@ -284,7 +284,9 @@ case ${1:-all} in
     rootful-modern) build_rootful_modern ;;
     rootless) build_rootless ;;
     roothide) build_roothide ;;
-    all) build_rootless; build_rootful_modern; build_rootful_legacy; build_roothide ;;
+    # Theos's arm64e object cache is shared across toolchains. Build the old
+    # ABI lane first so modern objects cannot be reused by the Xcode 11 lane.
+    all) build_rootful_legacy; build_rootful_modern; build_rootless; build_roothide ;;
     rooted) echo "error: rooted is ambiguous; use rootful-legacy or rootful-modern" >&2; exit 2 ;;
     *) echo "usage: $0 [all|rootful-legacy|rootful-modern|rootless|roothide]" >&2; exit 2 ;;
 esac

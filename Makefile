@@ -144,7 +144,7 @@ check-compat:
 # Build and stage every package-verified HookKit framework in Theos.
 .PHONY: install-theos
 install-theos:
-	$(ECHO_NOTHING)MAKEFLAGS= MAKELEVEL= bash scripts/install-theos.sh$(ECHO_END)
+	$(ECHO_NOTHING)bash scripts/install-theos.sh$(ECHO_END)
 
 # HookKit 3.0 rebind engine (Milestone 6). The first engine: rewrites import
 # slots (both LC_DYSYMTAB and chained-fixup mechanisms) to redirect an
