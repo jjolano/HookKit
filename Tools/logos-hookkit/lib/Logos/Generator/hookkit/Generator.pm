@@ -3,10 +3,11 @@ use strict;
 use parent qw(Logos::Generator::Base::Generator);
 
 sub findPreamble {
-    my $self = shift;
-    my $aref = shift;
-    my @matches = grep(/\s*#\s*(import|include)\s*[<"]logos\/logos\.h[">]/, @$aref);
-    return $self->SUPER::findPreamble($aref) && @matches > 0;
+    # Always report "no preamble present" so Logos inserts ours.
+    # The base check looks for logos/logos.h, which is always present in a
+    # %hook file; if we reported present, our HookKit includes would never be
+    # emitted (the static hook helper would then fail to compile).
+    return 0;
 }
 
 sub preamble {
