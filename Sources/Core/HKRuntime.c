@@ -18,6 +18,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #if defined(__APPLE__)
 #include <Availability.h>
@@ -829,6 +830,25 @@ hk_status_t hk_runtime_create_with_backend_override(
     hk_runtime_t **out_runtime)
 {
     return hk_runtime_create_impl(config, backend_ids, out_runtime);
+}
+
+// Shared per-process singleton — pthread_once memo like dlopen_preflight cache.
+// Keep per-TU statics for compat; this is the preferred wrapper.
+static hk_runtime_t *g_hk_shared_runtime = NULL;
+static pthread_once_t g_hk_shared_once = PTHREAD_ONCE_INIT;
+
+static void hk_shared_runtime_init(void) {
+    hk_runtime_config_t c;
+    memset(&c, 0, sizeof(c));
+    c.struct_size = sizeof(c);
+    c.struct_version = HK_ABI_VERSION_3_0;
+    c.install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS;
+    (void)hk_runtime_create(&c, &g_hk_shared_runtime);
+}
+
+hk_runtime_t *hk_shared_runtime(void) {
+    (void)pthread_once(&g_hk_shared_once, hk_shared_runtime_init);
+    return g_hk_shared_runtime;
 }
 
 void hk_runtime_shutdown(hk_runtime_t *runtime) {

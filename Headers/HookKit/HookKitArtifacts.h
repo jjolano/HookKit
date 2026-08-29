@@ -172,6 +172,13 @@ typedef struct {
     bool fully_inspected;
 } hk_artifact_t;
 
+// Convenience: import-slot artifacts are the common rebind-engine output.
+// No new hk_artifact_t kind — just a predicate for ergonomics.
+// ponytail: one-line inline, no new struct field
+static inline bool hk_artifact_is_import_slot(const hk_artifact_t *a) {
+    return a && a->kind == HK_ARTIFACT_IMPORT_SLOT;
+}
+
 typedef struct hk_artifact_snapshot hk_artifact_snapshot_t;
 
 // Deep-copied, immutable snapshots (spec section 7.5) -- never shared

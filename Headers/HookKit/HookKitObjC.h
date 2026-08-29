@@ -98,6 +98,16 @@ static inline hk_objc_target_t hk_objc_class_method(Class cls, SEL sel) {
     return hk_objc_target_make(cls, sel, HK_OBJC_CLASS_METHOD);
 }
 
+// Opt-in to inherited-method hooking. Default is HK_OBJC_LOCAL_METHOD_ONLY
+// (safe — refuse rather than widen). Call this only when blast radius is
+// intended; see MIGRATION.md. Logos `%hook` uses it only when the method
+// carries __attribute__((annotate("hookkit:allow_inherited"))) AND
+// %config hook_inheritance=allow_inherited is set.
+// ponytail: one-line setter, no new struct field, no ABI change
+static inline void hk_objc_target_allow_inherited(hk_objc_target_t *t) {
+    if (t) t->inheritance_policy = HK_OBJC_ALLOW_INHERITED_OVERRIDE;
+}
+
 // Fills a hook spec's ObjC target in one step, since a caller almost always
 // wants the spec rather than a bare target. Sets target_kind for the caller --
 // a spec whose target_kind disagrees with the union member that was filled is

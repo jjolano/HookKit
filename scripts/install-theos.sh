@@ -109,6 +109,20 @@ install_logos_generator() {
         }
     done
     printf 'Installed hookkit generator: %s\n' "$dst"
+
+    # The logos.pl patch (hookkit:allow_inherited attribute + hook_inheritance
+    # config) lives in the repo so consumers get it too. Installed with the
+    # generator, verified like the .pm files.
+    local logos_src="$ROOT/Tools/logos-hookkit/logos.pl"
+    local logos_dst="$THEOS/vendor/logos/bin/logos.pl"
+    if [ -f "$logos_src" ]; then
+        cp -p "$logos_src" "$logos_dst"
+        cmp -s "$logos_src" "$logos_dst" || {
+            echo "error: failed to verify $logos_dst" >&2
+            return 1
+        }
+        printf 'Installed hookkit logos.pl: %s\n' "$logos_dst"
+    fi
 }
 
 # Single source of truth for lane -> (deb, deb payload path, $THEOS/lib

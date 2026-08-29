@@ -94,6 +94,13 @@ hk_status_t hk_runtime_create_with_backend_override(
     const char *backend_ids,
     hk_runtime_t **out_runtime);
 
+// Process-wide shared singleton — lazy, HK_INSTALL_CONTEXT_EARLY_PROCESS,
+// pthread_once memo like HKRuntime.c dlopen_preflight cache. Cuts per-hook
+// calloc+HKIDs.c ID cost. Keep per-TU statics for compat; this is the
+// preferred path for new code and for the hookkit Logos generator.
+// ponytail: one pthread_once + one calloc per process, not per-TU
+hk_runtime_t *hk_shared_runtime(void);
+
 // Does not generically unhook active targets -- installed hooks and
 // original slots that live replacements still use outlive this call.
 // Releasing is a wrapper-lifetime operation, not an uninstall.

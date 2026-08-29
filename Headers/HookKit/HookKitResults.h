@@ -240,6 +240,16 @@ typedef struct {
     size_t artifact_count;
 } hk_hook_result_t;
 
+// Clean-refusal predicate for retry correctness. Only retry another route
+// when this returns true — i.e. no mutation occurred and the failure is
+// NO_ROUTE or FAILED_SAFE. PARTIAL/UNKNOWN are terminal. Matches
+// README.md:Backend routing and ARCHITECTURE.md invariant #4.
+// ponytail: static inline, no ABI addition; doc retry pattern inline
+static inline bool hk_hook_result_refused_cleanly(const hk_hook_result_t *r) {
+    return r && r->mutation == HK_MUTATION_NONE &&
+           (r->outcome == HK_OUTCOME_NO_ROUTE || r->outcome == HK_OUTCOME_FAILED_SAFE);
+}
+
 #ifdef __cplusplus
 }
 #endif

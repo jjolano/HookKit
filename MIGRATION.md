@@ -114,6 +114,10 @@ Device: `tests/device_lifecycle_smoke.c:1` / `tests/device_objc_smoke.m:1` patte
 ## 5. FAQ
 
 * **Routing?** `hk_runtime_create()` auto-routes; `hk_runtime_create_with_backend_override()` pins IDs (`README.md:Backend routing`). Compat shim uses auto-routing.
+* **Retrying another route?** Only when `hk_hook_result_refused_cleanly(&r)` — i.e. `mutation==HK_MUTATION_NONE && (outcome==HK_OUTCOME_NO_ROUTE||outcome==HK_OUTCOME_FAILED_SAFE)`. Never after `PARTIAL`/`UNKNOWN` (`README.md:Backend routing`).
+* **Shared runtime?** `hk_shared_runtime()` is the process singleton (`HK_INSTALL_CONTEXT_EARLY_PROCESS`, `pthread_once` memo). Prefer it over per-TU statics; cuts per-hook `calloc+HKIDs` cost.
+* **Import-slot artifacts?** `hk_artifact_is_import_slot(&a)` — iterate `hk_report_copy_artifacts(report,&snap); for(size_t i=0;i<hk_artifact_snapshot_count(snap);i++){hk_artifact_t a; hk_artifact_snapshot_copy_at(snap,i,&a); if(hk_artifact_is_import_slot(&a))/* import slot */; } hk_artifact_snapshot_release(snap);` No new `hk_artifact_t` kind.
 * **Calling original?** `%orig` unchanged. Raw: `MSHookFunction` orig pointer still filled via `hk_original_slot_load`.
 * **Memory `expected_bytes`?** Compat shim reads current bytes at `dst` as expected, revalidates at `hk_plan_commit`. Commit fails safe (`HK_OUTCOME_FAILED_SAFE`) if mismatch — not a blind write.
 * **Back to Logos?** Delete the 2 `Makefile` lines (+ Compat import). Theos Logos again emits `CydiaSubstrate` link, source unchanged.
+* **Inheritance?** Default `HK_OBJC_LOCAL_METHOD_ONLY` (safe). Opt-in per-method `__attribute__((annotate("hookkit:allow_inherited")))` gated by `%config hook_inheritance=allow_inherited` (i.e. both required). Widening blast radius: an inherited hook may attach to a superclass impl and affect all subclasses — use only when you intend that.
