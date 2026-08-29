@@ -1,10 +1,12 @@
 // Rebind engine <-> runtime adapter. See HKRebindVtable.h.
 //
-// No file-scoped state: the image and writer come from the registered engine
-// context, and the prepared plan is handed back by the core.
+// The image and writer come from the registered engine context, and the
+// prepared plan is handed back by the core. A small cache below reuses
+// catalog-wide discovery work between hooks in the same runtime context.
 
 #include "HKRebindVtable.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,6 +35,169 @@ static rebind_bundle_t *rebind_bundle_create(size_t capacity) {
         bundle->originals_agree = true;
     }
     return bundle;
+}
+
+static rebind_bundle_t *rebind_bundle_clone(const rebind_bundle_t *source) {
+    if (!source || source->count >
+                    (SIZE_MAX - sizeof(*source)) /
+                        sizeof(source->entries[0])) {
+        return NULL;
+    }
+    size_t size = sizeof(*source) +
+                  source->count * sizeof(source->entries[0]);
+    rebind_bundle_t *copy = malloc(size);
+    if (copy) {
+        memcpy(copy, source, size);
+    }
+    return copy;
+}
+
+// A catalog-wide bundle is immutable after preparation. Keep a small,
+// process-wide cache because the same runtime context can serve many plans;
+// the catalog generation and live-slot checks below keep entries bounded and
+// reject stale captured originals.
+#define HK_REBIND_BUNDLE_CACHE_SIZE 4
+typedef struct {
+    bool valid;
+    const hk_rebind_engine_ctx_t *context;
+    const hk_image_catalog_t *catalog;
+    uint64_t generation;
+    hk_symbol_name_convention_t convention;
+    hk_rebind_write_fn write;
+    void *write_ctx;
+    char *symbol;
+    rebind_bundle_t *bundle;
+} rebind_bundle_cache_entry_t;
+
+static pthread_mutex_t g_rebind_bundle_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static rebind_bundle_cache_entry_t
+    g_rebind_bundle_cache[HK_REBIND_BUNDLE_CACHE_SIZE] = {0};
+static uint32_t g_rebind_bundle_cache_next = 0;
+
+static bool rebind_bundle_cache_supported(
+    const hk_rebind_engine_ctx_t *context,
+    const hk_hook_spec_t *spec) {
+    return context && !context->image_base && context->catalog && spec &&
+           spec->target_kind == HK_TARGET_FUNCTION_SYMBOL &&
+           spec->target.symbol.name &&
+           spec->target.symbol.caller_image_scope.kind == HK_IMAGE_ANY_LOADED;
+}
+
+static bool rebind_bundle_cache_key_matches(
+    const rebind_bundle_cache_entry_t *entry,
+    const hk_rebind_engine_ctx_t *context,
+    const hk_hook_spec_t *spec,
+    uint64_t generation) {
+    return entry->valid && entry->context == context &&
+           entry->catalog == context->catalog &&
+           entry->generation == generation &&
+           entry->convention == spec->target.symbol.name_convention &&
+           entry->write == context->write &&
+           entry->write_ctx == context->write_ctx && entry->symbol &&
+           strcmp(entry->symbol, spec->target.symbol.name) == 0;
+}
+
+static void rebind_bundle_cache_clear_entry_locked(
+    rebind_bundle_cache_entry_t *entry) {
+    free(entry->symbol);
+    free(entry->bundle);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static bool rebind_bundle_cache_matches_live(
+    const rebind_bundle_t *bundle) {
+    for (size_t i = 0; i < bundle->count; i++) {
+        const hk_rebind_plan_t *plan = &bundle->entries[i].plan;
+        for (uint32_t site = 0; site < plan->count; site++) {
+            if (hk_rebind_read_slot(plan->sites[site].address) !=
+                plan->sites[site].original) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static rebind_bundle_t *rebind_bundle_cache_copy(
+    const hk_rebind_engine_ctx_t *context,
+    const hk_hook_spec_t *spec,
+    uint64_t generation) {
+    rebind_bundle_t *copy = NULL;
+    pthread_mutex_lock(&g_rebind_bundle_cache_lock);
+    for (size_t i = 0; i < HK_REBIND_BUNDLE_CACHE_SIZE; i++) {
+        rebind_bundle_cache_entry_t *entry = &g_rebind_bundle_cache[i];
+        if (!rebind_bundle_cache_key_matches(entry, context, spec,
+                                             generation)) {
+            continue;
+        }
+        if (!rebind_bundle_cache_matches_live(entry->bundle)) {
+            rebind_bundle_cache_clear_entry_locked(entry);
+            break;
+        }
+        copy = rebind_bundle_clone(entry->bundle);
+        break;
+    }
+    pthread_mutex_unlock(&g_rebind_bundle_cache_lock);
+    return copy;
+}
+
+static void rebind_bundle_cache_clear_context(
+    const hk_rebind_engine_ctx_t *context) {
+    pthread_mutex_lock(&g_rebind_bundle_cache_lock);
+    for (size_t i = 0; i < HK_REBIND_BUNDLE_CACHE_SIZE; i++) {
+        if (g_rebind_bundle_cache[i].valid &&
+            g_rebind_bundle_cache[i].context == context) {
+            rebind_bundle_cache_clear_entry_locked(&g_rebind_bundle_cache[i]);
+        }
+    }
+    pthread_mutex_unlock(&g_rebind_bundle_cache_lock);
+}
+
+static void rebind_bundle_cache_store(
+    const hk_rebind_engine_ctx_t *context,
+    const hk_hook_spec_t *spec,
+    uint64_t generation,
+    const rebind_bundle_t *bundle) {
+    rebind_bundle_t *cached_bundle = rebind_bundle_clone(bundle);
+    size_t symbol_size = strlen(spec->target.symbol.name) + 1;
+    char *cached_symbol = malloc(symbol_size);
+    if (!cached_bundle || !cached_symbol) {
+        free(cached_bundle);
+        free(cached_symbol);
+        return;
+    }
+    memcpy(cached_symbol, spec->target.symbol.name, symbol_size);
+
+    pthread_mutex_lock(&g_rebind_bundle_cache_lock);
+    int victim = -1;
+    for (size_t i = 0; i < HK_REBIND_BUNDLE_CACHE_SIZE; i++) {
+        if (rebind_bundle_cache_key_matches(&g_rebind_bundle_cache[i],
+                                            context, spec, generation)) {
+            victim = (int)i;
+            break;
+        }
+        if (!g_rebind_bundle_cache[i].valid && victim == -1) {
+            victim = (int)i;
+        }
+    }
+    if (victim == -1) {
+        victim = (int)(g_rebind_bundle_cache_next %
+                       HK_REBIND_BUNDLE_CACHE_SIZE);
+        g_rebind_bundle_cache_next = (uint32_t)(victim + 1) %
+                                     HK_REBIND_BUNDLE_CACHE_SIZE;
+    }
+    rebind_bundle_cache_entry_t *entry = &g_rebind_bundle_cache[victim];
+    rebind_bundle_cache_clear_entry_locked(entry);
+    entry->context = context;
+    entry->catalog = context->catalog;
+    entry->generation = generation;
+    entry->convention = spec->target.symbol.name_convention;
+    entry->write = context->write;
+    entry->write_ctx = context->write_ctx;
+    entry->symbol = cached_symbol;
+    entry->bundle = cached_bundle;
+    entry->valid = true;
+    pthread_mutex_unlock(&g_rebind_bundle_cache_lock);
 }
 
 // prepare must not be handed a writer -- it mutates nothing, and the type
@@ -216,6 +381,30 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
     // image. Prepare a plan for every matching importer so an ANY_LOADED or
     // explicit-set scope is honored instead of silently rebinding one image.
     if (!ctx->image_base && ctx->catalog) {
+        bool use_bundle_cache = rebind_bundle_cache_supported(ctx, spec);
+        uint64_t bundle_generation = use_bundle_cache
+            ? hk_image_catalog_generation(ctx->catalog) : 0;
+        if (use_bundle_cache) {
+            rebind_bundle_t *cached = rebind_bundle_cache_copy(
+                ctx, spec, bundle_generation);
+            if (cached) {
+                hk_prepare_result_t result;
+                if (cached->count == 0) {
+                    result = rebind_classify(HK_REBIND_NOT_FOUND, out_diag);
+                    free(cached);
+                    return result;
+                }
+                if (spec->original_requirement != HK_ORIGINAL_NONE &&
+                    (!cached->originals_agree || cached->original == 0)) {
+                    out_diag->error_message = "rebind sites have no single original";
+                    free(cached);
+                    return HK_PREPARE_FAILED;
+                }
+                *out_prepared = cached;
+                return HK_PREPARE_OK;
+            }
+        }
+
         rebind_bundle_t *bundle = rebind_bundle_create(
             hk_image_catalog_count(ctx->catalog));
         if (!bundle) {
@@ -235,6 +424,10 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
             hk_prepare_result_t result = rebind_classify(collect.error, out_diag);
             free(bundle);
             return result;
+        }
+        if (use_bundle_cache && bundle_generation ==
+            hk_image_catalog_generation(ctx->catalog)) {
+            rebind_bundle_cache_store(ctx, spec, bundle_generation, bundle);
         }
         if (bundle->count == 0) {
             hk_prepare_result_t result = rebind_classify(HK_REBIND_NOT_FOUND,
@@ -307,6 +500,10 @@ static hk_mutation_state_t rebind_commit_one_ctx(void *engine_ctx,
         return HK_MUTATION_NONE;
     }
     if (!ctx->image_base && ctx->catalog) {
+        // Later plans must capture the current slot values. Already-prepared
+        // sibling hooks own independent copies, so clearing this template
+        // cannot affect the commit in progress.
+        rebind_bundle_cache_clear_context(ctx);
         rebind_bundle_t *bundle = prepared;
         uint32_t total_written = 0;
         for (size_t i = 0; i < bundle->count; i++) {

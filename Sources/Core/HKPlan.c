@@ -1920,18 +1920,59 @@ static bool hk_build_commit_order(const hk_plan_t *plan,
     if (plan->hook_count == 0) return true;
 
     size_t *order = (size_t *)malloc(plan->hook_count * sizeof(*order));
-    bool *processed = (bool *)calloc(plan->hook_count, sizeof(*processed));
-    if (!order || !processed) {
+    if (!order) {
         free(order);
-        free(processed);
         return false;
     }
 
     size_t prepared_count = 0;
+    bool simple_order = true;
+    bool have_order_key = false;
+    uint32_t simple_domain_order = 0;
+    uint32_t simple_commit_order = 0;
     for (size_t i = 0; i < plan->hook_count; i++) {
-        if (plan->hooks[i]->result.outcome == HK_OUTCOME_PREPARED) {
+        struct hk_hook *hook = plan->hooks[i];
+        if (hook->result.outcome == HK_OUTCOME_PREPARED) {
             prepared_count++;
+            if (hook->spec.commit_after_count != 0) {
+                simple_order = false;
+            }
+            uint32_t domain_order = hk_hook_domain_order(hook);
+            if (!have_order_key) {
+                simple_domain_order = domain_order;
+                simple_commit_order = hook->spec.commit_order;
+                have_order_key = true;
+            } else if (domain_order != simple_domain_order ||
+                       hook->spec.commit_order != simple_commit_order) {
+                simple_order = false;
+            }
         } else {
+            // Non-prepared hooks are settled and never enter commit order.
+        }
+    }
+
+    // The common case has no dependency edges and one ordering key. Add order
+    // is already the required stable order, so avoid the general O(n^2)
+    // topological selection below.
+    if (simple_order) {
+        size_t output = 0;
+        for (size_t i = 0; i < plan->hook_count; i++) {
+            if (plan->hooks[i]->result.outcome == HK_OUTCOME_PREPARED) {
+                order[output++] = i;
+            }
+        }
+        *out_order = order;
+        *out_count = prepared_count;
+        return true;
+    }
+
+    bool *processed = (bool *)calloc(plan->hook_count, sizeof(*processed));
+    if (!processed) {
+        free(order);
+        return false;
+    }
+    for (size_t i = 0; i < plan->hook_count; i++) {
+        if (plan->hooks[i]->result.outcome != HK_OUTCOME_PREPARED) {
             // A dependency that never prepared is settled; its dependent is
             // refused before dispatch rather than silently installed.
             processed[i] = true;

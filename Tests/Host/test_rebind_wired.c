@@ -397,6 +397,67 @@ static void test_catalog_context_rebinds_every_matching_image(void) {
     printf("  catalog-context-rebinds-every-matching-image: PASS\n");
 }
 
+static void test_catalog_bundle_cache_revalidates_changed_slots(void) {
+    uint8_t *img = aligned_alloc(64, IMG_SIZE);
+    assert(img);
+    build_image(img);
+
+    hk_image_catalog_t *catalog = hk_image_catalog_create();
+    assert(catalog);
+    hk_image_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.header = img;
+    entry.slide = (uintptr_t)img - (uintptr_t)V_BASE;
+    assert(hk_image_catalog_add_entry(catalog, &entry));
+
+    hk_rebind_engine_ctx_t ectx = engine_ctx_for_catalog(catalog);
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *cached_plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
+    assert(hk_plan_create(rt, NULL, &cached_plan) == HK_STATUS_OK);
+
+    // The second hook reuses the first hook's catalog-wide prepared bundle.
+    hk_hook_spec_t first_spec = symbol_spec("hook.cache.first", "malloc",
+                                            (void *)(uintptr_t)REPLACEMENT);
+    hk_hook_spec_t second_spec = first_spec;
+    second_spec.stable_hook_id = "hook.cache.second";
+    hk_hook_t *first_hook = NULL;
+    hk_hook_t *second_hook = NULL;
+    assert(hk_plan_add_hook(cached_plan, &first_spec, &first_hook) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(cached_plan, &second_spec, &second_hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(cached_plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(cached_plan, NULL) == HK_STATUS_OK);
+    assert(first_hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(second_hook->result.outcome == HK_OUTCOME_PREPARED);
+    hk_plan_release(cached_plan);
+
+    // A later plan must not use the captured originals after another writer
+    // changed the live slots. The stale cache entry should be discarded and
+    // preparation should recapture these values.
+    put_u64(img, GOT_OFF, ORIGINAL + 1);
+    put_u64(img, GOT_OFF + 8, ORIGINAL + 1);
+    hk_plan_t *fresh_plan = NULL;
+    hk_hook_t *fresh_hook = NULL;
+    assert(hk_plan_create(rt, NULL, &fresh_plan) == HK_STATUS_OK);
+    hk_hook_spec_t fresh_spec = symbol_spec("hook.cache.refresh", "malloc",
+                                            (void *)(uintptr_t)REPLACEMENT);
+    assert(hk_plan_add_hook(fresh_plan, &fresh_spec, &fresh_hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(fresh_plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(fresh_plan, NULL) == HK_STATUS_OK);
+    assert(fresh_hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(hk_plan_commit(fresh_plan, NULL) == HK_STATUS_OK);
+    assert(fresh_hook->result.outcome == HK_OUTCOME_ACTIVE);
+    assert(slot(img, GOT_OFF) == REPLACEMENT);
+    assert(slot(img, GOT_OFF + 8) == REPLACEMENT);
+
+    hk_plan_release(fresh_plan);
+    hk_runtime_release(rt);
+    hk_image_catalog_destroy(catalog);
+    free(img);
+    printf("  catalog-bundle-cache-revalidates-changed-slots: PASS\n");
+}
+
 static void test_required_original_rejects_ambiguous_catalog(void) {
     uint8_t *first = aligned_alloc(64, IMG_SIZE);
     uint8_t *second = aligned_alloc(64, IMG_SIZE);
@@ -451,6 +512,7 @@ int main(void) {
     RUN_TEST(test_caller_image_scope_is_enforced);
     RUN_TEST(test_rebind_refusals_are_distinguishable);
     RUN_TEST(test_catalog_context_rebinds_every_matching_image);
+    RUN_TEST(test_catalog_bundle_cache_revalidates_changed_slots);
     RUN_TEST(test_required_original_rejects_ambiguous_catalog);
     #undef RUN_TEST
     hk_ownership_reset_for_testing();
