@@ -712,3 +712,34 @@ device-provider-lifecycle-smoke:
 .PHONY: device-provider-alias-smoke
 device-provider-alias-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/vendor/libhooker -o $(THEOS_OBJ_DIR)/device_provider_alias tests/device_provider_alias.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider_alias$(ECHO_END)
+
+# ---- Bench (host) and device-bench (on device) ----
+# ponytail: plain clang -O2 -lm, reuse HK_PLATFORM_ENGINE_SOURCES, no extra deps.
+BENCH_CFLAGS = -Wall -Wextra -Werror -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -I. -IHeaders -ITools/bench
+BENCH_LDFLAGS = -lm -lpthread
+
+.PHONY: bench bench-plan bench-resolvers bench-reloc bench-provider device-bench bench-instruments check-bench-regression
+
+bench: bench-plan bench-resolvers bench-reloc bench-provider
+
+bench-plan:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_plan Tools/bench/bench_plan.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_plan $(BENCH_ARGS)$(ECHO_END)
+
+bench-resolvers:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_resolvers Tools/bench/bench_resolvers.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_resolvers $(BENCH_ARGS)$(ECHO_END)
+
+bench-reloc:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_reloc Tools/bench/bench_reloc.c native/hk_arm64.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_reloc $(BENCH_ARGS)$(ECHO_END)
+
+bench-provider:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_provider Tools/bench/bench_provider.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_provider $(BENCH_ARGS)$(ECHO_END)
+
+# Device bench: real dyld catalog + provider enumerate + large-scale plan. Signposts for Instruments.
+device-bench: check-device-canonical-toolchain
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O2 -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -framework Foundation -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_bench tests/device_bench.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_bench$(ECHO_END)
+
+bench-instruments: device-bench
+	$(ECHO_NOTHING)bash $(CURDIR)/scripts/run_instruments.sh $(INSTRUMENTS_DEVICE) $(BENCH_ARGS)$(ECHO_END)
+
+check-bench-regression:
+	$(ECHO_NOTHING)python3 Tools/bench/check_regression.py artifacts/bench_host_baseline.json artifacts/bench_device_baseline.json$(ECHO_END)
