@@ -947,12 +947,7 @@ static hk_status_t hk_plan_add_hook_impl(
 // based analysis side-effect tests in spec section 21.2, not written),
 // but every fake engine this codebase defines honors it by construction.
 static unsigned hk_bit_count64(uint64_t value) {
-    unsigned count = 0;
-    while (value != 0) {
-        count += (unsigned)(value & 1u);
-        value >>= 1;
-    }
-    return count;
+    return __builtin_popcountll(value);
 }
 
 // A static reachability bit is only an honest per-operation result when the
