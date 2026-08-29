@@ -14,8 +14,8 @@ static hk_engine_capabilities_t objc_describe(void) {
     hk_engine_capabilities_t caps;
     memset(&caps, 0, sizeof(caps));
     caps.engine_id = "objc";
-    caps.backend_group = "native";
-    caps.display_name = "native";
+    caps.backend_group = "HookKit";
+    caps.display_name = "HookKit";
     caps.target_kinds = HK_TARGET_KIND_BIT(HK_TARGET_OBJC_METHOD);
     caps.architectures = HK_ENGINE_ARCHITECTURE_ARMV7 |
                          HK_ENGINE_ARCHITECTURE_ARMV7S |

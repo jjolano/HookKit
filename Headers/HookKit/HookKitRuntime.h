@@ -57,7 +57,7 @@ typedef void (*hk_diagnostic_callback_fn)(
 
 // Called once for each selectable backend group discoverable on a runtime.
 // Engines that share a group (for example every built-in function/memory
-// engine, which reports "native") are collapsed to a single call. `backend_id`
+// engine, which reports "HookKit") are collapsed to a single call. `backend_id`
 // is the group token, suitable as-is for
 // hk_runtime_create_with_backend_override(); `display_name` is its
 // human-readable label (falls back to the token). Both strings are borrowed

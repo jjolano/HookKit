@@ -64,7 +64,7 @@ typedef struct {
     // The selectable backend this engine belongs to, as a machine token
     // suitable for hk_runtime_create_with_backend_override(). Several engines
     // may share one group (all built-in function/memory engines report
-    // "native"); the enumerator collapses a group to a single entry. NULL
+    // "HookKit"); the enumerator collapses a group to a single entry. NULL
     // means "declares nothing" and falls back to engine_id -- the same safe
     // default as the other optional fields, so a pre-existing engine still
     // enumerates as its own group.

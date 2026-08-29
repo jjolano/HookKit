@@ -375,11 +375,42 @@ static bool hk_platform_substitute_discover(void *ctx) {
     if (loaded) {
         return true;
     }
-    if (dlsym(RTLD_DEFAULT, "MSHookFunction") != NULL ||
-        dlsym(RTLD_DEFAULT, "SubHookFunction") != NULL) {
+    if (dlsym(RTLD_DEFAULT, "substitute_hook_functions") != NULL) {
         return true;
     }
-    // The preflight pair is memoized (see hk_platform_gum_discover): the
+    // Generic MSHookFunction/SubHookFunction can be provided by other
+    // substrates (e.g. ElleKit's libhooker shim). Only treat them as
+    // Substitute when they originate from a substitute/CydiaSubstrate image,
+    // otherwise a device with only ElleKit would incorrectly advertise
+    // Substitute as available.
+    void *ms = dlsym(RTLD_DEFAULT, "MSHookFunction");
+    if (ms) {
+        Dl_info info;
+        if (dladdr(ms, &info) && info.dli_fname) {
+            bool is_substrate = strstr(info.dli_fname, "substitute") != NULL ||
+                                strstr(info.dli_fname, "CydiaSubstrate") != NULL;
+            bool is_ellekit = strstr(info.dli_fname, "ellekit") != NULL ||
+                              strstr(info.dli_fname, "hooker") != NULL ||
+                              strstr(info.dli_fname, "libhooker") != NULL;
+            if (is_substrate && !is_ellekit) {
+                return true;
+            }
+        }
+    }
+    void *sub = dlsym(RTLD_DEFAULT, "SubHookFunction");
+    if (sub) {
+        Dl_info info;
+        if (dladdr(sub, &info) && info.dli_fname) {
+            bool is_substrate = strstr(info.dli_fname, "substitute") != NULL ||
+                                strstr(info.dli_fname, "CydiaSubstrate") != NULL;
+            bool is_ellekit = strstr(info.dli_fname, "ellekit") != NULL ||
+                              strstr(info.dli_fname, "hooker") != NULL;
+            if (is_substrate && !is_ellekit) {
+                return true;
+            }
+        }
+    }
+    // The preflight files are memoized (see hk_platform_gum_discover): the
     // files are static, so their verdict cannot change mid-process. The
     // dlsym checks above stay live on purpose -- a late dlopen of Substitute
     // must still flip discovery to available.
@@ -388,10 +419,22 @@ static bool hk_platform_substitute_discover(void *ctx) {
     if (cached < 0) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
-            cached = (dlopen_preflight("/usr/lib/libsubstitute.0.dylib") ||
-                      dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate"))
-                         ? 1
-                         : 0;
+            bool hasSubstitute = dlopen_preflight("/var/jb/usr/lib/libsubstitute.0.dylib") ||
+                                 dlopen_preflight("/usr/lib/libsubstitute.0.dylib");
+            bool hasCydia = dlopen_preflight("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") ||
+                            dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate");
+            bool hasElleKit = dlopen_preflight("/var/jb/usr/lib/libellekit.dylib") ||
+                              dlopen_preflight("/usr/lib/libellekit.dylib") ||
+                              dlopen_preflight("/var/jb/usr/lib/libhooker.dylib") ||
+                              dlopen_preflight("/usr/lib/libhooker.dylib");
+            if (hasSubstitute) {
+                cached = 1;
+            } else if (hasCydia && !hasElleKit) {
+                // Legacy Cydia Substrate without ElleKit -- treat as Substitute.
+                cached = 1;
+            } else {
+                cached = 0;
+            }
         }
         pthread_mutex_unlock(&cache_lock);
     }
@@ -1203,6 +1246,11 @@ static bool hk_backend_span_matches(const char *tok, size_t len, const char *id)
         return false;
     }
     if (hk_ci_span_eq(tok, len, id)) {
+        return true;
+    }
+    // Legacy alias: "native" still selects the HookKit backend.
+    if (hk_ci_span_eq(tok, len, "native") &&
+        hk_ci_span_eq(id, strlen(id), "HookKit")) {
         return true;
     }
     static const char prefix[] = "provider-";

@@ -28,9 +28,9 @@ FAKE_ENGINE(eng_beta, "beta");
 FAKE_ENGINE(eng_gamma, "gamma");
 FAKE_ENGINE(eng_ellekit, "provider-ellekit");
 FAKE_ENGINE(eng_objc, "objc");
-// Two engines behind one group token, as the built-in "native" family is.
-FAKE_ENGINE_GROUP(eng_native_a, "inline-x", "native");
-FAKE_ENGINE_GROUP(eng_native_b, "inline-y", "native");
+// Two engines behind one group token, as the built-in "HookKit" family is.
+FAKE_ENGINE_GROUP(eng_native_a, "inline-x", "HookKit");
+FAKE_ENGINE_GROUP(eng_native_b, "inline-y", "HookKit");
 
 static const char *id_at(hk_runtime_t *rt, size_t i) {
     return rt->engines[i]->describe().engine_id;
@@ -95,7 +95,7 @@ int main(void) {
         &eng_native_a, &eng_ellekit, &eng_native_b,
     };
     rt = make_runtime(mixed, 3);
-    hk_runtime_apply_backend_override(rt, "native");
+    hk_runtime_apply_backend_override(rt, "HookKit");
     assert(rt->engine_count == 2);
     assert(strcmp(id_at(rt, 0), "inline-x") == 0);
     assert(strcmp(id_at(rt, 1), "inline-y") == 0);
