@@ -8,6 +8,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdlib.h>
 
 #include "../Resolvers/HKChainedFixups.h"
 #include "../Resolvers/HKDyldCachePatches.h"
@@ -234,6 +236,9 @@ static void close_file_view(file_view_t *view) {
     if (view->mapped) {
         munmap((void *)view->base, view->size);
     }
+    view->base = NULL;
+    view->size = 0;
+    view->mapped = false;
 }
 
 #define HK_REBIND_MAX_SEGMENTS 64u
@@ -242,6 +247,85 @@ typedef struct {
     uint32_t count;
     bool overflow;
 } segment_collect_t;
+
+// ponytail: 4-entry file cache for chained-fixup images. Per-image map if throughput matters.
+#define HK_REBIND_FILE_CACHE_SIZE 4
+static pthread_mutex_t g_rebind_file_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    bool valid;
+    char *path;
+    const void *image_base;
+    uint32_t cputype;
+    uint32_t cpusubtype;
+    file_view_t file;
+    const void *slice;
+    size_t slice_size;
+    hk_chained_fixups_t fixups;
+    segment_collect_t collected;
+    hk_chained_segment_mapping_t mappings[HK_REBIND_MAX_SEGMENTS];
+    uint64_t preferred;
+} g_rebind_file_cache[HK_REBIND_FILE_CACHE_SIZE] = {0};
+static uint32_t g_rebind_file_cache_next = 0;
+
+static void __attribute__((unused)) rebind_file_cache_clear_locked(void) {
+    for (int i = 0; i < HK_REBIND_FILE_CACHE_SIZE; i++) {
+        if (!g_rebind_file_cache[i].valid) continue;
+        free(g_rebind_file_cache[i].path);
+        close_file_view(&g_rebind_file_cache[i].file);
+        memset(&g_rebind_file_cache[i], 0, sizeof(g_rebind_file_cache[i]));
+    }
+    g_rebind_file_cache_next = 0;
+}
+
+// Second level: per-(image,symbol) site list cache. 8-entry, per-image.
+#define HK_REBIND_SYMBOL_CACHE_SIZE 8
+static pthread_mutex_t g_rebind_symbol_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    bool valid;
+    char *path;
+    const void *image_base;
+    char *symbol;
+    hk_symbol_name_convention_t convention;
+    uint32_t count;
+    struct {
+        uintptr_t address;
+        int64_t addend;
+        hk_pac_schema_t schema;
+        bool weak;
+    } sites[HK_REBIND_MAX_SITES];
+} g_rebind_symbol_cache[HK_REBIND_SYMBOL_CACHE_SIZE] = {0};
+static uint32_t g_rebind_symbol_cache_next = 0;
+
+static void __attribute__((unused)) rebind_symbol_cache_clear_locked(void) {
+    for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+        if (!g_rebind_symbol_cache[i].valid) continue;
+        free(g_rebind_symbol_cache[i].path);
+        free(g_rebind_symbol_cache[i].symbol);
+        memset(&g_rebind_symbol_cache[i], 0, sizeof(g_rebind_symbol_cache[i]));
+    }
+    g_rebind_symbol_cache_next = 0;
+}
+
+// Third level: dyld cache patch per-symbol cache. The shared cache's patch table
+// for a given symbol is the same for all hooks in the process, so caching it
+// avoids re-scanning the cache's patch table (thousands of entries) per hook.
+// Keyed per (cache, importer, symbol): the site list is per-importer, so a
+// symbol-only key would serve one image's sites to every other image.
+// ponytail: fixed-size array sized to the loaded-image working set; a hash
+// table keyed by (cache, importer, symbol) if memory pressure ever matters.
+#define HK_CACHE_PATCH_CACHE_SIZE 256
+static pthread_mutex_t g_cache_patch_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    bool valid;
+    bool found;
+    const void *cache_base;
+    const void *image_header;
+    char *symbol;
+    hk_symbol_name_convention_t convention;
+    bool include_shared_got;
+    hk_rebind_plan_t plan;
+} g_cache_patch_cache[HK_CACHE_PATCH_CACHE_SIZE] = {0};
+static uint32_t g_cache_patch_cache_next = 0;
 
 static bool collect_segment(void *opaque, uint32_t index,
                             const hk_macho_segment_t *segment) {
@@ -256,8 +340,227 @@ static bool collect_segment(void *opaque, uint32_t index,
 }
 
 static hk_rebind_status_t prepare_file_chains(
-    const hk_rebind_target_t *target, const hk_symbol_candidates_t *candidates,
+    const hk_rebind_target_t *target, const char *symbol_name,
+    hk_symbol_name_convention_t convention,
+    const hk_symbol_candidates_t *candidates,
     const hk_macho_header_t *loaded_header, hk_rebind_plan_t *plan) {
+    // Fast path: file_image seam (host tests) bypasses cache — no file on disk.
+    if (target->file_image && target->file_image_size) {
+        file_view_t file;
+        if (!open_file_view(target, &file)) {
+            return HK_REBIND_METADATA_UNAVAILABLE;
+        }
+        const void *slice = NULL;
+        size_t slice_size = 0;
+        hk_macho_status_t macho = hk_macho_select_slice(
+            file.base, file.size, loaded_header->cputype, loaded_header->cpusubtype,
+            &slice, &slice_size);
+        if (macho != HK_MACHO_OK) {
+            close_file_view(&file);
+            return macho == HK_MACHO_NOT_FOUND ? HK_REBIND_UNSUPPORTED_FORMAT
+                                                : HK_REBIND_MALFORMED_IMAGE;
+        }
+        uint8_t live_uuid[16], file_uuid[16];
+        size_t live_size = HK_MACHO_HEADER_64_SIZE + loaded_header->sizeofcmds;
+        if (hk_macho_copy_uuid(target->image_base, live_size, live_uuid) != HK_MACHO_OK ||
+            hk_macho_copy_uuid(slice, slice_size, file_uuid) != HK_MACHO_OK ||
+            memcmp(live_uuid, file_uuid, sizeof(live_uuid)) != 0) {
+            close_file_view(&file);
+            return HK_REBIND_MALFORMED_IMAGE;
+        }
+        size_t fixup_offset = 0, fixup_size = 0;
+        if (hk_macho_find_chained_fixups(slice, slice_size, &fixup_offset,
+                                         &fixup_size) != HK_MACHO_OK) {
+            close_file_view(&file);
+            return HK_REBIND_MALFORMED_IMAGE;
+        }
+        hk_chained_fixups_t fixups;
+        hk_chained_status_t chained = hk_chained_fixups_parse(
+            (const uint8_t *)slice + fixup_offset, fixup_size, &fixups);
+        if (chained != HK_CHAINED_OK) {
+            close_file_view(&file);
+            return chained == HK_CHAINED_UNSUPPORTED_FORMAT ||
+                           chained == HK_CHAINED_UNSUPPORTED_VERSION
+                ? HK_REBIND_UNSUPPORTED_FORMAT : HK_REBIND_MALFORMED_IMAGE;
+        }
+        segment_collect_t collected;
+        memset(&collected, 0, sizeof(collected));
+        if (hk_macho_iterate_segments(slice, slice_size, collect_segment,
+                                       &collected) != HK_MACHO_OK ||
+            collected.overflow || collected.count == 0) {
+            close_file_view(&file);
+            return collected.overflow ? HK_REBIND_UNSUPPORTED_FORMAT
+                                      : HK_REBIND_MALFORMED_IMAGE;
+        }
+        uint64_t preferred = UINT64_MAX;
+        for (uint32_t i = 0; i < collected.count; i++) {
+            hk_macho_segment_t *segment = &collected.segments[i];
+            if (strcmp(segment->segname, "__PAGEZERO") != 0 &&
+                segment->vmaddr < preferred) {
+                preferred = segment->vmaddr;
+            }
+        }
+        if (preferred == UINT64_MAX) {
+            close_file_view(&file);
+            return HK_REBIND_MALFORMED_IMAGE;
+        }
+        hk_chained_segment_mapping_t mappings[HK_REBIND_MAX_SEGMENTS];
+        for (uint32_t i = 0; i < collected.count; i++) {
+            hk_macho_segment_t *segment = &collected.segments[i];
+            if (strcmp(segment->segname, "__PAGEZERO") == 0) {
+                memset(&mappings[i], 0, sizeof(mappings[i]));
+                continue;
+            }
+            if (segment->vmaddr < preferred || segment->fileoff > slice_size ||
+                segment->filesize > slice_size - segment->fileoff) {
+                close_file_view(&file);
+                return HK_REBIND_MALFORMED_IMAGE;
+            }
+            mappings[i].image_offset = segment->vmaddr - preferred;
+            mappings[i].file_offset = segment->fileoff;
+            mappings[i].file_size = segment->filesize;
+        }
+        chained_ctx_t ctx = {
+            .fixups = &fixups,
+            .candidates = candidates,
+            .image_base = (uintptr_t)target->image_base,
+            .image_size = target->image_size,
+            .plan = plan,
+        };
+        chained = hk_chained_fixups_iterate_file_binds(
+            &fixups, slice, slice_size, mappings, collected.count,
+            chained_bind_cb, &ctx);
+        close_file_view(&file);
+        if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
+        if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
+        if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
+            return HK_REBIND_MALFORMED_IMAGE;
+        if (chained != HK_CHAINED_OK) return HK_REBIND_UNSUPPORTED_FORMAT;
+        return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
+    }
+
+    // Cached path for file-backed images (device): 4-entry, per-image.
+    // ponytail: 4-entry, per-image map if throughput matters (was single-entry, thrash on 2 images).
+    bool hit = false;
+    int hit_idx = -1;
+    hk_chained_fixups_t cached_fixups;
+    segment_collect_t cached_collected;
+    hk_chained_segment_mapping_t cached_mappings[HK_REBIND_MAX_SEGMENTS];
+    const void *cached_slice = NULL;
+    size_t cached_slice_size = 0;
+    pthread_mutex_lock(&g_rebind_file_cache_lock);
+    for (int i = 0; i < HK_REBIND_FILE_CACHE_SIZE; i++) {
+        if (g_rebind_file_cache[i].valid
+            && target->image_path && g_rebind_file_cache[i].path
+            && strcmp(target->image_path, g_rebind_file_cache[i].path) == 0
+            && target->image_base == g_rebind_file_cache[i].image_base
+            && loaded_header->cputype == g_rebind_file_cache[i].cputype
+            && loaded_header->cpusubtype == g_rebind_file_cache[i].cpusubtype) {
+            hit = true;
+            hit_idx = i;
+            break;
+        }
+    }
+    if (hit) {
+        cached_fixups = g_rebind_file_cache[hit_idx].fixups;
+        cached_collected = g_rebind_file_cache[hit_idx].collected;
+        memcpy(cached_mappings, g_rebind_file_cache[hit_idx].mappings, sizeof(cached_mappings));
+        cached_slice = g_rebind_file_cache[hit_idx].slice;
+        cached_slice_size = g_rebind_file_cache[hit_idx].slice_size;
+    }
+    pthread_mutex_unlock(&g_rebind_file_cache_lock);
+    if (hit) {
+        // Second level: per-(image,symbol) site list — 8-entry.
+        int sym_idx = -1;
+        pthread_mutex_lock(&g_rebind_symbol_cache_lock);
+        for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+            if (!g_rebind_symbol_cache[i].valid) continue;
+            if (g_rebind_symbol_cache[i].image_base != target->image_base) continue;
+            if (g_rebind_symbol_cache[i].convention != convention) continue;
+            if (!g_rebind_symbol_cache[i].path || !g_rebind_symbol_cache[i].symbol) continue;
+            if (strcmp(g_rebind_symbol_cache[i].path, target->image_path) != 0) continue;
+            if (strcmp(g_rebind_symbol_cache[i].symbol, symbol_name) != 0) continue;
+            sym_idx = i;
+            break;
+        }
+        if (sym_idx != -1) {
+            uint32_t cnt = g_rebind_symbol_cache[sym_idx].count;
+            struct { uintptr_t address; int64_t addend; hk_pac_schema_t schema; bool weak; } tmp[HK_REBIND_MAX_SITES];
+            for (uint32_t i = 0; i < cnt; i++) {
+                tmp[i].address = g_rebind_symbol_cache[sym_idx].sites[i].address;
+                tmp[i].addend = g_rebind_symbol_cache[sym_idx].sites[i].addend;
+                tmp[i].schema = g_rebind_symbol_cache[sym_idx].sites[i].schema;
+                tmp[i].weak = g_rebind_symbol_cache[sym_idx].sites[i].weak;
+            }
+            pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+            for (uint32_t i = 0; i < cnt; i++) {
+                add_site_status_t st = add_site(plan, tmp[i].address, &tmp[i].schema, tmp[i].addend, tmp[i].weak, true, false);
+                if (st == ADD_SITE_OVERFLOW) return HK_REBIND_TOO_MANY_SITES;
+                if (st == ADD_SITE_MALFORMED) return HK_REBIND_MALFORMED_IMAGE;
+                if (st == ADD_SITE_PAC_MISMATCH) return HK_REBIND_PAC_MISMATCH;
+                if (st != ADD_SITE_OK) return HK_REBIND_MALFORMED_IMAGE;
+            }
+            return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
+        }
+        pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+        chained_ctx_t ctx = {
+            .fixups = &cached_fixups,
+            .candidates = candidates,
+            .image_base = (uintptr_t)target->image_base,
+            .image_size = target->image_size,
+            .plan = plan,
+        };
+        hk_chained_status_t chained = hk_chained_fixups_iterate_file_binds(
+            &cached_fixups, cached_slice, cached_slice_size, cached_mappings, cached_collected.count,
+            chained_bind_cb, &ctx);
+        if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
+        if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
+        if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
+            return HK_REBIND_MALFORMED_IMAGE;
+        if (chained != HK_CHAINED_OK) return HK_REBIND_UNSUPPORTED_FORMAT;
+        // Always cache, even for not-found (count 0) — so next hook for same
+        // image+symbol can return NOT_FOUND without re-scanning thousands of binds.
+        {
+            pthread_mutex_lock(&g_rebind_symbol_cache_lock);
+            int victim = -1;
+            for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+                if (!g_rebind_symbol_cache[i].valid) { victim = i; break; }
+            }
+            if (victim == -1) {
+                victim = g_rebind_symbol_cache_next % HK_REBIND_SYMBOL_CACHE_SIZE;
+                free(g_rebind_symbol_cache[victim].path);
+                free(g_rebind_symbol_cache[victim].symbol);
+                memset(&g_rebind_symbol_cache[victim], 0, sizeof(g_rebind_symbol_cache[victim]));
+                g_rebind_symbol_cache_next = (victim + 1) % HK_REBIND_SYMBOL_CACHE_SIZE;
+            }
+            size_t plen = strlen(target->image_path) + 1;
+            size_t slen = strlen(symbol_name) + 1;
+            char *p = (char *)malloc(plen);
+            char *s = (char *)malloc(slen);
+            if (p && s) {
+                memcpy(p, target->image_path, plen);
+                memcpy(s, symbol_name, slen);
+                g_rebind_symbol_cache[victim].path = p;
+                g_rebind_symbol_cache[victim].symbol = s;
+                g_rebind_symbol_cache[victim].image_base = target->image_base;
+                g_rebind_symbol_cache[victim].convention = convention;
+                g_rebind_symbol_cache[victim].count = plan->count;
+                for (uint32_t i = 0; i < plan->count; i++) {
+                    g_rebind_symbol_cache[victim].sites[i].address = plan->sites[i].address;
+                    g_rebind_symbol_cache[victim].sites[i].addend = plan->sites[i].addend;
+                    g_rebind_symbol_cache[victim].sites[i].schema = plan->sites[i].schema;
+                    g_rebind_symbol_cache[victim].sites[i].weak = plan->sites[i].weak_import;
+                }
+                g_rebind_symbol_cache[victim].valid = true;
+            } else {
+                free(p); free(s);
+            }
+            pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+        }
+        return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
+    }
+
+    // Miss: full load then populate cache
     file_view_t file;
     if (!open_file_view(target, &file)) {
         return HK_REBIND_METADATA_UNAVAILABLE;
@@ -298,7 +601,7 @@ static hk_rebind_status_t prepare_file_chains(
     segment_collect_t collected;
     memset(&collected, 0, sizeof(collected));
     if (hk_macho_iterate_segments(slice, slice_size, collect_segment,
-                                  &collected) != HK_MACHO_OK ||
+                                   &collected) != HK_MACHO_OK ||
         collected.overflow || collected.count == 0) {
         close_file_view(&file);
         return collected.overflow ? HK_REBIND_UNSUPPORTED_FORMAT
@@ -332,6 +635,46 @@ static hk_rebind_status_t prepare_file_chains(
         mappings[i].file_offset = segment->fileoff;
         mappings[i].file_size = segment->filesize;
     }
+    // Populate cache on success path (keep file mapped) — 4-entry with eviction
+    if (target->image_path) {
+        pthread_mutex_lock(&g_rebind_file_cache_lock);
+        int victim = -1;
+        for (int i = 0; i < HK_REBIND_FILE_CACHE_SIZE; i++) {
+            if (!g_rebind_file_cache[i].valid) { victim = i; break; }
+        }
+        if (victim == -1) {
+            victim = g_rebind_file_cache_next % HK_REBIND_FILE_CACHE_SIZE;
+            if (g_rebind_file_cache[victim].valid) {
+                free(g_rebind_file_cache[victim].path);
+                close_file_view(&g_rebind_file_cache[victim].file);
+                memset(&g_rebind_file_cache[victim], 0, sizeof(g_rebind_file_cache[victim]));
+            }
+            g_rebind_file_cache_next = (victim + 1) % HK_REBIND_FILE_CACHE_SIZE;
+        }
+        size_t _path_len = strlen(target->image_path) + 1;
+        g_rebind_file_cache[victim].path = (char *)malloc(_path_len);
+        if (g_rebind_file_cache[victim].path) memcpy(g_rebind_file_cache[victim].path, target->image_path, _path_len);
+        g_rebind_file_cache[victim].image_base = target->image_base;
+        g_rebind_file_cache[victim].cputype = loaded_header->cputype;
+        g_rebind_file_cache[victim].cpusubtype = loaded_header->cpusubtype;
+        g_rebind_file_cache[victim].file = file;
+        g_rebind_file_cache[victim].slice = slice;
+        g_rebind_file_cache[victim].slice_size = slice_size;
+        g_rebind_file_cache[victim].fixups = fixups;
+        g_rebind_file_cache[victim].collected = collected;
+        memcpy(g_rebind_file_cache[victim].mappings, mappings, sizeof(mappings));
+        g_rebind_file_cache[victim].preferred = preferred;
+        g_rebind_file_cache[victim].valid = (g_rebind_file_cache[victim].path != NULL);
+        if (!g_rebind_file_cache[victim].valid) {
+            close_file_view(&file);
+            memset(&g_rebind_file_cache[victim], 0, sizeof(g_rebind_file_cache[victim]));
+        } else {
+            file.base = NULL;
+            file.size = 0;
+            file.mapped = false;
+        }
+        pthread_mutex_unlock(&g_rebind_file_cache_lock);
+    }
     chained_ctx_t ctx = {
         .fixups = &fixups,
         .candidates = candidates,
@@ -342,12 +685,67 @@ static hk_rebind_status_t prepare_file_chains(
     chained = hk_chained_fixups_iterate_file_binds(
         &fixups, slice, slice_size, mappings, collected.count,
         chained_bind_cb, &ctx);
-    close_file_view(&file);
+    // Keep file mapped until after iterate; for cached case file was transferred (empty) so no-op
+    if (file.mapped) {
+        close_file_view(&file);
+    }
     if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
     if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
     if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
         return HK_REBIND_MALFORMED_IMAGE;
     if (chained != HK_CHAINED_OK) return HK_REBIND_UNSUPPORTED_FORMAT;
+    if (1) {
+        pthread_mutex_lock(&g_rebind_symbol_cache_lock);
+        int existing = -1;
+        for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+            if (!g_rebind_symbol_cache[i].valid) continue;
+            if (g_rebind_symbol_cache[i].image_base != target->image_base) continue;
+            if (g_rebind_symbol_cache[i].convention != convention) continue;
+            if (!g_rebind_symbol_cache[i].path || !g_rebind_symbol_cache[i].symbol) continue;
+            if (strcmp(g_rebind_symbol_cache[i].path, target->image_path) != 0) continue;
+            if (strcmp(g_rebind_symbol_cache[i].symbol, symbol_name) != 0) continue;
+            existing = i;
+            break;
+        }
+        if (existing == -1) {
+            int victim = -1;
+            for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+                if (!g_rebind_symbol_cache[i].valid) { victim = i; break; }
+            }
+            if (victim == -1) {
+                victim = g_rebind_symbol_cache_next % HK_REBIND_SYMBOL_CACHE_SIZE;
+                free(g_rebind_symbol_cache[victim].path);
+                free(g_rebind_symbol_cache[victim].symbol);
+                memset(&g_rebind_symbol_cache[victim], 0, sizeof(g_rebind_symbol_cache[victim]));
+                g_rebind_symbol_cache_next = (victim + 1) % HK_REBIND_SYMBOL_CACHE_SIZE;
+            }
+            size_t plen = strlen(target->image_path) + 1;
+            size_t slen = strlen(symbol_name) + 1;
+            char *p = (char *)malloc(plen);
+            char *s = (char *)malloc(slen);
+            if (p && s) {
+                memcpy(p, target->image_path, plen);
+                memcpy(s, symbol_name, slen);
+                g_rebind_symbol_cache[victim].path = p;
+                g_rebind_symbol_cache[victim].symbol = s;
+                g_rebind_symbol_cache[victim].image_base = target->image_base;
+                g_rebind_symbol_cache[victim].convention = convention;
+                g_rebind_symbol_cache[victim].count = plan->count;
+                for (uint32_t i = 0; i < plan->count; i++) {
+                    g_rebind_symbol_cache[victim].sites[i].address = plan->sites[i].address;
+                    g_rebind_symbol_cache[victim].sites[i].addend = plan->sites[i].addend;
+                    g_rebind_symbol_cache[victim].sites[i].schema = plan->sites[i].schema;
+                    g_rebind_symbol_cache[victim].sites[i].weak = plan->sites[i].weak_import;
+                }
+                g_rebind_symbol_cache[victim].valid = true;
+            } else {
+                free(p); free(s);
+            }
+        } else {
+        }
+        pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+    } else {
+    }
     return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
 }
 
@@ -417,7 +815,17 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
     const void *cache_base = NULL;
     size_t cache_size = 0;
     live_cache_range(target, &cache_base, &cache_size);
-    if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
+    // Check cache patch per-(importer,symbol) cache
+    if (cache_base && symbol_name) {
+        pthread_mutex_lock(&g_cache_patch_cache_lock);
+        for (int i=0;i<HK_CACHE_PATCH_CACHE_SIZE;i++) if (g_cache_patch_cache[i].valid && g_cache_patch_cache[i].cache_base==cache_base && g_cache_patch_cache[i].image_header==image && g_cache_patch_cache[i].include_shared_got==target->include_shared_cache_got && g_cache_patch_cache[i].symbol && strcmp(g_cache_patch_cache[i].symbol,symbol_name)==0 && g_cache_patch_cache[i].convention==convention) {
+            *out_plan = g_cache_patch_cache[i].plan;
+            pthread_mutex_unlock(&g_cache_patch_cache_lock);
+            return g_cache_patch_cache[i].found ? finalize_plan(out_plan) : HK_REBIND_NOT_FOUND;
+        }
+        pthread_mutex_unlock(&g_cache_patch_cache_lock);
+    }
+if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
         (uintptr_t)image - (uintptr_t)cache_base < cache_size) {
         hk_cache_patch_target_t cache_target;
         memset(&cache_target, 0, sizeof(cache_target));
@@ -438,9 +846,12 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
         if (collect.malformed) return HK_REBIND_MALFORMED_IMAGE;
         switch (status) {
         case HK_CACHE_PATCH_OK:
-            return finalize_plan(out_plan);
-        case HK_CACHE_PATCH_NOT_FOUND:
-            return HK_REBIND_NOT_FOUND;
+        case HK_CACHE_PATCH_NOT_FOUND: {
+            pthread_mutex_lock(&g_cache_patch_cache_lock);
+            int victim=-1; for(int i=0;i<HK_CACHE_PATCH_CACHE_SIZE;i++) if(!g_cache_patch_cache[i].valid){victim=i;break;} if(victim==-1){victim=g_cache_patch_cache_next%HK_CACHE_PATCH_CACHE_SIZE; free(g_cache_patch_cache[victim].symbol); memset(&g_cache_patch_cache[victim],0,sizeof(g_cache_patch_cache[victim])); g_cache_patch_cache_next=(victim+1)%HK_CACHE_PATCH_CACHE_SIZE;}
+            size_t slen=strlen(symbol_name)+1; char *s=(char*)malloc(slen); if(s){memcpy(s,symbol_name,slen); g_cache_patch_cache[victim].cache_base=cache_base; g_cache_patch_cache[victim].image_header=image; g_cache_patch_cache[victim].include_shared_got=target->include_shared_cache_got; g_cache_patch_cache[victim].symbol=s; g_cache_patch_cache[victim].convention=convention; g_cache_patch_cache[victim].plan=*out_plan; g_cache_patch_cache[victim].found=(status==HK_CACHE_PATCH_OK); g_cache_patch_cache[victim].valid=true; }
+            pthread_mutex_unlock(&g_cache_patch_cache_lock);
+            return (status==HK_CACHE_PATCH_OK) ? finalize_plan(out_plan) : HK_REBIND_NOT_FOUND; }
         case HK_CACHE_PATCH_SCOPE_UNREPRESENTABLE:
             return HK_REBIND_SCOPE_UNREPRESENTABLE;
         case HK_CACHE_PATCH_UNSUPPORTED:
@@ -468,7 +879,7 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
             return HK_REBIND_MALFORMED_IMAGE;
         }
         hk_rebind_status_t status = prepare_file_chains(
-            target, &candidates, &loaded_header, out_plan);
+            target, symbol_name, convention, &candidates, &loaded_header, out_plan);
         return status == HK_REBIND_OK ? finalize_plan(out_plan) : status;
     }
     if (chain_command_status != HK_MACHO_NOT_FOUND) {
