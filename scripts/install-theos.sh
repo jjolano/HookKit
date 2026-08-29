@@ -149,6 +149,11 @@ case "${1:-all}" in
     all)
         failures=0
         installed=0
+        # Host tests use the host clang and are identical for every lane, so
+        # run them once here instead of once per lane (~3x redundant test
+        # time cut). HOOKKIT_SKIP_LANE_TEST skips the per-lane `make test`.
+        (cd "$ROOT" && make test)
+        export HOOKKIT_SKIP_LANE_TEST=1
         for lane in rootful-legacy rootful-modern rootless roothide; do
             if ./build.sh "$lane"; then
                 if install_one_lane "$lane"; then

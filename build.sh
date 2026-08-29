@@ -216,7 +216,7 @@ build_rootful_legacy() {
     require_oldabi_toolchain
     write_control "$lane"
     legacy_make HOOKKIT_LANE="$lane" clean
-    legacy_make HOOKKIT_LANE="$lane" test
+    [ -z "${HOOKKIT_SKIP_LANE_TEST:-}" ] && legacy_make HOOKKIT_LANE="$lane" test
     legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
@@ -257,7 +257,7 @@ build_rootful_modern() {
     local lane=rootful-modern
     require_modern_toolchain "$lane"
     modern_make HOOKKIT_LANE="$lane" clean
-    modern_make HOOKKIT_LANE="$lane" test
+    [ -z "${HOOKKIT_SKIP_LANE_TEST:-}" ] && modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
 }
 
@@ -265,7 +265,7 @@ build_rootless() {
     local lane=rootless
     require_modern_toolchain "$lane"
     modern_make HOOKKIT_LANE="$lane" clean
-    modern_make HOOKKIT_LANE="$lane" test
+    [ -z "${HOOKKIT_SKIP_LANE_TEST:-}" ] && modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
 }
 
@@ -275,7 +275,7 @@ build_roothide() {
     require_modern_toolchain roothide
     test -d "${THEOS:?}/vendor/mod/roothide"
     modern_make HOOKKIT_LANE="$lane" clean
-    modern_make HOOKKIT_LANE="$lane" test
+    [ -z "${HOOKKIT_SKIP_LANE_TEST:-}" ] && modern_make HOOKKIT_LANE="$lane" test
     package_modern_lane "$lane"
 }
 
@@ -286,7 +286,11 @@ case ${1:-all} in
     roothide) build_roothide ;;
     # Theos's arm64e object cache is shared across toolchains. Build the old
     # ABI lane first so modern objects cannot be reused by the Xcode 11 lane.
-    all) build_rootful_legacy; build_rootful_modern; build_rootless; build_roothide ;;
+    # Host tests use the host clang and are identical for every lane, so run
+    # them once for the whole `all` build instead of once per lane (~3x
+    # redundant test time cut).
+    all) run_make test; export HOOKKIT_SKIP_LANE_TEST=1
+        build_rootful_legacy; build_rootful_modern; build_rootless; build_roothide ;;
     rooted) echo "error: rooted is ambiguous; use rootful-legacy or rootful-modern" >&2; exit 2 ;;
     *) echo "usage: $0 [all|rootful-legacy|rootful-modern|rootless|roothide]" >&2; exit 2 ;;
 esac
