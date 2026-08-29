@@ -25,7 +25,11 @@
 #ifndef hookkit_inline_preflight_h
 #define hookkit_inline_preflight_h
 
-#import <HookKit/HookKit.h>
+// The v3 C API umbrella: this header uses hk_status_t (v3), not the v1
+// facade types, so import the v3 umbrella explicitly rather than
+// <HookKit/HookKit.h>, whose module resolution depends on include/F
+// ordering and can land on the flat v1 facade header.
+#include <HookKit/HookKitBase.h>
 
 #include <stddef.h>
 #include <stdint.h>

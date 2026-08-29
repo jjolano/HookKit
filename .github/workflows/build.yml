@@ -131,6 +131,18 @@ jobs:
           brew install dpkg ldid
           sudo git clone --recursive --quiet https://github.com/roothide/theos.git "$THEOS"
 
+      # The lane TARGETs pin iPhoneOS16.5.sdk (see Makefile) so builds are
+      # reproducible across toolchains; Xcode's bundled SDK may be newer, so
+      # stage the pinned one explicitly.
+      - name: Stage pinned iPhoneOS16.5 SDK
+        run: |
+          set -euo pipefail
+          curl -fL -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" \
+            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+          echo '5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb  '"$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" | sha256sum -c -
+          sudo mkdir -p "$THEOS/sdks"
+          sudo tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$THEOS/sdks"
+
       - name: Build and verify
         run: ./build.sh "${{ matrix.flavor }}"
 

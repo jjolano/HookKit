@@ -1,5 +1,10 @@
 ARCHS ?= armv7 armv7s arm64 arm64e
-TARGET ?= iphone:clang:latest:9.0
+# Pinned per lane: "latest" resolves to the newest installed SDK, which can
+# drift ahead of what a lane's toolchain can consume (e.g. armv7 module
+# builds with the bundled clang-13 against the iOS 26.5 SDK). Each lane
+# below pins the SDK its toolchain is verified against; the bare `make`
+# default pins the canonical 16.5 SDK so local builds are reproducible too.
+TARGET ?= iphone:clang:16.5:9.0
 
 # Release lanes override inherited make/environment values so a preceding
 # rootless build cannot silently turn a rootful framework into an iOS 15 one.
@@ -11,15 +16,15 @@ override TARGET_OS_DEPLOYMENT_VERSION_arm64e := 12.0
 override THEOS_PACKAGE_SCHEME :=
 else ifeq ($(HOOKKIT_LANE),rootful-modern)
 override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:latest:14.0
+override TARGET := iphone:clang:16.5:14.0
 override THEOS_PACKAGE_SCHEME :=
 else ifeq ($(HOOKKIT_LANE),rootless)
 override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:latest:15.0
+override TARGET := iphone:clang:16.5:15.0
 override THEOS_PACKAGE_SCHEME := rootless
 else ifeq ($(HOOKKIT_LANE),roothide)
 override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:latest:15.0
+override TARGET := iphone:clang:16.5:15.0
 override THEOS_PACKAGE_SCHEME := roothide
 else ifneq ($(HOOKKIT_LANE),)
 $(error unknown HOOKKIT_LANE '$(HOOKKIT_LANE)')
@@ -736,7 +741,7 @@ bench-provider:
 
 # Device bench: real dyld catalog + provider enumerate + large-scale plan. Signposts for Instruments.
 device-bench: check-device-canonical-toolchain
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O2 -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -framework Foundation -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_bench tests/device_bench.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_bench$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O2 -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(THEOS_OBJ_DIR) -framework HookKit -framework Foundation -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_bench tests/device_bench.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_bench$(ECHO_END)
 
 bench-instruments: device-bench
 	$(ECHO_NOTHING)bash $(CURDIR)/scripts/run_instruments.sh $(INSTRUMENTS_DEVICE) $(BENCH_ARGS)$(ECHO_END)
