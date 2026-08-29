@@ -60,7 +60,11 @@ static void print_stats(const char *name, uint64_t *v, size_t n, const char *uni
 
 // ---- allocs for large-scale hook creation uses heap; target are fake addresses (no write) ----
 
-static void *g_rep = (void*)0x1234;
+// A real, addressable replacement function: commit writes this pointer into
+// the live import slots, and the process calls it (puts) after the bench, so
+// a fake 0x1234 would SIGSEGV at exit. No-op keeps the write harmless.
+static void bench_replacement(void) { }
+static void *g_rep = (void *)bench_replacement;
 
 static hk_hook_spec_t sym_spec(const char *id, const char *name){
     hk_hook_spec_t s; memset(&s,0,sizeof(s));
@@ -217,6 +221,9 @@ int main(int argc, char **argv){
         int it = (Ns[i] >= 1000) ? (iters_e2e/5 ? iters_e2e/5 : 1) : iters_e2e;
         bench_plan_e2e(Ns[i], it, warmup);
     }
-    printf("device_bench: PASS\n");
+    // stderr, not printf: the bench patches every loaded image's puts slot,
+    // so a final literal printf("...\n") would be optimized to a puts call
+    // and swallowed (or, with a fake replacement, crash) at process exit.
+    fprintf(stderr, "device_bench: PASS\n");
     return 0;
 }

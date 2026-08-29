@@ -37,47 +37,15 @@
 #include "../Resolvers/HKSymbolResolve.h"
 
 #include "../../vendor/substitute/substitute.h"
-#if defined(HOOKKIT_CANONICAL_3) && \
-    (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
-#include "../../vendor/dobby/dobby.h"
-#include "../../vendor/libhooker/libhooker.h"
-
-// HKInlinePreflight.h is Objective-C-facing because provider headers import
-// Foundation. The two C entry points below have no ObjC types; declare that
-// tiny internal seam here so the C-first runtime never imports Foundation
-// merely to read a function prologue.
-extern int hk_inline_preflight_basic(void *function, void *replacement,
-                                     int *out_error);
-extern int hk_inline_preflight(void *function, void *replacement,
-                               size_t window, int *out_error);
-enum { HK_PLATFORM_DOBBY_INSPECTION_BYTES = 16 };
-
-typedef struct {
-    pthread_mutex_t lock;
-    void *handle;
-    int (*hook)(void *, void *, void **);
-    void (*begin_transaction)(void);
-    void (*end_transaction)(void);
-} hk_platform_gum_state_t;
-
-typedef struct {
-    pthread_mutex_t lock;
-    void *handle;
-    int (*hook_functions)(const struct LHFunctionHook *, int);
-} hk_platform_ellekit_state_t;
-
-static hk_platform_gum_state_t g_platform_gum = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-};
-
-static hk_platform_ellekit_state_t g_platform_ellekit = {
-    .lock = PTHREAD_MUTEX_INITIALIZER,
-};
 
 // Image-level export check without dlopen side-effects. Uses the same
 // Mach-O / export-trie parser the rebind engine uses (HKMachO.c +
 // HKSymbolResolve.c), so a CydiaSubstrate shim that is really an
 // ElleKit/libhooker image is not mis-identified as Substitute.
+// Canonical-gated only (not the arm64-gated Dobby block below): the
+// provider-discovery check runs on every canonical slice, including
+// armv7/armv7s legacy lanes.
+#if defined(HOOKKIT_CANONICAL_3)
 static bool hk_platform_file_exports(const char *path, const char *symbol) {
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
@@ -123,6 +91,44 @@ static bool hk_platform_file_exports(const char *path, const char *symbol) {
     munmap(mapped, size);
     return found;
 }
+#endif
+
+#if defined(HOOKKIT_CANONICAL_3) && \
+    (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
+#include "../../vendor/dobby/dobby.h"
+#include "../../vendor/libhooker/libhooker.h"
+
+// HKInlinePreflight.h is Objective-C-facing because provider headers import
+// Foundation. The two C entry points below have no ObjC types; declare that
+// tiny internal seam here so the C-first runtime never imports Foundation
+// merely to read a function prologue.
+extern int hk_inline_preflight_basic(void *function, void *replacement,
+                                     int *out_error);
+extern int hk_inline_preflight(void *function, void *replacement,
+                               size_t window, int *out_error);
+enum { HK_PLATFORM_DOBBY_INSPECTION_BYTES = 16 };
+
+typedef struct {
+    pthread_mutex_t lock;
+    void *handle;
+    int (*hook)(void *, void *, void **);
+    void (*begin_transaction)(void);
+    void (*end_transaction)(void);
+} hk_platform_gum_state_t;
+
+typedef struct {
+    pthread_mutex_t lock;
+    void *handle;
+    int (*hook_functions)(const struct LHFunctionHook *, int);
+} hk_platform_ellekit_state_t;
+
+static hk_platform_gum_state_t g_platform_gum = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+};
+
+static hk_platform_ellekit_state_t g_platform_ellekit = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+};
 
 static bool hk_platform_dobby_validate(void *ctx, const hk_hook_spec_t *spec,
                                        hk_prepare_diag_t *out_diag) {
