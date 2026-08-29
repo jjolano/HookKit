@@ -29,6 +29,12 @@
 #include <pthread.h>
 #include <sys/sysctl.h>
 #include <TargetConditionals.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "../Resolvers/HKMachO.h"
+#include "../Resolvers/HKSymbolResolve.h"
 
 #include "../../vendor/substitute/substitute.h"
 #if defined(HOOKKIT_CANONICAL_3) && \
@@ -68,6 +74,56 @@ static hk_platform_ellekit_state_t g_platform_ellekit = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
 };
 
+// Image-level export check without dlopen side-effects. Uses the same
+// Mach-O / export-trie parser the rebind engine uses (HKMachO.c +
+// HKSymbolResolve.c), so a CydiaSubstrate shim that is really an
+// ElleKit/libhooker image is not mis-identified as Substitute.
+static bool hk_platform_file_exports(const char *path, const char *symbol) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return false;
+    }
+    size_t size = (size_t)st.st_size;
+    if (size < HK_MACHO_HEADER_64_SIZE) {
+        close(fd);
+        return false;
+    }
+    void *mapped = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (mapped == MAP_FAILED) {
+        return false;
+    }
+    bool found = false;
+    hk_symbol_sources_t sources;
+    if (hk_symbol_sources_from_file_image(mapped, size, &sources) == HK_RESOLVE_OK) {
+        hk_symbol_resolution_t res;
+        if (hk_resolve_symbol(&sources, symbol, HK_SYMBOL_NAME_C,
+                              HK_SYMBOL_VISIBILITY_ANY, &res) == HK_RESOLVE_OK) {
+            found = true;
+        }
+    } else {
+        const void *slice = NULL;
+        size_t slice_size = 0;
+        if (hk_macho_select_slice(mapped, size, 0x0100000C, 0, &slice, &slice_size) == HK_MACHO_OK ||
+            hk_macho_select_slice(mapped, size, 0x0100000C | 0x01000000, 0, &slice, &slice_size) == HK_MACHO_OK) {
+            if (hk_symbol_sources_from_file_image(slice, slice_size, &sources) == HK_RESOLVE_OK) {
+                hk_symbol_resolution_t res;
+                if (hk_resolve_symbol(&sources, symbol, HK_SYMBOL_NAME_C,
+                                      HK_SYMBOL_VISIBILITY_ANY, &res) == HK_RESOLVE_OK) {
+                    found = true;
+                }
+            }
+        }
+    }
+    munmap(mapped, size);
+    return found;
+}
+
 static bool hk_platform_dobby_validate(void *ctx, const hk_hook_spec_t *spec,
                                        hk_prepare_diag_t *out_diag) {
     (void)ctx;
@@ -96,15 +152,26 @@ static bool hk_platform_gum_discover(void *ctx) {
     // preflight verdict cannot change while the process runs, so memoize.
     // Without this, every hook re-pays discovery for every provider engine
     // during plan analysis (~470 us/hook combined across providers).
+    // File-level export check (HKMachO) prevents a same-named shim from
+    // masquerading as HKGum.
     static int cached = -1; // -1 unknown, 0 unavailable, 1 available
     static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
     if (cached < 0) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
-            cached = (dlopen_preflight("/var/jb/usr/lib/HKGum.dylib") ||
-                      dlopen_preflight("/usr/lib/HKGum.dylib"))
-                         ? 1
-                         : 0;
+            bool available = false;
+            static const char *const paths[] = {
+                "/var/jb/usr/lib/HKGum.dylib",
+                "/usr/lib/HKGum.dylib",
+            };
+            for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+                if (dlopen_preflight(paths[i]) &&
+                    hk_platform_file_exports(paths[i], "hkgum_hook_function")) {
+                    available = true;
+                    break;
+                }
+            }
+            cached = available ? 1 : 0;
         }
         pthread_mutex_unlock(&cache_lock);
     }
@@ -194,7 +261,8 @@ static bool hk_platform_ellekit_discover(void *ctx) {
     (void)ctx;
     // Memoized for the same reason as hk_platform_gum_discover: four
     // dlopen_preflight signature validations per call dominate plan analysis
-    // if repeated per hook.
+    // if repeated per hook. Export check distinguishes a real ElleKit image
+    // from a same-named placeholder.
     static int cached = -1; // -1 unknown, 0 unavailable, 1 available
     static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
     if (cached < 0) {
@@ -208,7 +276,8 @@ static bool hk_platform_ellekit_discover(void *ctx) {
             };
             cached = 0;
             for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-                if (dlopen_preflight(paths[i])) {
+                if (dlopen_preflight(paths[i]) &&
+                    hk_platform_file_exports(paths[i], "LHHookFunctions")) {
                     cached = 1;
                     break;
                 }
@@ -419,14 +488,26 @@ static bool hk_platform_substitute_discover(void *ctx) {
     if (cached < 0) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
-            bool hasSubstitute = dlopen_preflight("/var/jb/usr/lib/libsubstitute.0.dylib") ||
-                                 dlopen_preflight("/usr/lib/libsubstitute.0.dylib");
-            bool hasCydia = dlopen_preflight("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") ||
-                            dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate");
-            bool hasElleKit = dlopen_preflight("/var/jb/usr/lib/libellekit.dylib") ||
-                              dlopen_preflight("/usr/lib/libellekit.dylib") ||
-                              dlopen_preflight("/var/jb/usr/lib/libhooker.dylib") ||
-                              dlopen_preflight("/usr/lib/libhooker.dylib");
+            bool hasSubstitute = (dlopen_preflight("/var/jb/usr/lib/libsubstitute.0.dylib") &&
+                                  (hk_platform_file_exports("/var/jb/usr/lib/libsubstitute.0.dylib", "substitute_hook_functions") ||
+                                   hk_platform_file_exports("/var/jb/usr/lib/libsubstitute.0.dylib", "SubHookFunction"))) ||
+                                 (dlopen_preflight("/usr/lib/libsubstitute.0.dylib") &&
+                                  (hk_platform_file_exports("/usr/lib/libsubstitute.0.dylib", "substitute_hook_functions") ||
+                                   hk_platform_file_exports("/usr/lib/libsubstitute.0.dylib", "SubHookFunction")));
+            bool hasCydia = (dlopen_preflight("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") &&
+                             hk_platform_file_exports("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "MSHookFunction") &&
+                             !hk_platform_file_exports("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "LHHookFunctions")) ||
+                            (dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") &&
+                             hk_platform_file_exports("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "MSHookFunction") &&
+                             !hk_platform_file_exports("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "LHHookFunctions"));
+            bool hasElleKit = (dlopen_preflight("/var/jb/usr/lib/libellekit.dylib") &&
+                               hk_platform_file_exports("/var/jb/usr/lib/libellekit.dylib", "LHHookFunctions")) ||
+                              (dlopen_preflight("/usr/lib/libellekit.dylib") &&
+                               hk_platform_file_exports("/usr/lib/libellekit.dylib", "LHHookFunctions")) ||
+                              (dlopen_preflight("/var/jb/usr/lib/libhooker.dylib") &&
+                               hk_platform_file_exports("/var/jb/usr/lib/libhooker.dylib", "LHHookFunctions")) ||
+                              (dlopen_preflight("/usr/lib/libhooker.dylib") &&
+                               hk_platform_file_exports("/usr/lib/libhooker.dylib", "LHHookFunctions"));
             if (hasSubstitute) {
                 cached = 1;
             } else if (hasCydia && !hasElleKit) {
