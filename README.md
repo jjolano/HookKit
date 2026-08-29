@@ -66,8 +66,36 @@ per-hook mutation state rather than inferring it from a generic error.
 
 Use `<HookKit/HookKit.h>` for the C umbrella. `<HookKit/HookKitObjC.h>` is an
 opt-in typed `Class`/`SEL` convenience header; it is intentionally not pulled
-into the C umbrella. `<HookKit.h>` remains a forwarding include path to the
-same C API.
+into the C umbrella. `<HookKit.h>` is the Objective-C compatibility umbrella:
+it declares `HKSubstitutor` and imports the v1 module headers
+(`<HookKit/Core.h>`, `<HookKit/Hook.h>`, `<HookKit/Module.h>`, with
+`<HookKit/Compat.h>` kept as the v1 spelling). New C code wants
+`<HookKit/HookKit.h>`, not this one.
+
+## HookKit v1 / 2.x compatibility
+
+Binaries linked against HookKit v1.0.1 or any v2.x release load and run
+unrecompiled, and v1/2.x sources still compile. All seven historical
+Objective-C classes are exported — `HKSubstitutor`, `HookKitCore`,
+`HookKitModule`, `HookKitHook`, `HookKitClassHook`, `HookKitFunctionHook`,
+`HookKitMemoryHook` — and every one of them is a translator over the 3.0
+plan/engine lifecycle, never a second runtime.
+
+```objc
+#import <HookKit.h>
+
+HookKitModule *module = [[HookKitCore sharedInstance] defaultModule];
+[module executeHook:[HookKitFunctionHook hook:sym replacement:rep orig:&orig]];
+// or the HKSubstitutor spelling
+HKHookFunction(sym, rep, &orig);
+```
+
+Two things v1 had that 3.0 does not: **Modulous plugin bundles** (nothing is
+read from `/Library/Modulous/HookKit`; `getModuleInfo` returns one built-in
+row) and **per-library provider identity** (`activeType` is `HK_LIB_NONE`,
+`getAvailableCategories` is `HK_CAT_NONE`). Routing is the 3.0 runtime's.
+`docs/3.0/LEGACY_ABI.md` is the authoritative contract;
+`Tests/LegacyABI/Baselines/` gates it every release build.
 
 ## Building
 
@@ -124,6 +152,8 @@ make install-theos                    # installs framework + hookkit Logos gener
 * Pure Logos (`%hook`/`%orig`): add 2 lines to `Tweak.mk` — `Tweak_EXTRA_FRAMEWORKS += HookKit` + `Tweak_LOGOSFLAGS += -c generator=hookkit` — no source change.
 * Raw `MSHookFunction`/`LHHookFunctions`/`substitute_hook_functions`/`LBHookMessage`/`MSHookMemory`/`LHPatchMemory`: also `#import <HookKit/HookKitCompat.h>` before the provider header (`substrate.h` etc).
 
+* HookKit v1 / 2.x consumer: nothing to do — see "HookKit v1 / 2.x compatibility" above.
+
 See `MIGRATION.md` (quick-start, shim gates, `migrate.py`, revert).
 
 ## Verification
@@ -131,6 +161,7 @@ See `MIGRATION.md` (quick-start, shim gates, `migrate.py`, revert).
 ```sh
 make test
 bash scripts/check_exports.sh
+bash scripts/check_legacy_abi.sh .theos/obj/HookKit.framework   # v1/2.x ABI
 ```
 
 The public ABI is declared under `Headers/HookKit/`; `HookKit.tbd` and

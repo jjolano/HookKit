@@ -205,6 +205,25 @@ write_gum_control() {
         'Tag: role::developer' > "build/control.$profile.gum"
 }
 
+# Gate the v1/2.x Objective-C ABI the facade restores. Compares the built
+# framework against every baseline under Tests/LegacyABI/Baselines.
+check_legacy_abi() {
+    local expected_install_name=${1:-} binary
+    binary=$(find .theos/obj -path '*/HookKit.framework/HookKit' -type f \
+        ! -path '*/arm64/*' ! -path '*/arm64e/*' \
+        ! -path '*/armv7/*' ! -path '*/armv7s/*' | head -n 1)
+    [ -n "$binary" ] || {
+        echo "error: built HookKit framework binary not found" >&2
+        return 1
+    }
+    if [ -n "$expected_install_name" ]; then
+        bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
+            --expected-install-name "$expected_install_name"
+    else
+        bash scripts/check_legacy_abi.sh "$binary"
+    fi
+}
+
 copy_release_artifact() {
     local artifact=$1 name=$2
     cp -p "$artifact" "build/$name.deb"
@@ -220,6 +239,7 @@ build_rootful_legacy() {
     legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
+    check_legacy_abi
     copy_release_artifact "$artifact" hookkit-rootful-legacy
 }
 
@@ -234,6 +254,11 @@ package_modern_lane() {
     modern_make HOOKKIT_LANE="$lane" LIBRARY_NAME= package FINALPACKAGE=1 \
         _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
     artifact=$(cat .theos/last_package)
+    if [ "$lane" = roothide ]; then
+        check_legacy_abi '@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
+    else
+        check_legacy_abi
+    fi
     copy_release_artifact "$artifact" "hookkit-$lane"
 
     # Then stage just HKGum with its own package metadata. The base package

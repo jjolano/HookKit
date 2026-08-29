@@ -17,9 +17,17 @@ typedef signed char BOOL;
 @end
 @interface NSArray <__covariant ObjectType>
 + (instancetype)arrayWithObjects:(const id [])objects count:(NSUInteger)count;
+// A typed receiver makes an undeclared selector an error, not a warning, so
+// the handful the ABI smokes actually send have to be declared here.
+- (NSUInteger)count;
+- (ObjectType)objectAtIndex:(NSUInteger)index;
 @end
-@interface NSDictionary <__covariant KeyType, __covariant ObjectType> @end
+@interface NSDictionary <__covariant KeyType, __covariant ObjectType>
+- (ObjectType)objectForKey:(KeyType)key;
+@end
 @interface NSNumber @end
 @interface NSValue @end
 @interface NSString @end
+// v1's Module.h declares openImageWithURL:, so the stub needs the name.
+@interface NSURL @end
 #endif

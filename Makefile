@@ -29,8 +29,13 @@ include $(THEOS)/makefiles/common.mk
 
 FRAMEWORK_NAME = HookKit
 
-# HookKit is the canonical 3.0 framework in every package lane.
+# HookKit is the canonical 3.0 framework in every package lane. The
+# Compatibility/ sources are 3.0 translators over the public plan API -- the
+# v1/2.x ABI surface, never the former backend/router implementation.
 HookKit_FILES = \
+	Sources/Compatibility/HKSubstitutor.m \
+	Sources/Compatibility/HKLegacyFacade.c \
+	Sources/Compatibility/HKLegacyModules.m \
 	Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Core/HKOwnership.c \
 	Sources/Core/HKImageCatalog.c Sources/Core/HKImageScope.c \
 	Sources/Core/HKInstalled.c Sources/Core/HKPlan.c Sources/Core/HKReport.c \
@@ -74,7 +79,9 @@ HookKit_LDFLAGS += -lroothide
 endif
 HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib
 HookKit_CFLAGS += -DHOOKKIT_CANONICAL_3=1
-HookKit_LDFLAGS += -lobjc -current_version 3.0.0 -compatibility_version 3.0.0
+# Current version advertises 3.0; compatibility stays at 2.5 so existing
+# binaries linked against HookKit v1/2.x continue to load against the facade.
+HookKit_LDFLAGS += -lobjc -current_version 3.0.0 -compatibility_version 2.5.1
 HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/scripts/export-HookKit.list
 
 include $(THEOS_MAKE_PATH)/framework.mk
@@ -140,6 +147,13 @@ check-exports:
 .PHONY: check-compat
 check-compat:
 	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT) $(COMPAT_GUM_ARTIFACT)$(ECHO_END)
+
+# Shadow 3.7.6 vendors a historical HookKit commit. Keep its retained facade
+# contract checked without making the sibling Shadow checkout a normal CI input.
+SHADOW_376_DIR ?= ../shadow
+.PHONY: check-shadow376-compat
+check-shadow376-compat:
+	$(ECHO_NOTHING)bash scripts/check_shadow376_compat.sh "$(SHADOW_376_DIR)"$(ECHO_END)
 
 # Build and stage every package-verified HookKit framework in Theos.
 .PHONY: install-theos
@@ -518,6 +532,22 @@ test-export-trie:
 test-macho:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_macho Tests/Host/test_macho.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_macho$(ECHO_END)
 
+# Legacy facade device smoke binary. NOT part of `make test`: it links the built
+# framework and has to run on a jailbroken device.
+#
+# The rm-before-scp is NOT optional. Overwriting a Mach-O in place that has
+# already been executed leaves the kernel's cached code signature stale for that
+# vnode, and the next exec is SIGKILLed by AMFI with no output and no crash
+# report. Delete, then copy.
+#
+# -O0 -fno-inline is load-bearing, not laziness: at -O2 the compiler inlines or
+# devirtualizes the calls to the hook targets, so the call never reaches the
+# patched entry and the test measures nothing.
+DEVICE_SMOKE_SDK ?= $(THEOS)/sdks/iPhoneOS13.7.sdk
+DEVICE_SMOKE_ARCH ?= arm64
+DEVICE_SMOKE_MIN ?= 13.0
+DEVICE_SMOKE_LDID ?= ldid
+
 # Canonical HookKit lifecycle smoke. This intentionally exercises only public C ABI
 # loading and immutable artifact reads; engine installation remains a
 # separate device gate until production registration is enabled.
@@ -551,10 +581,14 @@ comma := ,
 HK_PLATFORM_ENGINE_SOURCES = Sources/Core/HKImageScope.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c
 HK_PLATFORM_ENGINE_LDFLAGS = $(if $(filter Darwin,$(HOST_OS)),-lobjc)
 MODERN_TOOLCHAIN ?= $(THEOS)/toolchain/modern/linux/iphone
+DEVICE_SMOKE_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_SWIFTC ?= $(SDKBINPATH)/swiftc
 DEVICE_CANONICAL_LD ?= $(SDKBINPATH)/ld
 ifeq ($(HOST_OS),Linux)
+ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
+DEVICE_SMOKE_CLANG := $(MODERN_TOOLCHAIN)/bin/clang
+endif
 ifeq ($(DEVICE_CANONICAL_ARCH),arm64e)
 DEVICE_CANONICAL_CLANG := $(MODERN_TOOLCHAIN)/bin/clang
 DEVICE_CANONICAL_LD := $(MODERN_TOOLCHAIN)/bin/ld
@@ -581,12 +615,20 @@ DEVICE_CANONICAL_SWIFT_OBJECT = $(DEVICE_CANONICAL_SWIFTC) $(DEVICE_CANONICAL_SW
 endif
 endif
 
+DEVICE_SMOKE_TARGETS := device-smoke
 DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
-	device-swift-real-smoke \
+	device-swift-real-smoke device-swift-facade-real-smoke \
 	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
-	device-rebind-adapter-smoke device-static-smoke device-provider-smoke \
+	device-legacy-facade-smoke device-rebind-adapter-smoke \
+	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
 	device-provider-lifecycle-smoke device-provider-alias-smoke
-.PHONY: check-device-canonical-toolchain
+.PHONY: check-device-smoke-toolchain check-device-canonical-toolchain
+check-device-smoke-toolchain:
+ifeq ($(HOST_OS),Linux)
+ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
+	$(ECHO_NOTHING)bash $(CURDIR)/scripts/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
+endif
+endif
 
 check-device-canonical-toolchain:
 ifeq ($(HOST_OS),Linux)
@@ -595,7 +637,12 @@ ifeq ($(DEVICE_CANONICAL_ARCH),arm64e)
 endif
 endif
 
+$(DEVICE_SMOKE_TARGETS): check-device-smoke-toolchain
 $(DEVICE_CANONICAL_TARGETS): check-device-canonical-toolchain
+
+.PHONY: device-smoke
+device-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_SMOKE_CLANG) -Wall -Wextra -O0 -fno-inline -fobjc-arc -target $(DEVICE_SMOKE_ARCH)-apple-ios$(DEVICE_SMOKE_MIN) -isysroot $(DEVICE_SMOKE_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_smoke tests/device_smoke.m && $(DEVICE_SMOKE_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_smoke$(ECHO_END)
 
 .PHONY: device-lifecycle-smoke
 device-lifecycle-smoke:
@@ -616,6 +663,10 @@ device-swift-smoke:
 device-swift-real-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -c -o $(THEOS_OBJ_DIR)/device_swift_real_smoke.o tests/device_swift_real_smoke.c && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_real_smoke $(THEOS_OBJ_DIR)/device_swift_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_real_smoke$(ECHO_END)
 
+.PHONY: device-swift-facade-real-smoke
+device-swift-facade-real-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -c -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o tests/device_swift_facade_real_smoke.m && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -framework -Xlinker Foundation -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke$(ECHO_END)
+
 .PHONY: device-catalog-smoke
 device-catalog-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Resolvers -o $(THEOS_OBJ_DIR)/device_catalog_smoke tests/device_image_catalog.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKMachO.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_catalog_smoke$(ECHO_END)
@@ -628,9 +679,23 @@ device-resolver-smoke:
 device-rebind-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/Sources/Core -lobjc -o $(THEOS_OBJ_DIR)/device_rebind_smoke tests/device_rebind.m Sources/Engines/HKRebindEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c native/hk_native.c native/hk_arm64.c native/hk_symbols.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_smoke$(ECHO_END)
 
+.PHONY: device-legacy-facade-smoke
+device-legacy-facade-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_facade_smoke tests/device_legacy_facade.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_facade_smoke$(ECHO_END)
+
 .PHONY: device-rebind-adapter-smoke
 device-rebind-adapter-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke tests/device_rebind_adapter.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke$(ECHO_END)
+
+.PHONY: device-legacy-abi-smoke
+device-legacy-abi-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Wno-objc-method-access -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/tests/fake_headers -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_abi_smoke tests/device_legacy_abi.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_abi_smoke$(ECHO_END)
+
+# Models the actual HookKit call profile in Shadow 3.7.6. This only builds
+# the probe; deployment and runtime execution remain an explicit device step.
+.PHONY: device-shadow376-smoke
+device-shadow376-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_shadow376_smoke tests/device_shadow376_compat.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_shadow376_smoke$(ECHO_END)
 
 .PHONY: device-static-smoke
 device-static-smoke:

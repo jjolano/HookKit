@@ -1,3 +1,17 @@
+_OBJC_CLASS_$_HKSubstitutor
+_OBJC_METACLASS_$_HKSubstitutor
+_OBJC_CLASS_$_HookKitCore
+_OBJC_METACLASS_$_HookKitCore
+_OBJC_CLASS_$_HookKitModule
+_OBJC_METACLASS_$_HookKitModule
+_OBJC_CLASS_$_HookKitHook
+_OBJC_METACLASS_$_HookKitHook
+_OBJC_CLASS_$_HookKitClassHook
+_OBJC_METACLASS_$_HookKitClassHook
+_OBJC_CLASS_$_HookKitFunctionHook
+_OBJC_METACLASS_$_HookKitFunctionHook
+_OBJC_CLASS_$_HookKitMemoryHook
+_OBJC_METACLASS_$_HookKitMemoryHook
 _hk_runtime_create
 _hk_runtime_create_with_backend_override
 _hk_shared_runtime

@@ -2,6 +2,16 @@
 
 HookKit 3 is C-first. Existing Logos/Substrate tweaks migrate with **no source rewrite** for `%hook`, and **one import** for raw `MSHook*` calls. Recompile only; revert by deleting the import/flag.
 
+**Already on HookKit v1 or v2.x?** Nothing to migrate. Install the 3.0 package
+and your binaries keep running unrecompiled — all seven v1 classes
+(`HKSubstitutor`, `HookKitCore`, `HookKitModule`, `HookKitHook`,
+`HookKitClassHook`, `HookKitFunctionHook`, `HookKitMemoryHook`) are exported
+and translate to 3.0 plans. Two gaps: Modulous bundles are not loaded
+(`getModuleInfo` returns one built-in row) and per-library provider identity is
+retired (`activeType` is `HK_LIB_NONE`). See `README.md:HookKit v1 / 2.x
+compatibility` and `docs/3.0/LEGACY_ABI.md`. The rest of this document is for
+Logos/Substrate tweaks that never used HookKit.
+
 ## 1. Install HookKit into Theos (once)
 
 ```sh
