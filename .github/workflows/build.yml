@@ -47,9 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-          target_link_flags=()
+          target_link_flags=
           if [[ "${{ matrix.arch }}" == arm64 ]]; then
-            target_link_flags=(-Wl,-no_fixup_chains)
+            target_link_flags=-Wl,-no_fixup_chains
           fi
           out="$RUNNER_TEMP/hookkit-live-${{ matrix.arch }}"
           targets="$RUNNER_TEMP/libHookKitLiveTargets.dylib"
@@ -58,7 +58,7 @@ jobs:
             -install_name @rpath/libHookKitLiveTargets.dylib \
             -o "$targets" Tests/MacOS/live_hook_targets.c
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
-            -arch "${{ matrix.arch }}" "${target_link_flags[@]}" \
+            -arch "${{ matrix.arch }}" ${target_link_flags} \
             -framework Foundation -lpthread \
             -o "$out" \
             Tests/MacOS/test_live_hooks.m \
