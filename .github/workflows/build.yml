@@ -12,7 +12,7 @@ jobs:
     name: macos-pac
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # This exercises real Apple-silicon PAC instructions, not HookKit's
       # tagged host simulator. It does not claim macOS backend or iOS
@@ -38,7 +38,7 @@ jobs:
       matrix:
         arch: [arm64, arm64e]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run live hook smoke
         run: |
@@ -74,7 +74,7 @@ jobs:
     name: rootful-legacy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Theos and old-ABI toolchain
         run: |
@@ -102,7 +102,7 @@ jobs:
       - name: Verify Dobby provenance
         run: bash scripts/rebuild-dobby.sh --check
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hookkit-rootful-legacy
           path: build/hookkit-rootful-legacy.deb
@@ -115,10 +115,10 @@ jobs:
       matrix:
         flavor: [rootful-modern, rootless, roothide]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Restore Frida Gum devkit
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             vendor/gum/frida-gum.h
@@ -128,6 +128,7 @@ jobs:
 
       - name: Install Theos
         run: |
+          brew untap aws/tap 2>/dev/null || true
           brew install dpkg ldid
           sudo git clone --recursive --quiet https://github.com/roothide/theos.git "$THEOS"
 
@@ -146,7 +147,7 @@ jobs:
       - name: Build and verify
         run: ./build.sh "${{ matrix.flavor }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hookkit-${{ matrix.flavor }}
           path: |
