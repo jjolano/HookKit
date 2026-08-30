@@ -6,6 +6,9 @@ on:
 
 env:
   THEOS: /opt/theos
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: advice.defaultBranchName
+  GIT_CONFIG_VALUE_0: "false"
 
 jobs:
   pac:
@@ -44,6 +47,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
+          target_link_flags=()
+          if [[ "${{ matrix.arch }}" == arm64 ]]; then
+            target_link_flags=(-Wl,-no_fixup_chains)
+          fi
           out="$RUNNER_TEMP/hookkit-live-${{ matrix.arch }}"
           targets="$RUNNER_TEMP/libHookKitLiveTargets.dylib"
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline \
@@ -51,7 +58,7 @@ jobs:
             -install_name @rpath/libHookKitLiveTargets.dylib \
             -o "$targets" Tests/MacOS/live_hook_targets.c
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
-            -arch "${{ matrix.arch }}" -Wl,-no_fixup_chains \
+            -arch "${{ matrix.arch }}" "${target_link_flags[@]}" \
             -framework Foundation -lpthread \
             -o "$out" \
             Tests/MacOS/test_live_hooks.m \
@@ -129,7 +136,7 @@ jobs:
       - name: Install Theos
         run: |
           brew untap aws/tap 2>/dev/null || true
-          brew install dpkg ldid
+          brew install make dpkg ldid
           sudo git clone --recursive --quiet https://github.com/roothide/theos.git "$THEOS"
 
       # The lane TARGETs pin iPhoneOS16.5.sdk (see Makefile) so builds are
@@ -145,6 +152,8 @@ jobs:
           sudo tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$THEOS/sdks"
 
       - name: Build and verify
+        env:
+          MAKE_COMMAND: gmake
         run: ./build.sh "${{ matrix.flavor }}"
 
       - uses: actions/upload-artifact@v7

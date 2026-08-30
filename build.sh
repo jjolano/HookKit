@@ -5,6 +5,7 @@ ROOT=$(cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 : "${THEOS:?THEOS must point to Theos}"
 PACKAGE_VERSION=3.0.0-1
+MAKE_COMMAND=${MAKE_COMMAND:-make}
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-build.XXXXXX")
 MAKE_ARGS=("THEOS_LIBRARY_PATH=$STAGE/lib")
 trap 'rm -rf "$STAGE"' EXIT
@@ -13,7 +14,7 @@ rm -rf build
 mkdir -p build
 
 run_make() {
-    make "${MAKE_ARGS[@]}" "$@"
+    "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
 }
 
 # Modern lanes need a toolchain that stamps arm64e slices with the versioned
@@ -53,11 +54,11 @@ require_modern_toolchain() {
 # Modern-lane make: on Linux the toolchain above replaces theos's default.
 modern_make() {
     if [ "$(uname -s)" = Darwin ]; then
-        make "${MAKE_ARGS[@]}" "$@"
+        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
     else
         # Theos's Linux default predates this modern wrapper and otherwise
         # selects libroot_oldabi.a even when clang emits the new ABI.
-        make "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" IS_NEW_ABI=1 "$@"
+        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" IS_NEW_ABI=1 "$@"
     fi
 }
 
@@ -93,9 +94,9 @@ require_oldabi_toolchain() {
 
 legacy_make() {
     if [ "$(uname -s)" = Darwin ]; then
-        DEVELOPER_DIR="$OLDABI_DEVELOPER_DIR" make "${MAKE_ARGS[@]}" "$@"
+        DEVELOPER_DIR="$OLDABI_DEVELOPER_DIR" "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
     else
-        make "${MAKE_ARGS[@]}" SDKBINPATH="$OLDABI_TOOLCHAIN/bin" THEOS_SDKS_PATH="$OLDABI_SDKS" "$@"
+        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" SDKBINPATH="$OLDABI_TOOLCHAIN/bin" THEOS_SDKS_PATH="$OLDABI_SDKS" "$@"
     fi
 }
 

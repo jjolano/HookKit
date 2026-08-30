@@ -32,6 +32,10 @@ endif
 
 include $(THEOS)/makefiles/common.mk
 
+# Current ld64 no longer accepts Theos' legacy duplicate-symbol policy flag.
+# It is safe to remove here: HookKit does not rely on duplicate definitions.
+_THEOS_TARGET_LDFLAGS := $(subst -multiply_defined suppress,,$(_THEOS_TARGET_LDFLAGS))
+
 FRAMEWORK_NAME = HookKit
 
 # HookKit is the canonical 3.0 framework in every package lane. The
@@ -82,11 +86,14 @@ HookKit_LDFLAGS += -install_name @rpath/HookKit.framework/HookKit
 else
 HookKit_LDFLAGS += -lroothide
 endif
-HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -rpath /usr/lib -rpath /var/jb/usr/lib
+HookKit_LDFLAGS += -rpath /Library/Frameworks -rpath /usr/lib
+ifneq ($(THEOS_PACKAGE_SCHEME),rootless)
+HookKit_LDFLAGS += -rpath /var/jb/Library/Frameworks -rpath /var/jb/usr/lib
+endif
 HookKit_CFLAGS += -DHOOKKIT_CANONICAL_3=1
 # Current version advertises 3.0; compatibility stays at 2.5 so existing
 # binaries linked against HookKit v1/2.x continue to load against the facade.
-HookKit_LDFLAGS += -lobjc -current_version 3.0.0 -compatibility_version 2.5.1
+HookKit_LDFLAGS += -current_version 3.0.0 -compatibility_version 2.5.1
 HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/scripts/export-HookKit.list
 
 include $(THEOS_MAKE_PATH)/framework.mk
@@ -129,7 +136,9 @@ HKGum_FILES = vendor/gum/hkgum.c
 HKGum_ARCHS = arm64 arm64e
 # Export boundary: only the 3 hkgum_* wrappers (scripts/export-HKGum.list);
 # the ~6k frida-gum symbols become local.
-HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/scripts/export-HKGum.list
+# Both Gum and this wrapper require static constructors; keep the linker
+# diagnostic useful for other products without reporting these known entries.
+HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/scripts/export-HKGum.list -Wl,-no_warn_inits
 HKGum_INSTALL_PATH = /usr/lib
 include $(THEOS_MAKE_PATH)/library.mk
 
