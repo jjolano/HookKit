@@ -166,20 +166,10 @@ if [ "$PROFILE" = rootful-legacy ]; then
             exit 1
         }
     done
-    for field in Conflicts Replaces; do
-        "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit3 || {
-            echo "FAIL legacy package $field does not replace the retired HookKit3 package" >&2
-            exit 1
-        }
-    done
 else
     for field in Conflicts Replaces; do
         "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit.legacy || {
             echo "FAIL modern package $field does not include me.jjolano.fmwk.hookkit.legacy" >&2
-            exit 1
-        }
-        "$DPKG_DEB" -f "$ARTIFACT" "$field" | grep -Fq me.jjolano.fmwk.hookkit3 || {
-            echo "FAIL modern package $field does not replace the retired HookKit3 package" >&2
             exit 1
         }
     done

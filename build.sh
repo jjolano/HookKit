@@ -119,8 +119,8 @@ write_control() {
             floor=9.0
             arch=iphoneos-arm
             ceiling=', firmware (<< 14.0)'
-            conflicts=', me.jjolano.fmwk.hookkit, me.jjolano.fmwk.hookkit3'
-            replaces=', me.jjolano.fmwk.hookkit, me.jjolano.fmwk.hookkit3'
+            conflicts=', me.jjolano.fmwk.hookkit'
+            replaces=', me.jjolano.fmwk.hookkit'
             provides=', me.jjolano.fmwk.hookkit'
             ;;
         rootful-modern)
@@ -128,8 +128,8 @@ write_control() {
             name='HookKit Framework (Modern Rootful)'
             floor=14.0
             arch=iphoneos-arm
-            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
-            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy'
+            replaces=', me.jjolano.fmwk.hookkit.legacy'
             provides=
             ;;
         rootless)
@@ -137,8 +137,8 @@ write_control() {
             name='HookKit Framework (Rootless)'
             floor=15.0
             arch=iphoneos-arm64
-            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
-            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy'
+            replaces=', me.jjolano.fmwk.hookkit.legacy'
             provides=
             ;;
         roothide)
@@ -147,8 +147,8 @@ write_control() {
             floor=15.0
             arch=iphoneos-arm64e
             ceiling=', firmware (<< 18.0)'
-            conflicts=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
-            replaces=', me.jjolano.fmwk.hookkit.legacy, me.jjolano.fmwk.hookkit3'
+            conflicts=', me.jjolano.fmwk.hookkit.legacy'
+            replaces=', me.jjolano.fmwk.hookkit.legacy'
             provides=
             ;;
         *) echo "error: no control profile for $profile" >&2; return 1 ;;

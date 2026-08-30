@@ -89,9 +89,8 @@ classes. Everything else stays hidden — enforced today by
 the v1.0.1 seven-class surface).
 
 Every package is version `3.0.0-1`. Canonical modern packages conflict with
-and replace both `me.jjolano.fmwk.hookkit.legacy` and the retired
-`me.jjolano.fmwk.hookkit3`; the legacy package reciprocally replaces the
-modern and retired packages.
+and replace `me.jjolano.fmwk.hookkit.legacy`; the legacy package reciprocally
+conflicts with, replaces, and provides `me.jjolano.fmwk.hookkit`.
 
 ## v1.x module API (`HookKitCore`/`HookKitModule`/Modulous)
 
