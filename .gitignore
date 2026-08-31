@@ -1,16 +1,12 @@
 .theos/
-packages/
-build/
+.claude/
+.slim/
 .DS_Store
 .vscode/
 __pycache__/
 *.pyc
-artifacts/perf-*.log
 
-# Downloaded on demand by scripts/fetch-gum.sh; pins live in vendor/gum/gum.lock.
+# Downloaded on demand by tools/dependencies/fetch-gum.sh; pins live in vendor/gum/gum.lock.
 vendor/gum/frida-gum.h
 vendor/gum/libfrida-gum.a
 vendor/gum/.devkit-*
-
-# deepwork
-.slim/deepwork/

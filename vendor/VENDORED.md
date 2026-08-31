@@ -61,7 +61,7 @@ upstream commit). Committed local patches:
 - `cfc736d` (2026-08-10) — off-by-one fix in rebind record append.
 
 - `fbe2235` (2026-08-11) — removed the DSC parser by stubbing
-  `litehook_locate_dsc` / `litehook_find_dsc_symbol`; `native/hk_symbols.c`
+  `litehook_locate_dsc` / `litehook_find_dsc_symbol`; `src/native/hk_symbols.c`
   replaces it.
 
 Rebuild: none; retained source-only and not compiled or packaged by the
@@ -87,11 +87,11 @@ and the patch touches no public symbol or signature — ABI unchanged.
   (upstream: `blr` at 0x300 before `str` at 0x334); arm64e `str` at 0x3a8
   before `blraa` at 0x3d4 (upstream: `blraa` at 0x394 before `str` at 0x3c4).
 
-Rebuild/verify: `scripts/rebuild-dobby.sh --check` verifies the pinned source
+Rebuild/verify: `tools/dependencies/rebuild-dobby.sh --check` verifies the pinned source
 archive, machine-applicable patch, checked-in archive SHA-256, slices, member
 count, arm64e ABI, and required exports. `--rebuild` requires explicit
 `DOBBY_SDK` and `DOBBY_TOOLCHAIN` paths and writes an ignored candidate under
-`build/dobby-rebuild/`; it never replaces the checked-in archive. The lock
+`.theos/dobby-rebuild/`; it never replaces the checked-in archive. The lock
 records iOS 14.0 for both arm64 and arm64e.
 
 ### gum (wrapper only; devkit binary is pristine)
@@ -99,10 +99,10 @@ records iOS 14.0 for both arm64 and arm64e.
 - `a99f14d` (2026-08-10) — `hkgum_begin_transaction`/`hkgum_end_transaction`
   return `void`: frida-gum 17.17's transaction API reports no failure, so the
   previous `int` wrappers faked a failure channel. Only `hkgum.c` is local;
-  `scripts/fetch-gum.sh` obtains `frida-gum.h` and `libfrida-gum.a` from the
+  `tools/dependencies/fetch-gum.sh` obtains `frida-gum.h` and `libfrida-gum.a` from the
   unmodified, checksum-pinned devkits when a modern package is built.
 
-Rebuild: none — `scripts/fetch-gum.sh` downloads the two Frida 17.17.0
+Rebuild: none — `tools/dependencies/fetch-gum.sh` downloads the two Frida 17.17.0
 devkits, verifies their SHA-256 values from `gum.lock`, and lipo-merges their
 static libraries; `hkgum.c` is compiled by the Makefile (`HKGum` product).
 
@@ -170,11 +170,11 @@ License: 3-clause BSD per the header text. Rebuild: none — header only.
 ## Rebuild commands
 
 - fishhook, litehook: source-only; no release build or package consumes them.
-- dobby: run `bash scripts/rebuild-dobby.sh --check` before release. To build
+- dobby: run `bash tools/dependencies/rebuild-dobby.sh --check` before release. To build
   a reviewed candidate, set `DOBBY_SDK` and `DOBBY_TOOLCHAIN`, then run
-  `bash scripts/rebuild-dobby.sh --rebuild`. Replacing `libdobby.a` requires
+  `bash tools/dependencies/rebuild-dobby.sh --rebuild`. Replacing `libdobby.a` requires
   a deliberate SHA update in `dobby.lock`.
-- gum: none — run `bash scripts/fetch-gum.sh`; it downloads the two
+- gum: none — run `bash tools/dependencies/fetch-gum.sh`; it downloads the two
   Frida 17.17.0 devkits recorded in `vendor/gum/gum.lock`, verifies them,
   and lipo-merges the two static-library slices. Update the lock together
   with a Frida version bump.

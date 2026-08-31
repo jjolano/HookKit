@@ -1,8 +1,10 @@
 # HookKit 3.0 — Implementation Status
 
-HookKit 3 ships the native `hk_*` runtime API. The retired 2.x façade and ABI
-fixtures are intentionally absent; Git history preserves their implementation
-and migration record.
+HookKit 3 ships the native `hk_*` runtime API and the v1/2 compatibility
+facade. `HKSubstitutor` and all six v1 module classes remain exported as
+translators over the 3.0 plan lifecycle, and the compatibility headers remain
+part of the framework. Historical ABI snapshot fixtures and comparison tooling
+are intentionally absent.
 
 Supported release lanes remain independent of that API cleanup:
 
@@ -11,5 +13,7 @@ Supported release lanes remain independent of that API cleanup:
 - `rootless` and `roothide`: iOS 15+, arm64/arm64e.
 
 The release checks are `make test`, each `./build.sh` lane, and
-`scripts/check_exports.sh`. Historical milestone detail lives in Git rather
-than defining the unreleased 3.0 surface.
+`tools/release/check_exports.sh`. They cover current public-header compilation,
+package/linker compatibility, and exact current exports; compatibility device
+smokes live in `tests/device/`. No release check claims to compare historical
+selector or type-encoding snapshots. Historical milestone detail lives in Git.

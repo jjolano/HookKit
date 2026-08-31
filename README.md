@@ -94,8 +94,10 @@ Two things v1 had that 3.0 does not: **Modulous plugin bundles** (nothing is
 read from `/Library/Modulous/HookKit`; `getModuleInfo` returns one built-in
 row) and **per-library provider identity** (`activeType` is `HK_LIB_NONE`,
 `getAvailableCategories` is `HK_CAT_NONE`). Routing is the 3.0 runtime's.
-`docs/3.0/LEGACY_ABI.md` is the authoritative contract;
-`Tests/LegacyABI/Baselines/` gates it every release build.
+`docs/3.0/LEGACY_ABI.md` is the authoritative contract. Current compatibility
+is covered by the shipped facade and headers, linker compatibility, exact
+current export checks, public-header compile tests, and device compatibility
+smokes. Historical selector/type-encoding snapshots are not release-gated.
 
 ## Building
 
@@ -154,15 +156,16 @@ make install-theos                    # installs framework + hookkit Logos gener
 
 * HookKit v1 / 2.x consumer: nothing to do — see "HookKit v1 / 2.x compatibility" above.
 
-See `MIGRATION.md` (quick-start, shim gates, `migrate.py`, revert).
+See `docs/MIGRATION.md` (quick-start, shim gates, `migrate.py`, revert).
 
 ## Verification
 
 ```sh
 make test
-bash scripts/check_exports.sh
-bash scripts/check_legacy_abi.sh .theos/obj/HookKit.framework   # v1/2.x ABI
+bash tools/release/check_exports.sh
 ```
 
-The public ABI is declared under `Headers/HookKit/`; `HookKit.tbd` and
-`scripts/export-HookKit.list` are the release export contract.
+The public ABI is declared under `include/HookKit/`.
+`packaging/abi/HookKit.tbd` and
+`packaging/exports/export-HookKit.list` are the current release export
+contract. Compatibility device smokes live under `tests/device/`.

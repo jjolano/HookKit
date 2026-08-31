@@ -1,9 +1,8 @@
-# HookKit 3.0 — Public C ABI (draft)
+# HookKit 3.0 — Public C ABI
 
-Status: **draft for Milestone 1**. This is the normative reference Milestone
-3 turns into actual headers under `Headers/HookKit/`, with compile tests in
-C, Objective-C, C++, and Objective-C++. Nothing here is implemented yet —
-see `IMPLEMENTATION_STATUS.md`.
+Status: **implemented**. The normative declarations live under
+`include/HookKit/`, with compile tests in C, Objective-C, C++, and
+Objective-C++ under `tests/host/`. See `IMPLEMENTATION_STATUS.md`.
 
 Companion docs: `ARCHITECTURE.md` (invariants this ABI exists to encode),
 `REACHABILITY_VECTOR.md`, `ORIGINAL_AND_CONTINUATION_MODEL.md`,
@@ -306,8 +305,9 @@ reflect that exclusion — the exclusion is never silent.
 **Symbol target**: symbol string; name convention (C source name, exact
 Mach-O name, C++ mangled, Swift mangled); exported/private visibility
 requirement; defining-image selector; caller/import-image scope; alias
-policy; whether an interior address is permitted. Leading underscores are
-normalized internally.
+policy; whether an interior address is permitted. C lookup tries the supplied
+spelling, then its linker-prefixed form; use `HK_SYMBOL_NAME_MACHO_EXACT` for
+one exact Mach-O spelling.
 
 **Address target**: target address; expected image identity; optional
 expected image UUID; optional expected initial bytes; whether address
@@ -418,7 +418,10 @@ typedef struct {
 ```
 
 All request-owned data is deep-copied when the hook is added to the plan.
-Stable IDs are validated unique within the plan at add time.
+Stable IDs and target identities are each validated unique within the plan at
+add time. To chain a compatible target, install it through separately
+committed plans: a successor prepared before its predecessor commits fails
+safely rather than overwriting a stale target state.
 
 ## Plan state
 
@@ -597,7 +600,7 @@ oversight.
 `hk_artifact_kind_t`, `hk_artifact_state_t`, the artifact record layout, and
 the snapshot functions (`hk_report_copy_artifacts`,
 `hk_runtime_copy_artifacts`, `hk_copy_process_artifacts`, ...) are specified
-in `ARTIFACT_MANIFEST.md` (pending) and `Schemas/hookkit-artifact.schema.json`
-rather than duplicated here — the schema is the source of truth for artifact
-field layout since Milestone 2's manifest extractor and the eventual
-`Tools/abi/` scripts both consume it directly.
+in `ARTIFACT_MANIFEST.md` (pending) and
+`metadata/schemas/hookkit-artifact.schema.json` rather than duplicated here.
+The schema is the serialized artifact contract; the public C declaration lives
+in `include/HookKit/HookKitArtifacts.h`.

@@ -1,7 +1,7 @@
 # HookKit 3.0 — Engine Contract
 
-The executable contract lives in `Sources/Core/HKEngineInternal.h` and is
-enforced by `Sources/Core/HKPlan.c`.
+The executable contract lives in `src/core/HKEngineInternal.h` and is
+enforced by `src/core/HKPlan.c`.
 
 - Analysis is read-only.
 - Preparation may reserve resources but never mutates the requested target.

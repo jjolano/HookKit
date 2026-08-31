@@ -103,39 +103,51 @@ call.
 
 ## Repository layout
 
-The rewrite moves toward:
+The repository uses:
 
 ```text
-Headers/
-  HookKit.h                    # C API include-path shim
+include/
+  HookKit.h                    # Objective-C v1/2 compatibility umbrella
   HookKit/
-    HookKit.h                  # new C API only — no Foundation pulled in
-    HookKitBase.h
-    HookKitTargets.h
-    HookKitRuntime.h
-    HookKitPlan.h
-    HookKitResults.h
-    HookKitArtifacts.h
-    HookKitObjC.h
-    HookKitSwift.h
-
-Sources/
-  Core/          # HKRuntime, HKPlan, HKDomain, HKOperation, HKRouter,
-                 # HKResult, HKReport, HKArtifactLedger, HKOwnership,
-                 # HKOriginalSlot, HKEffects, HKExecutor, HKDiagnostics
-  Platform/Apple/  # HKImages, HKMachO, HKMemory, HKProtections, HKPtrauth, ...
-  Resolvers/     # export/import/private-symbol/shared-cache/ObjC/Swift resolvers
-  Engines/
-    ObjC/ Rebind/ NativeInline/ Memory/ Swift/ Providers/
-Schemas/         # hookkit-artifact, hookkit-provider-evidence,
-                 # shadow-hook-manifest, shadow-route-report
-
-ProviderEvidence/ # libhooker/ ellekit/ substrate/ substitute/ dobby/ gum/
-
-Tests/            # Host/ Device/ Holdout/ Fuzz/ Fixtures/
-Tools/            # abi/ shadow-manifest-extract/ route-feasibility/ provider-audit/
+    HookKit.h                  # C API umbrella
+    Compat.h Core.h Hook.h Module.h
+    HookKitBase.h HookKitTargets.h HookKitRuntime.h HookKitPlan.h
+    HookKitResults.h HookKitArtifacts.h HookKitObjC.h HookKitSwift.h
+src/
+  compatibility/              # v1/2 facade and module-class translators
+  core/                       # runtime, plans, reports, ownership, artifacts
+  engines/                    # built-in engines and provider adapters
+  internal/                   # framework-private Objective-C/platform seams
+  native/                     # native patching, relocation, and Swift support
+  resolvers/                  # Mach-O, export, import, and symbol resolution
+tests/
+  host/
+  macos/
+  device/
+  fixtures/headers/
+  benchmarks/baselines/       # tracked host.json and device.json
+tools/
+  bench/
+  conformance/
+  dependencies/
+  logos-hookkit/
+  provider-evidence/
+  release/
+  shadow-manifest-extract/
+metadata/
+  provider-evidence/
+  schemas/
+  manifests/
+packaging/
+  abi/
+  exports/
+  layout/
+  resources/
+vendor/
 docs/3.0/
+.theos/                       # generated build, release, bench, and rebuild output
 ```
 
-HookKit 3 ships only this runtime and its `hk_*` public API. Pre-3.0 source
-and ABI commitments are retained in Git history, not in the framework.
+HookKit 3 ships the `hk_*` runtime together with the v1/2 compatibility
+facade, compatibility classes, headers, and linker surface. Historical ABI
+snapshot tooling is not part of the repository or release gate.

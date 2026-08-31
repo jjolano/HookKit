@@ -45,7 +45,7 @@ other copies still matter for source-repository distribution and future use.
   SHA-256, checked-in archive SHA-256, expected slices/member count, and
   source patch now live in `vendor/dobby/dobby.lock` and
   `vendor/dobby/patches/0001-publish-original-before-activation.patch`.
-  `scripts/rebuild-dobby.sh --check` verifies all of them without rewriting
+  `tools/dependencies/rebuild-dobby.sh --check` verifies all of them without rewriting
   the vendor archive.
 - Apache-2.0 section 4 requires a license copy for recipients and prominent
   change notices in modified source that is distributed. See the
@@ -73,7 +73,7 @@ patch/lock are now shipped or retained as above.
   top-level `COPYING` is therefore not a verified complete notice inventory
   for the binary.
 
-**Technical remediation:** `layout/usr/share/doc/hookkit/` now supplies a
+**Technical remediation:** `packaging/layout/usr/share/doc/hookkit/` now supplies a
 version-pinned Frida devkit SBOM and the identified full license texts in the
 base package. Every optional Gum package has an exact dependency on that base,
 so the notices are installed without file ownership conflicts. This remains a
@@ -106,7 +106,7 @@ the source, or remove this unused fork if retaining it has no near-term value.
   The license's sections 2.1–2.3 impose source, modified-code, and object-code
   conditions; the Apple headers themselves are unmodified.
 - No LiteHook source is part of the shipped framework. The Apple fixup header
-  is currently compiled only by `Tests/Host/test_chained_fixups.c`.
+  is currently compiled only by `tests/host/test_chained_fixups.c`.
 
 **Technical remediation:** `vendor/litehook/APSL-2.0.txt` now retains the
 full APSL-2.0 text with the source-only headers.

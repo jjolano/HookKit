@@ -13,7 +13,7 @@ up:
 ```bash
 make install-theos            # build + install all four lanes
 # or, one lane only:
-bash scripts/install-theos.sh <rootful-legacy|rootful-modern|rootless|roothide>
+bash tools/release/install-theos.sh <rootful-legacy|rootful-modern|rootless|roothide>
 ```
 
 - Do it **after the commit lands**, not before — a refresh models a committed state.
@@ -36,6 +36,5 @@ for it. A peer request is never authorization to publish.
 
 - Host test suite (no device): `make test` — runs serially clean; a parallel
   `-j` run can race on the shared `.theos/obj` dir, so prefer `make -j1 test`.
-- Device smokes live in `tests/device_*`; see the memory notes / `scripts/` for
-  the jailbroken-device workflow (rm the old binary before scp — code signing
-  kills an overwrite-in-place).
+- Device smokes live in `tests/device/`; helper scripts live under `tools/`
+  (rm the old binary before scp — code signing kills an overwrite-in-place).

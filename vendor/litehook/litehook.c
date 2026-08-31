@@ -70,7 +70,7 @@ void os_thread_self_restrict_tpro_to_ro(void)
 
 size_t _lth_fstrlen(FILE *f)
 {
-	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	/* ponytail: shared-cache parser removed — use src/native/hk_symbols.c */
 	(void)f;
 	return 0;
 }
@@ -196,13 +196,13 @@ kern_return_t litehook_hook_function(void *source, void *target)
 
 const char *litehook_locate_dsc(void)
 {
-	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	/* ponytail: shared-cache parser removed — use src/native/hk_symbols.c */
 	return NULL;
 }
 
 uintptr_t litehook_get_dsc_slide(void)
 {
-	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	/* ponytail: shared-cache parser removed — use src/native/hk_symbols.c */
 	return 0;
 }
 
@@ -318,7 +318,7 @@ void *litehook_find_symbol(const mach_header_u *header, const char *symbolName)
 
 void *litehook_find_dsc_symbol(const char *imagePath, const char *symbolName)
 {
-	/* ponytail: shared-cache parser removed — use native/hk_symbols.c */
+	/* ponytail: shared-cache parser removed — use src/native/hk_symbols.c */
 	(void)imagePath;
 	(void)symbolName;
 	return NULL;

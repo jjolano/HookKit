@@ -30,6 +30,9 @@ else ifneq ($(HOOKKIT_LANE),)
 $(error unknown HOOKKIT_LANE '$(HOOKKIT_LANE)')
 endif
 
+THEOS_BUILD_DIR := $(CURDIR)/.theos
+THEOS_LAYOUT_DIR_NAME := packaging/layout
+
 include $(THEOS)/makefiles/common.mk
 
 # Current ld64 no longer accepts Theos' legacy duplicate-symbol policy flag.
@@ -39,32 +42,33 @@ _THEOS_TARGET_LDFLAGS := $(subst -multiply_defined suppress,,$(_THEOS_TARGET_LDF
 FRAMEWORK_NAME = HookKit
 
 # HookKit is the canonical 3.0 framework in every package lane. The
-# Compatibility/ sources are 3.0 translators over the public plan API -- the
+# src/compatibility sources are 3.0 translators over the public plan API -- the
 # v1/2.x ABI surface, never the former backend/router implementation.
 HookKit_FILES = \
-	Sources/Compatibility/HKSubstitutor.m \
-	Sources/Compatibility/HKLegacyFacade.c \
-	Sources/Compatibility/HKLegacyModules.m \
-	Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Core/HKOwnership.c \
-	Sources/Core/HKImageCatalog.c Sources/Core/HKImageScope.c \
-	Sources/Core/HKInstalled.c Sources/Core/HKPlan.c Sources/Core/HKReport.c \
-	Sources/Core/HKRuntime.c Sources/Core/HKRuntimeSymbol.c \
-	Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c \
-	Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c \
-	Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c \
-	Sources/Engines/HKProviderVtable.c \
-	Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c \
-	Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c \
-	Sources/Engines/HKSwiftEngine.c Sources/Engines/HKStaticPool.c \
-	Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c \
-	Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c \
-	Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c \
-	Internal/HKInlinePreflight.m \
-	native/hk_native.c native/hk_arm64.c native/hk_symbols.c native/hk_swift.c
+	src/compatibility/HKSubstitutor.m \
+	src/compatibility/HKLegacyFacade.c \
+	src/compatibility/HKLegacyModules.m \
+	src/core/HKArtifactLedger.c src/core/HKIDs.c src/core/HKOwnership.c \
+	src/core/HKImageCatalog.c src/core/HKImageScope.c \
+	src/core/HKInstalled.c src/core/HKPlan.c src/core/HKReport.c \
+	src/core/HKRuntime.c src/core/HKRuntimeSymbol.c \
+	src/engines/HKInlineEngine.c src/engines/HKInlineVtable.c \
+	src/engines/HKMemoryEngine.c src/engines/HKMemoryVtable.c \
+	src/engines/HKObjCEngine.c src/engines/HKObjCVtable.c \
+	src/engines/HKProviderVtable.c \
+	src/engines/HKRebindEngine.c src/engines/HKRebindVtable.c \
+	src/engines/HKRelocInlineEngine.c src/engines/HKRelocInlineVtable.c \
+	src/engines/HKSwiftEngine.c src/engines/HKStaticPool.c \
+	src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c \
+	src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c \
+	src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c \
+	src/internal/HKInlinePreflight.m \
+	src/native/hk_native.c src/native/hk_arm64.c src/native/hk_symbols.c src/native/hk_swift.c
 HookKit_FRAMEWORKS = Foundation
 HookKit_INSTALL_PATH = /Library/Frameworks
-HookKit_PUBLIC_HEADERS = Headers/HookKit.h
-HookKit_CFLAGS = -fobjc-arc -I. -IHeaders
+HookKit_PUBLIC_HEADERS = include/HookKit.h
+HookKit_RESOURCE_DIRS = packaging/resources
+HookKit_CFLAGS = -fobjc-arc -I. -Iinclude
 HookKit_LDFLAGS =
 # Jailbreak-root seam is compile-time per scheme:
 # rootful = identity, rootless = libroot (auto-linked -lroot by theos),
@@ -94,7 +98,7 @@ HookKit_CFLAGS += -DHOOKKIT_CANONICAL_3=1
 # Current version advertises 3.0; compatibility stays at 2.5 so existing
 # binaries linked against HookKit v1/2.x continue to load against the facade.
 HookKit_LDFLAGS += -current_version 3.0.0 -compatibility_version 2.5.1
-HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/scripts/export-HookKit.list
+HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/packaging/exports/export-HookKit.list
 
 include $(THEOS_MAKE_PATH)/framework.mk
 
@@ -103,7 +107,7 @@ include $(THEOS_MAKE_PATH)/framework.mk
 after-HookKit-all::
 	$(ECHO_NOTHING)rm -rf "$(THEOS_OBJ_DIR)/HookKit.framework/Headers/HookKit"$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p "$(THEOS_OBJ_DIR)/HookKit.framework/Headers/HookKit"$(ECHO_END)
-	$(ECHO_NOTHING)rsync -a Headers/HookKit/ "$(THEOS_OBJ_DIR)/HookKit.framework/Headers/HookKit/"$(ECHO_END)
+	$(ECHO_NOTHING)rsync -a include/HookKit/ "$(THEOS_OBJ_DIR)/HookKit.framework/Headers/HookKit/"$(ECHO_END)
 
 # Dobby's current archive hard-imports post-iOS-9 private symbols. Keep it out
 # of the iOS-9 lane; its provider engine is unavailable there.
@@ -134,45 +138,45 @@ ifneq ($(HOOKKIT_LANE),rootful-legacy)
 LIBRARY_NAME = HKGum
 HKGum_FILES = vendor/gum/hkgum.c
 HKGum_ARCHS = arm64 arm64e
-# Export boundary: only the 3 hkgum_* wrappers (scripts/export-HKGum.list);
-# the ~6k frida-gum symbols become local.
+# Export boundary: only the 3 hkgum_* wrappers
+# (packaging/exports/export-HKGum.list); the ~6k frida-gum symbols become local.
 # Both Gum and this wrapper require static constructors; keep the linker
 # diagnostic useful for other products without reporting these known entries.
-HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/scripts/export-HKGum.list -Wl,-no_warn_inits
+HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/packaging/exports/export-HKGum.list -Wl,-no_warn_inits
 HKGum_INSTALL_PATH = /usr/lib
 include $(THEOS_MAKE_PATH)/library.mk
 
 # The 76 MB Gum devkit is intentionally not tracked. Fetch its pinned,
 # checksummed release assets only for a lane that builds HKGum.
 before-HKGum-all::
-	$(ECHO_NOTHING)bash scripts/fetch-gum.sh$(ECHO_END)
+	$(ECHO_NOTHING)bash tools/dependencies/fetch-gum.sh$(ECHO_END)
 endif
 
 # Release export check: verifies every built binary exports exactly its
-# allowlist (scripts/export-*.list), per arch slice. Discovers the freshly
+# allowlist (packaging/exports/export-*.list), per arch slice. Discovers the freshly
 # built products under .theos (fat + per-arch thin copies + staged copies),
 # so it works after both `make` and `make package`. Fails with a clear
 # diff-style message on any discrepancy.
 .PHONY: check-exports
 check-exports:
-	$(ECHO_NOTHING)bash scripts/check_exports.sh$(ECHO_END)
+	$(ECHO_NOTHING)bash tools/release/check_exports.sh$(ECHO_END)
 
 # Release package check. build.sh supplies the package profile.
 .PHONY: check-compat
 check-compat:
-	$(ECHO_NOTHING)bash scripts/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT) $(COMPAT_GUM_ARTIFACT)$(ECHO_END)
+	$(ECHO_NOTHING)bash tools/release/check_compat.sh $(COMPAT_PROFILE) $(COMPAT_ARTIFACT) $(COMPAT_GUM_ARTIFACT)$(ECHO_END)
 
 # Shadow 3.7.6 vendors a historical HookKit commit. Keep its retained facade
 # contract checked without making the sibling Shadow checkout a normal CI input.
 SHADOW_376_DIR ?= ../shadow
 .PHONY: check-shadow376-compat
 check-shadow376-compat:
-	$(ECHO_NOTHING)bash scripts/check_shadow376_compat.sh "$(SHADOW_376_DIR)"$(ECHO_END)
+	$(ECHO_NOTHING)bash tools/release/check_shadow376_compat.sh "$(SHADOW_376_DIR)"$(ECHO_END)
 
 # Build and stage every package-verified HookKit framework in Theos.
 .PHONY: install-theos
 install-theos:
-	$(ECHO_NOTHING)bash scripts/install-theos.sh$(ECHO_END)
+	$(ECHO_NOTHING)bash tools/release/install-theos.sh$(ECHO_END)
 
 # HookKit 3.0 rebind engine (Milestone 6). The first engine: rewrites import
 # slots (both LC_DYSYMTAB and chained-fixup mechanisms) to redirect an
@@ -180,11 +184,11 @@ install-theos:
 # writes); the write is behind a seam a host test drives into a buffer.
 .PHONY: test-rebind-engine
 test-rebind-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_engine Tests/Host/test_rebind_engine.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_engine tests/host/test_rebind_engine.c src/engines/HKRebindEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_engine$(ECHO_END)
 
 .PHONY: test-rebind-pac
 test-rebind-pac:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac Tests/Host/test_rebind_pac.c Sources/Engines/HKRebindEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac tests/host/test_rebind_pac.c src/engines/HKRebindEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c src/core/HKArtifactLedger.c src/core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL memory-patch
 # engine through its runtime adapter (Milestone 6). Real analyze/prepare/commit,
@@ -192,11 +196,11 @@ test-rebind-pac:
 # targets; no fake engine.
 .PHONY: test-memory-wired
 test-memory-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_wired Tests/Host/test_memory_wired.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_memory_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_wired tests/host/test_memory_wired.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_memory_wired$(ECHO_END)
 
 .PHONY: test-memory-engine
 test-memory-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_engine Tests/Host/test_memory_engine.c Sources/Engines/HKMemoryEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_memory_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_memory_engine tests/host/test_memory_engine.c src/engines/HKMemoryEngine.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_memory_engine$(ECHO_END)
 
 # HookKit 3.0 Objective-C method engine (Milestone 6). There is no ObjC
 # runtime on this host, so the whole runtime is a function-pointer seam and
@@ -206,17 +210,17 @@ test-memory-engine:
 # replace all host-observable. Plain C11: no .m, no -lobjc.
 .PHONY: test-objc-engine
 test-objc-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_objc_engine Tests/Host/test_objc_engine.c Sources/Engines/HKObjCEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_objc_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_objc_engine tests/host/test_objc_engine.c src/engines/HKObjCEngine.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_objc_engine$(ECHO_END)
 
 # HookKit 3.0 native RELOCATING inline engine (Milestone 8). Preserves the
 # displaced prologue in a trampoline so the original stays callable -- the one
-# thing terminal inline refuses to do. Reuses native/hk_arm64.c's relocator
+# thing terminal inline refuses to do. Reuses src/native/hk_arm64.c's relocator
 # as-is: it already writes into a caller-provided buffer, so allocation was
 # always outside it. Two device seams (obtain an executable page, seal R-W to
 # R-X); everything else is buffer arithmetic.
 .PHONY: test-reloc-inline-engine
 test-reloc-inline-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_reloc_inline_engine Tests/Host/test_reloc_inline_engine.c Sources/Engines/HKRelocInlineEngine.c native/hk_arm64.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_reloc_inline_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_reloc_inline_engine tests/host/test_reloc_inline_engine.c src/engines/HKRelocInlineEngine.c src/native/hk_arm64.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_reloc_inline_engine$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the relocating inline engine through its adapter,
 # AND alongside the terminal one (Milestone 8). The two describe themselves
@@ -224,7 +228,7 @@ test-reloc-inline-engine:
 # original-requirement routing criterion earns its keep.
 .PHONY: test-reloc-inline-wired
 test-reloc-inline-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_reloc_inline_wired Tests/Host/test_reloc_inline_wired.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_reloc_inline_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_reloc_inline_wired tests/host/test_reloc_inline_wired.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_reloc_inline_wired$(ECHO_END)
 
 # HookKit 3.0 static continuation (Milestone 9): a fixed pool of trampoline
 # slots that were executable at load, driven by the SAME relocating engine
@@ -233,9 +237,9 @@ test-reloc-inline-wired:
 # does.
 .PHONY: test-static-continuation
 test-static-continuation:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_static_continuation Tests/Host/test_static_continuation.c Sources/Engines/HKStaticPool.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_static_continuation$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_static_continuation tests/host/test_static_continuation.c src/engines/HKStaticPool.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_static_continuation$(ECHO_END)
 
-# HookKit 3.0 image-scope check (Sources/Core/HKImageScope.c): does an address
+# HookKit 3.0 image-scope check (src/core/HKImageScope.c): does an address
 # actually lie in the image a request named, and is that image the expected
 # build. Assembled from the catalog matcher, hk_macho_peek_header and
 # hk_macho_image_span_for_loaded_image -- all already host-tested. A NULL or
@@ -243,16 +247,16 @@ test-static-continuation:
 # omit the production runtime's dyld-populated catalog).
 .PHONY: test-image-scope
 test-image-scope:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_image_scope Tests/Host/test_image_scope.c Sources/Core/HKImageScope.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c -lpthread && $(THEOS_OBJ_DIR)/test_image_scope$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_image_scope tests/host/test_image_scope.c src/core/HKImageScope.c src/core/HKImageCatalog.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c -lpthread && $(THEOS_OBJ_DIR)/test_image_scope$(ECHO_END)
 
 # HookKit 3.0 native TERMINAL inline engine (Milestone 7). Overwrites a
 # function entry with a branch and stops there: no relocation, no trampoline,
-# no executable allocation (spec 13.4). Reuses native/hk_arm64.c as-is -- that
+# no executable allocation (spec 13.4). Reuses src/native/hk_arm64.c as-is -- that
 # file is Darwin-free by design and test-reloc already runs it here. Only the
 # store is device-only, and it is behind a seam.
 .PHONY: test-inline-engine
 test-inline-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_inline_engine Tests/Host/test_inline_engine.c Sources/Engines/HKInlineEngine.c native/hk_arm64.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_inline_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_inline_engine tests/host/test_inline_engine.c src/engines/HKInlineEngine.c src/native/hk_arm64.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_inline_engine$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL terminal inline
 # engine through its runtime adapter (Milestone 7). Fourth engine wired in and
@@ -260,7 +264,7 @@ test-inline-engine:
 # address-target path. No fake engine; the only fake is the write seam.
 .PHONY: test-inline-wired
 test-inline-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_inline_wired Tests/Host/test_inline_wired.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_inline_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_inline_wired tests/host/test_inline_wired.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_inline_wired$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL ObjC engine
 # through its runtime adapter (Milestone 6). Third engine wired in, and the
@@ -268,7 +272,7 @@ test-inline-wired:
 # ObjC-target path. No fake engine; the only fake is the runtime seam.
 .PHONY: test-objc-wired
 test-objc-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_objc_wired Tests/Host/test_objc_wired.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_objc_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_objc_wired tests/host/test_objc_wired.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_objc_wired$(ECHO_END)
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL rebind engine
 # through its runtime adapter (Milestone 6). Real analyze/prepare/commit, real
@@ -276,57 +280,53 @@ test-objc-wired:
 # buffer-backed seam, real artifacts in the report. No fake engine.
 .PHONY: test-rebind-wired
 test-rebind-wired:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_wired Tests/Host/test_rebind_wired.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_rebind_wired$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_rebind_wired tests/host/test_rebind_wired.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_rebind_wired$(ECHO_END)
 
 # Milestone 5 conformance run against a REAL Mach-O image. Deliberately NOT
 # part of `make test`: it needs a specimen pulled off a device, and specimens
 # are third-party binaries that are not committed. See the header of
-# Tools/conformance/macho_conformance.c for how to obtain one.
+# tools/conformance/macho_conformance.c for how to obtain one.
 #
 #   make conformance IMAGE=/path/to/libfoo.dylib
 #   make conformance IMAGE=/path/to/libfoo.dylib SYMBOLS="malloc free"
 .PHONY: conformance
 conformance:
 	$(ECHO_NOTHING)test -n "$(IMAGE)" || { echo "usage: make conformance IMAGE=<mach-o> [SYMBOLS=\"a b\"]"; exit 2; }; \
-	mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O1 -o $(THEOS_OBJ_DIR)/macho_conformance Tools/conformance/macho_conformance.c Sources/Resolvers/*.c && $(THEOS_OBJ_DIR)/macho_conformance "$(IMAGE)" $(SYMBOLS)$(ECHO_END)
+	mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O1 -o $(THEOS_OBJ_DIR)/macho_conformance tools/conformance/macho_conformance.c src/resolvers/*.c && $(THEOS_OBJ_DIR)/macho_conformance "$(IMAGE)" $(SYMBOLS)$(ECHO_END)
 
 # Host-side test aggregate: builds and runs each suite in sequence, stopping
 # at the first failure (no -k).
 .PHONY: test
 test:
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-abi test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-backend-enumeration test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-backend-enumeration test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
 
 .PHONY: test-pointer-auth
 test-pointer-auth:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_pointer_auth Tests/Host/test_pointer_auth.c Sources/Core/HKOwnership.c -lpthread && $(THEOS_OBJ_DIR)/test_pointer_auth$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_pointer_auth tests/host/test_pointer_auth.c src/core/HKOwnership.c -lpthread && $(THEOS_OBJ_DIR)/test_pointer_auth$(ECHO_END)
 
 .PHONY: test-cache-patches
 test-cache-patches:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_cache_patches Tests/Host/test_cache_patches.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
-
-.PHONY: test-abi
-test-abi:
-	$(ECHO_NOTHING)python3 Tools/abi/test_extract_abi.py && python3 Tools/abi/test_compare_abi.py$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_cache_patches tests/host/test_cache_patches.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/resolvers/HKExportTrie.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
 
 .PHONY: test-shadow-manifest
 test-shadow-manifest:
-	$(ECHO_NOTHING)python3 Tools/shadow-manifest-extract/test_extract.py && python3 Tools/shadow-manifest-extract/test_logos_extract.py$(ECHO_END)
+	$(ECHO_NOTHING)python3 tools/shadow-manifest-extract/test_extract.py && python3 tools/shadow-manifest-extract/test_logos_extract.py$(ECHO_END)
 
 .PHONY: test-provider-evidence
 test-provider-evidence:
-	$(ECHO_NOTHING)python3 Tools/provider-evidence/test_validate.py && python3 Tools/provider-evidence/validate.py$(ECHO_END)
+	$(ECHO_NOTHING)python3 tools/provider-evidence/test_validate.py && python3 tools/provider-evidence/validate.py$(ECHO_END)
 
 .PHONY: test-provider-vtable
 test-provider-vtable:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_provider_vtable Tests/Host/test_provider_vtable.c Sources/Engines/HKProviderVtable.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_provider_vtable$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_provider_vtable tests/host/test_provider_vtable.c src/engines/HKProviderVtable.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_provider_vtable$(ECHO_END)
 
 # Host-side relocator test. Runs on the build machine, not the device: it only
 # exercises instruction decode/re-encode, which is where the crashes come from.
 .PHONY: test-reloc
 test-reloc:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -o $(THEOS_OBJ_DIR)/test_arm64_reloc tests/test_arm64_reloc.c native/hk_arm64.c && $(THEOS_OBJ_DIR)/test_arm64_reloc$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -o $(THEOS_OBJ_DIR)/test_arm64_reloc tests/host/test_arm64_reloc.c src/native/hk_arm64.c && $(THEOS_OBJ_DIR)/test_arm64_reloc$(ECHO_END)
 
-# Host-side Swift vtable engine test. The test includes native/hk_swift.c
+# Host-side Swift vtable engine test. The test includes src/native/hk_swift.c
 # itself so it can inject a simulated pointer-authentication scheme (the host
 # has no PAC hardware) and a fake hk_native_patch_memory, then drives the
 # engine's core against a hand-built fake class metadata blob. -rdynamic puts
@@ -334,46 +334,46 @@ test-reloc:
 # is what lets the name-matching paths run on the host.
 .PHONY: test-swift-abi
 test-swift-abi:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -rdynamic -o $(THEOS_OBJ_DIR)/test_swift_abi tests/test_swift_abi.c && $(THEOS_OBJ_DIR)/test_swift_abi$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -O2 -rdynamic -o $(THEOS_OBJ_DIR)/test_swift_abi tests/host/test_swift_abi.c && $(THEOS_OBJ_DIR)/test_swift_abi$(ECHO_END)
 
 .PHONY: test-swift-engine
 test-swift-engine:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_swift_engine Tests/Host/test_swift_engine.c Sources/Engines/HKSwiftEngine.c native/hk_swift.c native/hk_native.c native/hk_arm64.c -ldl $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_swift_engine$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_swift_engine tests/host/test_swift_engine.c src/engines/HKSwiftEngine.c src/native/hk_swift.c src/native/hk_native.c src/native/hk_arm64.c -ldl $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_swift_engine$(ECHO_END)
 
 # HookKit 3.0 new-ABI header compile tests (spec section 21, Milestone 3):
-# the same Headers/HookKit/*.h compiled and run under all 4 language modes.
+# the same include/HookKit/*.h compiled and run under all 4 language modes.
 # ObjC/ObjC++ reuse the existing fake Foundation/objc-runtime stubs
-# (tests/fake_headers) rather than a new copy -- these new headers are
+# (tests/fixtures/headers) rather than a new copy -- these new headers are
 # Foundation-free by design, so the stub is only there to give the ObjC
 # compiler front end a minimal NSObject/Class/SEL vocabulary to check
 # against.
 .PHONY: test-header-compile
 test-header-compile:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && \
-	clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_c Tests/Host/test_header_compile.c && $(THEOS_OBJ_DIR)/test_header_compile_c && \
-	clang -Wall -Wextra -Werror -std=c11 -O2 -x objective-c -D__APPLE__ -I$(CURDIR)/tests/fake_headers -o $(THEOS_OBJ_DIR)/test_header_compile_m Tests/Host/test_header_compile.m && $(THEOS_OBJ_DIR)/test_header_compile_m && \
-	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_cpp Tests/Host/test_header_compile.cpp && $(THEOS_OBJ_DIR)/test_header_compile_cpp && \
-	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -x objective-c++ -D__APPLE__ -I$(CURDIR)/tests/fake_headers -o $(THEOS_OBJ_DIR)/test_header_compile_mm Tests/Host/test_header_compile.mm && $(THEOS_OBJ_DIR)/test_header_compile_mm && \
+	clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_c tests/host/test_header_compile.c && $(THEOS_OBJ_DIR)/test_header_compile_c && \
+	clang -Wall -Wextra -Werror -std=c11 -O2 -x objective-c -D__APPLE__ -I$(CURDIR)/tests/fixtures/headers -o $(THEOS_OBJ_DIR)/test_header_compile_m tests/host/test_header_compile.m && $(THEOS_OBJ_DIR)/test_header_compile_m && \
+	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -o $(THEOS_OBJ_DIR)/test_header_compile_cpp tests/host/test_header_compile.cpp && $(THEOS_OBJ_DIR)/test_header_compile_cpp && \
+	clang++ -Wall -Wextra -Werror -std=c++17 -O2 -x objective-c++ -D__APPLE__ -I$(CURDIR)/tests/fixtures/headers -o $(THEOS_OBJ_DIR)/test_header_compile_mm tests/host/test_header_compile.mm && $(THEOS_OBJ_DIR)/test_header_compile_mm && \
 	echo "test-header-compile: C, ObjC, C++, ObjC++ all compiled and passed"$(ECHO_END)
 
 # HookKit 3.0 core runtime lifecycle test (Milestone 4, first slice):
-# real Sources/Core/HKRuntime.c + HKIDs.c, linked and run, not just
+# real src/core/HKRuntime.c + HKIDs.c, linked and run, not just
 # compiled -- includes the internal headers directly (same pattern as
 # test-swift-abi) to verify config was actually deep-copied, not just that
 # calls returned OK. -lpthread for pthread_once (the process-nonce guard).
 .PHONY: test-runtime-lifecycle
 test-runtime-lifecycle:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_runtime_lifecycle Tests/Host/test_runtime_lifecycle.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKInstalled.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_runtime_lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_runtime_lifecycle tests/host/test_runtime_lifecycle.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKInstalled.c src/core/HKReport.c src/core/HKArtifactLedger.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_runtime_lifecycle$(ECHO_END)
 
 # HookKit 3.0 plan lifecycle + domain registration test (Milestone 4):
-# real Sources/Core/HKPlan.c. The critical property this exercises is
+# real src/core/HKPlan.c. The critical property this exercises is
 # hk_domain_t* pointer stability across the internal array's realloc
 # growth (37 domains, several times past the initial capacity of 4) --
 # see HKPlanInternal.h for why domains are individually heap-allocated
 # rather than stored inline in that array.
 .PHONY: test-plan-lifecycle
 test-plan-lifecycle:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_lifecycle Tests/Host/test_plan_lifecycle.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_lifecycle tests/host/test_plan_lifecycle.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_lifecycle$(ECHO_END)
 
 # HookKit 3.0 hook registration test (Milestone 4): real hk_plan_add_hook,
 # the deep copy of the full target union (symbol/address/objc/memory).
@@ -382,61 +382,61 @@ test-plan-lifecycle:
 # and recursive HK_IMAGE_EXPLICIT_SET ownership.
 .PHONY: test-hook-add
 test-hook-add:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_hook_add Tests/Host/test_hook_add.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_hook_add$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_hook_add tests/host/test_hook_add.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_hook_add$(ECHO_END)
 
 # HookKit 3.0 plan analysis test (Milestone 4): real hk_plan_analyze +
-# hk_report_t (Sources/Core/HKReport.c). No engine registry exists yet, so
+# hk_report_t (src/core/HKReport.c). No engine registry exists yet, so
 # every hook honestly gets HK_OUTCOME_NO_ROUTE -- this test is about the
 # plumbing (state transitions, report/hook independence, result content)
 # being correct given that starting point, not routing logic that doesn't
 # exist yet.
 .PHONY: test-plan-analyze
 test-plan-analyze:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_analyze Tests/Host/test_plan_analyze.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_analyze$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_analyze tests/host/test_plan_analyze.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_analyze$(ECHO_END)
 
 # HookKit 3.0 engine registry test (Milestone 4's "fake engines"): proves
 # hk_plan_analyze actually consults registered engines now (see
-# Sources/Core/HKEngineInternal.h for the minimal internal contract this
+# src/core/HKEngineInternal.h for the minimal internal contract this
 # is built on) -- an eligible engine upgrades a hook from NO_ROUTE to
 # ANALYZED, an engine matching the target kind but not the required reach
 # correctly stays NO_ROUTE, and first-eligible-wins correctly skips past
 # an ineligible engine registered earlier.
 .PHONY: test-engine-registry
 test-engine-registry:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_engine_registry Tests/Host/test_engine_registry.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_engine_registry$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_engine_registry tests/host/test_engine_registry.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_engine_registry$(ECHO_END)
 
 # HookKit 3.0 runtime ordering plus strict backend-ID selection.
 .PHONY: test-backend-policy
 test-backend-policy:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_backend_policy Tests/Host/test_backend_policy.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_backend_policy$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_backend_policy tests/host/test_backend_policy.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_backend_policy$(ECHO_END)
 
 .PHONY: test-backend-enumeration
 test-backend-enumeration:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_backend_enumeration Tests/Host/test_backend_enumeration.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_backend_enumeration$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_backend_enumeration tests/host/test_backend_enumeration.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_backend_enumeration$(ECHO_END)
 
 # HookKit 3.0 plan preparation test (Milestone 4): real hk_plan_prepare.
 # Covers the per-hook outcome transitions (ANALYZED -> PREPARED/
 # FAILED_SAFE, NO_ROUTE left untouched), the plan-level PREPARED/PARTIAL/
 # FAILED rollup, and that prepare calls the same engine analyze matched
 # (hook->matched_engine) rather than re-searching the registry. Shares
-# Tests/Host/fake_engines.h with test-engine-registry.
+# tests/host/fake_engines.h with test-engine-registry.
 .PHONY: test-plan-prepare
 test-plan-prepare:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_prepare Tests/Host/test_plan_prepare.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_prepare$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_prepare tests/host/test_plan_prepare.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_prepare$(ECHO_END)
 
 # HookKit 3.0 plan commit test (Milestone 4): real hk_plan_commit. The
 # property under test is the mutation-state -> outcome mapping (spec
 # section 4.4/6.27) -- one of the spec's core invariants -- exercised via
-# 4 distinct fake engines in Tests/Host/fake_engines.h (COMPLETE/NONE/
+# 4 distinct fake engines in tests/host/fake_engines.h (COMPLETE/NONE/
 # PARTIAL/UNKNOWN, plus a commit_one == NULL case) rather than trusted
 # from reading the switch statement.
 .PHONY: test-plan-commit
 test-plan-commit:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_commit Tests/Host/test_plan_commit.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKOwnership.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_commit$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_commit tests/host/test_plan_commit.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKOwnership.c src/core/HKRuntime.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_commit$(ECHO_END)
 
 .PHONY: test-ownership
 test-ownership:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_ownership Tests/Host/test_ownership.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKOwnership.c Sources/Core/HKRuntime.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_ownership$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_ownership tests/host/test_ownership.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKOwnership.c src/core/HKRuntime.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_ownership$(ECHO_END)
 
 # HookKit 3.0 domain preparation gate test (spec section 15.1): a domain
 # with require_all_mandatory_prepared set, containing a mandatory hook
@@ -448,7 +448,7 @@ test-ownership:
 # rollup depends on) -- see the fix's comment in HKPlan.c.
 .PHONY: test-domain-gate
 test-domain-gate:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_domain_gate Tests/Host/test_domain_gate.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_domain_gate$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_domain_gate tests/host/test_domain_gate.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_domain_gate$(ECHO_END)
 
 # HookKit 3.0 artifact ledger test (spec section 7 / Milestone 4). Exercises
 # the append + immutable-snapshot read path directly (no engine populates
@@ -457,7 +457,7 @@ test-domain-gate:
 # not the whole plan/runtime, since that is all this path touches.
 .PHONY: test-artifact-ledger
 test-artifact-ledger:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_artifact_ledger Tests/Host/test_artifact_ledger.c Sources/Core/HKIDs.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c -lpthread && $(THEOS_OBJ_DIR)/test_artifact_ledger$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_artifact_ledger tests/host/test_artifact_ledger.c src/core/HKIDs.c src/core/HKReport.c src/core/HKArtifactLedger.c -lpthread && $(THEOS_OBJ_DIR)/test_artifact_ledger$(ECHO_END)
 
 # HookKit 3.0 original-slot / installed-handle test (spec section on
 # original slots, Milestone 4). The property that matters: an original slot
@@ -466,7 +466,7 @@ test-artifact-ledger:
 # core set since it drives a real commit end to end.
 .PHONY: test-installed-original
 test-installed-original:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_installed_original Tests/Host/test_installed_original.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_installed_original$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_installed_original tests/host/test_installed_original.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_installed_original$(ECHO_END)
 
 # HookKit 3.0 model-based test of the plan lifecycle state machine (Milestone
 # 4). An independent reference model predicts accept/reject + resulting state
@@ -476,7 +476,7 @@ test-installed-original:
 # test-plan-prepare / test-plan-commit.
 .PHONY: test-plan-model
 test-plan-model:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_model Tests/Host/test_plan_model.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_model$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_plan_model tests/host/test_plan_model.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_plan_model$(ECHO_END)
 
 # HookKit 3.0 fault-injection (OOM) sweep (Milestone 4). Wraps
 # malloc/calloc/realloc via the linker so it can fail the Nth allocation, then
@@ -486,7 +486,7 @@ test-plan-model:
 # also catch OOM-path leaks; here it catches crashes and the state invariant.
 .PHONY: test-fault-injection
 test-fault-injection:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 $(if $(filter Linux,$(HOST_OS)),-Wl$(comma)--wrap=malloc$(comma)--wrap=calloc$(comma)--wrap=realloc) -o $(THEOS_OBJ_DIR)/test_fault_injection Tests/Host/test_fault_injection.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_fault_injection$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 $(if $(filter Linux,$(HOST_OS)),-Wl$(comma)--wrap=malloc$(comma)--wrap=calloc$(comma)--wrap=realloc) -o $(THEOS_OBJ_DIR)/test_fault_injection tests/host/test_fault_injection.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_fault_injection$(ECHO_END)
 
 # HookKit 3.0 image catalog test (Milestone 5). The platform-agnostic half:
 # selector matching (all 6 hk_image_selector_kind_t cases + EXPLICIT_SET
@@ -494,7 +494,7 @@ test-fault-injection:
 # (see HKImageCatalog.h) and not exercised here. Self-contained.
 .PHONY: test-image-catalog
 test-image-catalog:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_image_catalog Tests/Host/test_image_catalog.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_image_catalog$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_image_catalog tests/host/test_image_catalog.c src/core/HKImageCatalog.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_image_catalog$(ECHO_END)
 
 # HookKit 3.0 Mach-O symbol table search (Milestone 5, private-symbol
 # resolver). Pure logic over a caller-supplied table view, so it is fully
@@ -503,7 +503,7 @@ test-image-catalog:
 # (unterminated) string table. Self-contained.
 .PHONY: test-symbol-table
 test-symbol-table:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_table Tests/Host/test_symbol_table.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_symbol_table$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_table tests/host/test_symbol_table.c src/resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_symbol_table$(ECHO_END)
 
 # HookKit 3.0 chained fixups, metadata half (Milestone 5). The MODERN iOS 15+
 # import mechanism, which the LC_DYSYMTAB path does not cover. Cross-checks
@@ -511,7 +511,7 @@ test-symbol-table:
 # vendor/litehook/fixup-chains.h, including the bit layouts.
 .PHONY: test-chained-fixups
 test-chained-fixups:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_chained_fixups Tests/Host/test_chained_fixups.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_chained_fixups$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_chained_fixups tests/host/test_chained_fixups.c src/resolvers/HKChainedFixups.c src/resolvers/HKSymbolResolve.c src/resolvers/HKExportTrie.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_chained_fixups$(ECHO_END)
 
 # HookKit 3.0 import slot resolution (Milestone 5). Maps each symbol-pointer
 # slot to the symbol it binds to, via LC_DYSYMTAB's indirect symbol table --
@@ -519,7 +519,7 @@ test-chained-fixups:
 # equivalent walk trusts dyld's prior validation.
 .PHONY: test-import-slots
 test-import-slots:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_import_slots Tests/Host/test_import_slots.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_import_slots$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_import_slots tests/host/test_import_slots.c src/resolvers/HKImportSlots.c src/resolvers/HKSymbolResolve.c src/resolvers/HKExportTrie.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_import_slots$(ECHO_END)
 
 # HookKit 3.0 resolver-selection layer (Milestone 5). The single place that
 # decides HOW a symbol is looked up: name normalization in one place, and the
@@ -527,7 +527,7 @@ test-import-slots:
 # something. Pure logic over caller-supplied sources.
 .PHONY: test-symbol-resolve
 test-symbol-resolve:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_resolve Tests/Host/test_symbol_resolve.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_symbol_resolve$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_symbol_resolve tests/host/test_symbol_resolve.c src/resolvers/HKSymbolResolve.c src/resolvers/HKExportTrie.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_symbol_resolve$(ECHO_END)
 
 # HookKit 3.0 export trie resolver (Milestone 5). ULEB128 decoding + trie
 # walking against synthetic tries: the proper path for EXPORTED symbols
@@ -536,7 +536,7 @@ test-symbol-resolve:
 # no sanitizer detects.
 .PHONY: test-export-trie
 test-export-trie:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_export_trie Tests/Host/test_export_trie.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_export_trie$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_export_trie tests/host/test_export_trie.c src/resolvers/HKExportTrie.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_export_trie$(ECHO_END)
 
 # HookKit 3.0 Mach-O container parsing (Milestone 5). Pure buffer logic:
 # header validation, bounded load-command iteration, and building the
@@ -544,7 +544,7 @@ test-export-trie:
 # test composing both resolvers. Only obtaining a real image is device-only.
 .PHONY: test-macho
 test-macho:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_macho Tests/Host/test_macho.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_macho$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_macho tests/host/test_macho.c src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c && $(THEOS_OBJ_DIR)/test_macho$(ECHO_END)
 
 # Legacy facade device smoke binary. NOT part of `make test`: it links the built
 # framework and has to run on a jailbroken device.
@@ -584,7 +584,7 @@ HOST_OS ?= $(shell uname -s)
 # own comma-delimited arguments (e.g. an -Wl,opt1,opt2 flag list below).
 comma := ,
 
-# hk_runtime_register_platform_engines (Sources/Core/HKRuntime.c, __APPLE__-only)
+# hk_runtime_register_platform_engines (src/core/HKRuntime.c, __APPLE__-only)
 # unconditionally wires up every native engine plus the ObjC runtime shims,
 # regardless of which single engine a given host test exercises. Any host
 # test linking HKRuntime.c needs this whole closure on a Darwin host or the
@@ -592,7 +592,7 @@ comma := ,
 # compile) stays green. HOOKKIT_CANONICAL_3-gated providers (Dobby/Gum/
 # ElleKit/Substitute) are deliberately excluded: host tests never define
 # HOOKKIT_CANONICAL_3, so those stay unreferenced either way.
-HK_PLATFORM_ENGINE_SOURCES = Sources/Core/HKImageScope.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c
+HK_PLATFORM_ENGINE_SOURCES = src/core/HKImageScope.c src/engines/HKInlineEngine.c src/engines/HKInlineVtable.c src/engines/HKMemoryEngine.c src/engines/HKMemoryVtable.c src/engines/HKObjCEngine.c src/engines/HKObjCVtable.c src/engines/HKRebindEngine.c src/engines/HKRebindVtable.c src/engines/HKRelocInlineEngine.c src/engines/HKRelocInlineVtable.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
 HK_PLATFORM_ENGINE_LDFLAGS = $(if $(filter Darwin,$(HOST_OS)),-lobjc)
 MODERN_TOOLCHAIN ?= $(THEOS)/toolchain/modern/linux/iphone
 DEVICE_SMOKE_CLANG ?= $(SDKBINPATH)/clang
@@ -640,14 +640,14 @@ DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swif
 check-device-smoke-toolchain:
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
-	$(ECHO_NOTHING)bash $(CURDIR)/scripts/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
+	$(ECHO_NOTHING)bash $(CURDIR)/tools/dependencies/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
 endif
 endif
 
 check-device-canonical-toolchain:
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_CANONICAL_ARCH),arm64e)
-	$(ECHO_NOTHING)bash $(CURDIR)/scripts/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
+	$(ECHO_NOTHING)bash $(CURDIR)/tools/dependencies/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
 endif
 endif
 
@@ -656,80 +656,80 @@ $(DEVICE_CANONICAL_TARGETS): check-device-canonical-toolchain
 
 .PHONY: device-smoke
 device-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_SMOKE_CLANG) -Wall -Wextra -O0 -fno-inline -fobjc-arc -target $(DEVICE_SMOKE_ARCH)-apple-ios$(DEVICE_SMOKE_MIN) -isysroot $(DEVICE_SMOKE_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_smoke tests/device_smoke.m && $(DEVICE_SMOKE_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_SMOKE_CLANG) -Wall -Wextra -O0 -fno-inline -fobjc-arc -target $(DEVICE_SMOKE_ARCH)-apple-ios$(DEVICE_SMOKE_MIN) -isysroot $(DEVICE_SMOKE_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_smoke tests/device/device_smoke.m && $(DEVICE_SMOKE_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_smoke$(ECHO_END)
 
 .PHONY: device-lifecycle-smoke
 device-lifecycle-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_lifecycle_smoke tests/device_lifecycle_smoke.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_lifecycle_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_lifecycle_smoke tests/device/device_lifecycle_smoke.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_lifecycle_smoke$(ECHO_END)
 
 .PHONY: device-objc-smoke
 device-objc-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_objc_smoke tests/device_objc_smoke.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_objc_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_objc_smoke tests/device/device_objc_smoke.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_objc_smoke$(ECHO_END)
 
 .PHONY: device-swift-smoke
 device-swift-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_swift_smoke tests/device_swift_smoke.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_swift_smoke tests/device/device_swift_smoke.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_smoke$(ECHO_END)
 
 # Real Swift metadata/vtable smoke. The probe class is compiled into the
 # executable, so it never patches a system class and restores its own slot
 # before exiting. Build canonical HookKit first; this target links that ABI.
 .PHONY: device-swift-real-smoke
 device-swift-real-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -c -o $(THEOS_OBJ_DIR)/device_swift_real_smoke.o tests/device_swift_real_smoke.c && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_real_smoke $(THEOS_OBJ_DIR)/device_swift_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_real_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_real_smoke.o tests/device/device_swift_real_smoke.c && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_real_smoke $(THEOS_OBJ_DIR)/device_swift_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_real_smoke$(ECHO_END)
 
 .PHONY: device-swift-facade-real-smoke
 device-swift-facade-real-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -c -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o tests/device_swift_facade_real_smoke.m && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -framework -Xlinker Foundation -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o tests/device/device_swift_facade_real_smoke.m && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -framework -Xlinker Foundation -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke$(ECHO_END)
 
 .PHONY: device-catalog-smoke
 device-catalog-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Resolvers -o $(THEOS_OBJ_DIR)/device_catalog_smoke tests/device_image_catalog.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKMachO.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_catalog_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -I$(CURDIR)/src/core -I$(CURDIR)/src/resolvers -o $(THEOS_OBJ_DIR)/device_catalog_smoke tests/device/device_image_catalog.c src/core/HKImageCatalog.c src/resolvers/HKMachO.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_catalog_smoke$(ECHO_END)
 
 .PHONY: device-resolver-smoke
 device-resolver-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_resolver_smoke tests/device_resolver.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_resolver_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_resolver_smoke tests/device/device_resolver.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_resolver_smoke$(ECHO_END)
 
 .PHONY: device-rebind-smoke
 device-rebind-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/Sources/Core -lobjc -o $(THEOS_OBJ_DIR)/device_rebind_smoke tests/device_rebind.m Sources/Engines/HKRebindEngine.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKMachO.c native/hk_native.c native/hk_arm64.c native/hk_symbols.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/src/engines -I$(CURDIR)/src/resolvers -I$(CURDIR)/src/core -lobjc -o $(THEOS_OBJ_DIR)/device_rebind_smoke tests/device/device_rebind.m src/engines/HKRebindEngine.c src/core/HKArtifactLedger.c src/core/HKIDs.c src/resolvers/HKImportSlots.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/resolvers/HKExportTrie.c src/resolvers/HKMachO.c src/native/hk_native.c src/native/hk_arm64.c src/native/hk_symbols.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_smoke$(ECHO_END)
 
 .PHONY: device-legacy-facade-smoke
 device-legacy-facade-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_facade_smoke tests/device_legacy_facade.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_facade_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_facade_smoke tests/device/device_legacy_facade.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_facade_smoke$(ECHO_END)
 
 .PHONY: device-rebind-adapter-smoke
 device-rebind-adapter-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke tests/device_rebind_adapter.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke tests/device/device_rebind_adapter.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke$(ECHO_END)
 
 .PHONY: device-legacy-abi-smoke
 device-legacy-abi-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Wno-objc-method-access -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/tests/fake_headers -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_abi_smoke tests/device_legacy_abi.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_abi_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Wno-objc-method-access -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/tests/fixtures/headers -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_abi_smoke tests/device/device_legacy_abi.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_abi_smoke$(ECHO_END)
 
 # Models the actual HookKit call profile in Shadow 3.7.6. This only builds
 # the probe; deployment and runtime execution remain an explicit device step.
 .PHONY: device-shadow376-smoke
 device-shadow376-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_shadow376_smoke tests/device_shadow376_compat.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_shadow376_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_shadow376_smoke tests/device/device_shadow376_compat.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_shadow376_smoke$(ECHO_END)
 
 .PHONY: device-static-smoke
 device-static-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Engines -I$(CURDIR)/Sources/Resolvers -I$(CURDIR)/native -lobjc -framework CoreFoundation -o $(THEOS_OBJ_DIR)/device_static_smoke tests/device_static_continuation.c Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c Sources/Core/HKImageCatalog.c Sources/Core/HKImageScope.c Sources/Core/HKInstalled.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKRuntime.c Sources/Engines/HKInlineEngine.c Sources/Engines/HKInlineVtable.c Sources/Engines/HKMemoryEngine.c Sources/Engines/HKMemoryVtable.c Sources/Engines/HKObjCEngine.c Sources/Engines/HKObjCVtable.c Sources/Engines/HKRebindEngine.c Sources/Engines/HKRebindVtable.c Sources/Engines/HKRelocInlineEngine.c Sources/Engines/HKRelocInlineVtable.c Sources/Engines/HKStaticPool.c Sources/Engines/HKSwiftEngine.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_arm64.c native/hk_native.c native/hk_symbols.c native/hk_swift.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_static_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -I$(CURDIR)/src/core -I$(CURDIR)/src/engines -I$(CURDIR)/src/resolvers -I$(CURDIR)/src/native -lobjc -framework CoreFoundation -o $(THEOS_OBJ_DIR)/device_static_smoke tests/device/device_static_continuation.c src/core/HKArtifactLedger.c src/core/HKIDs.c src/core/HKImageCatalog.c src/core/HKImageScope.c src/core/HKInstalled.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKRuntime.c src/engines/HKInlineEngine.c src/engines/HKInlineVtable.c src/engines/HKMemoryEngine.c src/engines/HKMemoryVtable.c src/engines/HKObjCEngine.c src/engines/HKObjCVtable.c src/engines/HKRebindEngine.c src/engines/HKRebindVtable.c src/engines/HKRelocInlineEngine.c src/engines/HKRelocInlineVtable.c src/engines/HKStaticPool.c src/engines/HKSwiftEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c src/native/hk_swift.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_static_smoke$(ECHO_END)
 
 .PHONY: device-provider-smoke
 device-provider-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/vendor/dobby -L$(CURDIR)/vendor/dobby -o $(THEOS_OBJ_DIR)/device_provider tests/device_provider.c -ldobby -lc++ && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/vendor/dobby -L$(CURDIR)/vendor/dobby -o $(THEOS_OBJ_DIR)/device_provider tests/device/device_provider.c -ldobby -lc++ && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider$(ECHO_END)
 
 .PHONY: device-provider-lifecycle-smoke
 device-provider-lifecycle-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -I$(CURDIR)/Sources/Core -I$(CURDIR)/Sources/Engines -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_provider_lifecycle tests/device_provider_lifecycle.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider_lifecycle$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -I$(CURDIR)/src/core -I$(CURDIR)/src/engines -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_provider_lifecycle tests/device/device_provider_lifecycle.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider_lifecycle$(ECHO_END)
 
 .PHONY: device-provider-alias-smoke
 device-provider-alias-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/vendor/libhooker -o $(THEOS_OBJ_DIR)/device_provider_alias tests/device_provider_alias.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider_alias$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/vendor/libhooker -o $(THEOS_OBJ_DIR)/device_provider_alias tests/device/device_provider_alias.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_provider_alias$(ECHO_END)
 
 # ---- Bench (host) and device-bench (on device) ----
 # ponytail: plain clang -O2 -lm, reuse HK_PLATFORM_ENGINE_SOURCES, no extra deps.
-BENCH_CFLAGS = -Wall -Wextra -Werror -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -I. -IHeaders -ITools/bench
+BENCH_CFLAGS = -Wall -Wextra -Werror -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -I. -Iinclude -Itools/bench
 BENCH_LDFLAGS = -lm -lpthread
 
 .PHONY: bench bench-plan bench-resolvers bench-reloc bench-provider device-bench bench-instruments check-bench-regression
@@ -737,23 +737,23 @@ BENCH_LDFLAGS = -lm -lpthread
 bench: bench-plan bench-resolvers bench-reloc bench-provider
 
 bench-plan:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_plan Tools/bench/bench_plan.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_plan $(BENCH_ARGS)$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_plan tools/bench/bench_plan.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_plan $(BENCH_ARGS)$(ECHO_END)
 
 bench-resolvers:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_resolvers Tools/bench/bench_resolvers.c Sources/Core/HKImageCatalog.c Sources/Resolvers/HKChainedFixups.c Sources/Resolvers/HKDyldCachePatches.c Sources/Resolvers/HKExportTrie.c Sources/Resolvers/HKImportSlots.c Sources/Resolvers/HKMachO.c Sources/Resolvers/HKSymbolResolve.c Sources/Resolvers/HKSymbolTable.c native/hk_symbols.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_resolvers $(BENCH_ARGS)$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_resolvers tools/bench/bench_resolvers.c src/core/HKImageCatalog.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_resolvers $(BENCH_ARGS)$(ECHO_END)
 
 bench-reloc:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_reloc Tools/bench/bench_reloc.c native/hk_arm64.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_reloc $(BENCH_ARGS)$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_reloc tools/bench/bench_reloc.c src/native/hk_arm64.c $(BENCH_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_reloc $(BENCH_ARGS)$(ECHO_END)
 
 bench-provider:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_provider Tools/bench/bench_provider.c Sources/Core/HKImageCatalog.c Sources/Core/HKIDs.c Sources/Core/HKRuntime.c Sources/Core/HKOwnership.c Sources/Core/HKPlan.c Sources/Core/HKReport.c Sources/Core/HKArtifactLedger.c Sources/Core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_provider $(BENCH_ARGS)$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && clang $(BENCH_CFLAGS) -o $(THEOS_OBJ_DIR)/bench_provider tools/bench/bench_provider.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c $(HK_PLATFORM_ENGINE_SOURCES) $(BENCH_LDFLAGS) $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/bench_provider $(BENCH_ARGS)$(ECHO_END)
 
 # Device bench: real dyld catalog + provider enumerate + large-scale plan. Signposts for Instruments.
 device-bench: check-device-canonical-toolchain
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O2 -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/Headers -F$(THEOS_OBJ_DIR) -framework HookKit -framework Foundation -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_bench tests/device_bench.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_bench$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O2 -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(THEOS_OBJ_DIR) -framework HookKit -framework Foundation -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_bench tests/device/device_bench.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_bench$(ECHO_END)
 
 bench-instruments: device-bench
-	$(ECHO_NOTHING)bash $(CURDIR)/scripts/run_instruments.sh $(INSTRUMENTS_DEVICE) $(BENCH_ARGS)$(ECHO_END)
+	$(ECHO_NOTHING)bash $(CURDIR)/tools/bench/run_instruments.sh $(INSTRUMENTS_DEVICE) $(BENCH_ARGS)$(ECHO_END)
 
 check-bench-regression:
-	$(ECHO_NOTHING)python3 Tools/bench/check_regression.py artifacts/bench_host_baseline.json artifacts/bench_device_baseline.json$(ECHO_END)
+	$(ECHO_NOTHING)python3 tools/bench/check_regression.py tests/benchmarks/baselines/host.json tests/benchmarks/baselines/device.json$(ECHO_END)

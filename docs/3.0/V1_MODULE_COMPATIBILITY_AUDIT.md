@@ -71,7 +71,7 @@ class names anywhere in the current source tree.
    There is nothing on the provider side left to accidentally keep binary
    compatibility with beyond the v1 `HKSubstitutor` subset, which is already
    what's shipped and tested (v1.0.1 tag present, `_OBJC_CLASS_$_HKSubstitutor`
-   exported in every current build lane per the Milestone 0 baseline).
+   exported in every build lane examined during Milestone 0).
 
 ## Final conclusion
 
@@ -107,18 +107,20 @@ so a v1 binary or source tree needs neither a relink nor an edit.
 What changed:
 
 * **The six classes ship**, as translators over the same plan lifecycle
-  `HKSubstitutor` drives (`Sources/Compatibility/HKLegacyModules.m`). v1's own
+  `HKSubstitutor` drives (`src/compatibility/HKLegacyModules.m`). v1's own
   provider seam at `Module+Internal.h` is the seam they use, so the public
   `HookKitModule` methods are v1's code unchanged.
-* **`Tests/LegacyABI/Baselines/v1.0.1.json` now covers all seven classes**, not
-  the `HKSubstitutor` subset. `Tools/abi/derive_v1_baseline.py --from-binary`
-  derives it, and fails if the build is missing anything the v1.0.1 headers
-  declare — so the completeness claim is checked, not asserted.
+* **The current seven-class surface is checked directly**: compatibility
+  headers ship in `include/`, exact current class exports are listed in
+  `packaging/exports/export-HookKit.list`, and facade/module behavior is
+  exercised by compatibility smokes in `tests/device/`. Historical ABI
+  snapshots and selector/type-encoding comparisons are intentionally not a
+  release gate.
 
 What did not change:
 
 * **Modulous is still not restored.** No bundle loading, no
-  `/Library/Modulous/HookKit`, and `control` keeps every
+  `/Library/Modulous/HookKit`, and `packaging/layout/DEBIAN/control` keeps every
   `me.jjolano.hkmodule.*` package in Conflicts/Replaces/Provides. Finding 1
   (the migration was announced twice and shipped never) and finding 2 (the
   revival deleted Modulous) are exactly why: there is a v1 API surface worth

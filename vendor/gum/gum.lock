@@ -1,4 +1,4 @@
-# Official Frida release assets; scripts/fetch-gum.sh validates these before
+# Official Frida release assets; tools/dependencies/fetch-gum.sh validates these before
 # extracting the generated header and static library.
 GUM_VERSION=17.17.0
 GUM_ARM64_URL=https://github.com/frida/frida/releases/download/17.17.0/frida-gum-devkit-17.17.0-ios-arm64.tar.xz

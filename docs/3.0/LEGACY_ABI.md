@@ -2,8 +2,9 @@
 
 Status: **canonical cutover implemented**. `HookKit.framework` is the only
 3.0 framework identity; `HookKit3.framework` and its beta package are
-retired. The canonical facade, packages, exports, and six historical ABI
-baselines are release-gated together.
+retired. The canonical facade, packages, exports, and compatibility surface
+ship together. Exact current exports and package/linker
+metadata are release-gated; historical ABI snapshots are not.
 
 ## What must keep working, unrecompiled
 
@@ -15,9 +16,9 @@ with no recompile, no relink):
   `HookKitModule`, `HookKitHook`, `HookKitClassHook`, `HookKitFunctionHook`
   and `HookKitMemoryHook`
 
-All historical tags are present locally (verified in `IMPLEMENTATION_STATUS.md`,
-Milestone 0) — the fixture/baseline work in Milestone 11 builds against
-real tagged headers and `.tbd` files, not reconstructions.
+Historical tagged headers and `.tbd` files informed the compatibility policy
+and remain available in Git history. The current release does not rebuild or
+compare historical selector/type-encoding snapshots.
 
 Source compatibility (old `#import`s keep compiling, undeprecated-but-marked):
 
@@ -85,8 +86,8 @@ Canonical 3.0 build: `@rpath/HookKit.framework/HookKit`,
 `current_version = 3.0.0`, `compatibility_version = 2.5.1`. Exports the new
 `hk_*` C ABI plus `_OBJC_CLASS_$_` / `_OBJC_METACLASS_$_` for all seven v1
 classes. Everything else stays hidden — enforced today by
-`scripts/check_exports.sh` and the six historical ABI baselines (the sixth is
-the v1.0.1 seven-class surface).
+`tools/release/check_exports.sh` against
+`packaging/exports/export-HookKit.list`.
 
 Every package is version `3.0.0-1`. Canonical modern packages conflict with
 and replace `me.jjolano.fmwk.hookkit.legacy`; the legacy package reciprocally
@@ -99,7 +100,7 @@ classes and recommended retaining the `HKSubstitutor` subset alone. That
 recommendation is superseded: the classes ship, as translators. The audit's
 factual findings still stand and still govern the one part not restored.
 
-**Restored** (`Sources/Compatibility/HKLegacyModules.m`): all six classes, on
+**Restored** (`src/compatibility/HKLegacyModules.m`): all six classes, on
 the same plan lifecycle `HKSubstitutor` drives. v1 put its provider seam at
 `Module+Internal.h`, so every public `HookKitModule` method is v1's own code
 unchanged and only the eight `_hook*` / `_openImage:` / `_findSymbol:image:`
@@ -109,8 +110,9 @@ subclass.
 
 **Not restored**: Modulous. No bundle is read from `/Library/Modulous/HookKit`,
 `getModuleInfo` returns exactly one row for the built-in module, and the
-`me.jjolano.hkmodule.*` packages stay in `control`'s Conflicts/Replaces/
-Provides. A v1 consumer that reads a *specific* provider identifier out of
+`me.jjolano.hkmodule.*` packages stay in
+`packaging/layout/DEBIAN/control`'s Conflicts/Replaces/Provides. A v1 consumer
+that reads a *specific* provider identifier out of
 `getModuleInfo` sees one HookKit row instead of a per-library list — the one
 behavioural difference from v1, and a consequence of provider identity being
 retired facade-wide (see "Provider identity" above), not of the shim.
@@ -122,11 +124,17 @@ Two translation choices worth knowing:
 | `_hookFunctions:` | Specs pre-built, then one plan for the batch; returns the exact installed count |
 | `_hookRegions:` | Returns `-1` (declines). `expected_bytes` must be captured at execute time, so there is nothing to pre-build; v1's own per-op fallback runs |
 
+Duplicate target identities in one `_hookFunctions:` batch are rejected per
+operation. Callers that intentionally chain a target submit separate batches
+after the earlier batch has committed.
+
 ## Test system pointer
 
-`tests/device_legacy_abi.m` (both the `HKSubstitutor` and the v1 module-class
-sections) and `tests/device_legacy_facade.m` are retained for current-device
-smoke. `scripts/check_legacy_abi.sh` validates all six
-historical JSON baselines against each built framework. The accepted release
-bar is package/source/ABI validation across all lanes plus the existing arm64
-device smoke; it does not claim physical armv7, armv7s, or arm64e verification.
+`tests/device/device_legacy_abi.m` (both the `HKSubstitutor` and v1 module-class
+sections), `tests/device/device_legacy_facade.m`, and
+`tests/device/device_compat_smoke.m` are retained for current-device smoke.
+`make test-header-compile` checks the current public headers, release builds
+check package/linker metadata, and `tools/release/check_exports.sh` checks the
+exact current export set. There is no historical selector/type-encoding or ABI
+snapshot release gate. The accepted release bar does not claim physical armv7,
+armv7s, or arm64e verification.

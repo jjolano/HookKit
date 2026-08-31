@@ -29,7 +29,7 @@ jobs:
             -arch arm64e \
             -DHK_EXPECT_NATIVE_PTRAUTH=1 \
             -o "$RUNNER_TEMP/test_pointer_auth" \
-            Tests/Host/test_pointer_auth.c Sources/Core/HKOwnership.c \
+            tests/host/test_pointer_auth.c src/core/HKOwnership.c \
             -lpthread
           "$RUNNER_TEMP/test_pointer_auth"
 
@@ -56,25 +56,25 @@ jobs:
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline \
             -arch "${{ matrix.arch }}" -dynamiclib \
             -install_name @rpath/libHookKitLiveTargets.dylib \
-            -o "$targets" Tests/MacOS/live_hook_targets.c
+            -o "$targets" tests/macos/live_hook_targets.c
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
             -arch "${{ matrix.arch }}" ${target_link_flags} \
             -framework Foundation -lpthread \
             -o "$out" \
-            Tests/MacOS/test_live_hooks.m \
-            Sources/Engines/HKInlineEngine.c \
-            Sources/Engines/HKMemoryEngine.c \
-            Sources/Engines/HKObjCEngine.c \
-            Sources/Engines/HKRebindEngine.c \
-            Sources/Resolvers/HKChainedFixups.c \
-            Sources/Resolvers/HKDyldCachePatches.c \
-            Sources/Resolvers/HKExportTrie.c \
-            Sources/Resolvers/HKImportSlots.c \
-            Sources/Resolvers/HKMachO.c \
-            Sources/Resolvers/HKSymbolResolve.c \
-            Sources/Resolvers/HKSymbolTable.c \
-            Sources/Core/HKArtifactLedger.c Sources/Core/HKIDs.c \
-            native/hk_arm64.c native/hk_native.c native/hk_symbols.c
+            tests/macos/test_live_hooks.m \
+            src/engines/HKInlineEngine.c \
+            src/engines/HKMemoryEngine.c \
+            src/engines/HKObjCEngine.c \
+            src/engines/HKRebindEngine.c \
+            src/resolvers/HKChainedFixups.c \
+            src/resolvers/HKDyldCachePatches.c \
+            src/resolvers/HKExportTrie.c \
+            src/resolvers/HKImportSlots.c \
+            src/resolvers/HKMachO.c \
+            src/resolvers/HKSymbolResolve.c \
+            src/resolvers/HKSymbolTable.c \
+            src/core/HKArtifactLedger.c src/core/HKIDs.c \
+            src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
           "$out" "$targets"
 
   legacy:
@@ -107,12 +107,12 @@ jobs:
         run: ./build.sh rootful-legacy
 
       - name: Verify Dobby provenance
-        run: bash scripts/rebuild-dobby.sh --check
+        run: bash tools/dependencies/rebuild-dobby.sh --check
 
       - uses: actions/upload-artifact@v7
         with:
           name: hookkit-rootful-legacy
-          path: build/hookkit-rootful-legacy.deb
+          path: .theos/release/hookkit-rootful-legacy.deb
 
   modern:
     name: ${{ matrix.flavor }}
@@ -160,5 +160,5 @@ jobs:
         with:
           name: hookkit-${{ matrix.flavor }}
           path: |
-            build/hookkit-${{ matrix.flavor }}.deb
-            build/hookkit-${{ matrix.flavor }}-gum.deb
+            .theos/release/hookkit-${{ matrix.flavor }}.deb
+            .theos/release/hookkit-${{ matrix.flavor }}-gum.deb

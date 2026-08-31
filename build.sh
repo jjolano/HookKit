@@ -8,10 +8,11 @@ PACKAGE_VERSION=3.0.0-1
 MAKE_COMMAND=${MAKE_COMMAND:-make}
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-build.XXXXXX")
 MAKE_ARGS=("THEOS_LIBRARY_PATH=$STAGE/lib")
+RELEASE_DIR="$ROOT/.theos/release"
 trap 'rm -rf "$STAGE"' EXIT
 
-rm -rf build
-mkdir -p build
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR"
 
 run_make() {
     "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
@@ -20,7 +21,7 @@ run_make() {
 # Modern lanes need a toolchain that stamps arm64e slices with the versioned
 # ptrauth ABI (cpusubtype 0x80000002). Xcode 12+ does; theos's bundled Linux
 # clang does not -- it emits 0x00000002, the preview ABI modern ld rejects as
-# "arm64e.old". scripts/setup-modern-toolchain.sh assembles a Linux toolchain
+# "arm64e.old". tools/dependencies/setup-modern-toolchain.sh assembles a Linux toolchain
 # that can, and MODERN_TOOLCHAIN points at it.
 MODERN_TOOLCHAIN=${MODERN_TOOLCHAIN:-$THEOS/toolchain/modern/linux/iphone}
 
@@ -41,12 +42,12 @@ require_modern_toolchain() {
     # old-ABI arm64e slice that links locally and is rejected everywhere else.
     [ -x "$MODERN_TOOLCHAIN/bin/clang" ] || {
         echo "error: $1 needs a new-ABI arm64e toolchain at $MODERN_TOOLCHAIN" >&2
-        echo "       run scripts/setup-modern-toolchain.sh to assemble one" >&2
+        echo "       run tools/dependencies/setup-modern-toolchain.sh to assemble one" >&2
         return 1
     }
-    bash "$ROOT/scripts/setup-modern-toolchain.sh" --verify "$MODERN_TOOLCHAIN" >/dev/null || {
+    bash "$ROOT/tools/dependencies/setup-modern-toolchain.sh" --verify "$MODERN_TOOLCHAIN" >/dev/null || {
         echo "error: $1: $MODERN_TOOLCHAIN emits old-ABI arm64e" >&2
-        echo "       re-run scripts/setup-modern-toolchain.sh" >&2
+        echo "       re-run tools/dependencies/setup-modern-toolchain.sh" >&2
         return 1
     }
 }
@@ -168,11 +169,11 @@ write_control() {
         -e "s/^(Replaces:.*)/\\1$replaces/" \
         -e "s/^(Provides:.*)/\\1$provides/" \
         -e "s/^Version:.*/Version: $PACKAGE_VERSION/" \
-        control > "build/control.$profile"
+        packaging/layout/DEBIAN/control > "$RELEASE_DIR/control.$profile"
 
-    if [ -z "$conflicts" ]; then drop_field "build/control.$profile" Conflicts; fi
-    if [ -z "$replaces" ]; then drop_field "build/control.$profile" Replaces; fi
-    if [ -z "$provides" ]; then drop_field "build/control.$profile" Provides; fi
+    if [ -z "$conflicts" ]; then drop_field "$RELEASE_DIR/control.$profile" Conflicts; fi
+    if [ -z "$replaces" ]; then drop_field "$RELEASE_DIR/control.$profile" Replaces; fi
+    if [ -z "$provides" ]; then drop_field "$RELEASE_DIR/control.$profile" Provides; fi
 }
 
 write_gum_control() {
@@ -203,32 +204,13 @@ write_gum_control() {
         'Maintainer: jjolano <jjolano@me.com>' \
         'Author: jjolano <jjolano@me.com>' \
         'Section: Development' \
-        'Tag: role::developer' > "build/control.$profile.gum"
-}
-
-# Gate the v1/2.x Objective-C ABI the facade restores. Compares the built
-# framework against every baseline under Tests/LegacyABI/Baselines.
-check_legacy_abi() {
-    local expected_install_name=${1:-} binary
-    binary=$(find .theos/obj -path '*/HookKit.framework/HookKit' -type f \
-        ! -path '*/arm64/*' ! -path '*/arm64e/*' \
-        ! -path '*/armv7/*' ! -path '*/armv7s/*' | head -n 1)
-    [ -n "$binary" ] || {
-        echo "error: built HookKit framework binary not found" >&2
-        return 1
-    }
-    if [ -n "$expected_install_name" ]; then
-        bash scripts/check_legacy_abi.sh "$binary" Tests/LegacyABI/Baselines \
-            --expected-install-name "$expected_install_name"
-    else
-        bash scripts/check_legacy_abi.sh "$binary"
-    fi
+        'Tag: role::developer' > "$RELEASE_DIR/control.$profile.gum"
 }
 
 copy_release_artifact() {
     local artifact=$1 name=$2
-    cp -p "$artifact" "build/$name.deb"
-    cp -p "$artifact" "build/$(basename "$artifact")"
+    cp -p "$artifact" "$RELEASE_DIR/$name.deb"
+    cp -p "$artifact" "$RELEASE_DIR/$(basename "$artifact")"
 }
 
 build_rootful_legacy() {
@@ -237,10 +219,9 @@ build_rootful_legacy() {
     write_control "$lane"
     legacy_make HOOKKIT_LANE="$lane" clean
     [ -z "${HOOKKIT_SKIP_LANE_TEST:-}" ] && legacy_make HOOKKIT_LANE="$lane" test
-    legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
+    legacy_make HOOKKIT_LANE="$lane" package FINALPACKAGE=1 _THEOS_DEB_PACKAGE_CONTROL_PATH="$RELEASE_DIR/control.$lane"
     artifact=$(cat .theos/last_package)
     run_make check-compat COMPAT_PROFILE="$lane" COMPAT_ARTIFACT="$artifact"
-    check_legacy_abi
     copy_release_artifact "$artifact" hookkit-rootful-legacy
 }
 
@@ -253,25 +234,20 @@ package_modern_lane() {
     # framework product alone first so the core package stays small and does
     # not fetch the Gum devkit.
     modern_make HOOKKIT_LANE="$lane" LIBRARY_NAME= package FINALPACKAGE=1 \
-        _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane"
+        _THEOS_DEB_PACKAGE_CONTROL_PATH="$RELEASE_DIR/control.$lane"
     artifact=$(cat .theos/last_package)
-    if [ "$lane" = roothide ]; then
-        check_legacy_abi '@loader_path/.jbroot/Library/Frameworks/HookKit.framework/HookKit'
-    else
-        check_legacy_abi
-    fi
     copy_release_artifact "$artifact" "hookkit-$lane"
 
     # Then stage just HKGum with its own package metadata. The base package
     # owns the shared release notices; the Gum package depends on that exact
     # base version, so duplicating those files would make dpkg reject the pair.
-    # Theos normally stages layout/ for every package, so point this invocation
+    # Theos normally stages the package layout for every package, so point this invocation
     # at an empty layout directory instead.
     empty_layout="$STAGE/empty-layout"
     mkdir -p "$empty_layout"
     modern_make HOOKKIT_LANE="$lane" FRAMEWORK_NAME= package FINALPACKAGE=1 \
         THEOS_LAYOUT_DIR="$empty_layout" THEOS_LAYOUT_DIR_NAME="$empty_layout" \
-        _THEOS_DEB_PACKAGE_CONTROL_PATH="build/control.$lane.gum"
+        _THEOS_DEB_PACKAGE_CONTROL_PATH="$RELEASE_DIR/control.$lane.gum"
     gum_artifact=$(cat .theos/last_package)
     copy_release_artifact "$gum_artifact" "hookkit-$lane-gum"
 

@@ -1,4 +1,4 @@
-# Pinned source and expected checked-in archive for scripts/rebuild-dobby.sh.
+# Pinned source and expected checked-in archive for tools/dependencies/rebuild-dobby.sh.
 DOBBY_COMMIT=5dfc8546954ce3b3198132ab13fddb89ee92cdd7
 DOBBY_SOURCE_URL=https://codeload.github.com/jmpews/Dobby/tar.gz/5dfc8546954ce3b3198132ab13fddb89ee92cdd7
 DOBBY_SOURCE_SHA256=01a417233c40929aa21098c8a9724c00f6f05b5cde3f11abcac84b8e00053748
