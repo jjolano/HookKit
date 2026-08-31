@@ -36,6 +36,7 @@ __attribute__((noinline)) static int hk_terminal_replacement(void) {
 }
 
 static volatile int hk_memory_value = 3;
+static volatile int hk_batched_memory_value = 5;
 
 static int fail(const char *message) {
     fprintf(stderr, "HookKit canonical facade: FAIL: %s\n", message);
@@ -117,12 +118,12 @@ int main(void) {
     set_batching(batched, sel_registerName("setBatching:"), true);
     int second_replacement = 13;
     if (send_memory_hook(batched,
-                         sel_registerName("hookMemory:withData:size:"),
-                         (void *)&hk_memory_value, &second_replacement,
-                         sizeof(second_replacement)) != HK_OK ||
-        hk_memory_value != replacement ||
+                          sel_registerName("hookMemory:withData:size:"),
+                          (void *)&hk_batched_memory_value, &second_replacement,
+                          sizeof(second_replacement)) != HK_OK ||
+        hk_batched_memory_value != 5 ||
         execute_hooks(batched, sel_registerName("executeHooks")) != HK_OK ||
-        hk_memory_value != second_replacement) {
+        hk_batched_memory_value != second_replacement) {
         return fail("3.0 legacy batching");
     }
 

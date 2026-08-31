@@ -12,6 +12,7 @@ __attribute__((noinline)) static int hk_legacy_abi_replacement(void) {
 }
 
 static volatile int hk_legacy_abi_memory = 1;
+static volatile int hk_legacy_abi_batched_memory = 4;
 
 // Separate targets for the v1 module-class section so the two halves of this
 // smoke cannot mask each other.
@@ -94,12 +95,12 @@ int main(void) {
         HKSubstitutor *batched = [HKSubstitutor new];
         [batched setBatching:YES];
         int second_replacement = 3;
-        if ([batched hookMemory:(void *)&hk_legacy_abi_memory
+        if ([batched hookMemory:(void *)&hk_legacy_abi_batched_memory
                         withData:&second_replacement
                             size:sizeof(second_replacement)] != HK_OK ||
-            hk_legacy_abi_memory != replacement ||
+            hk_legacy_abi_batched_memory != 4 ||
             [batched executeHooks] != HK_OK ||
-            hk_legacy_abi_memory != second_replacement) {
+            hk_legacy_abi_batched_memory != second_replacement) {
             puts("HookKit legacy ABI: FAIL batching");
             return 1;
         }
