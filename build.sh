@@ -18,86 +18,30 @@ run_make() {
     "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
 }
 
-# Modern lanes need a toolchain that stamps arm64e slices with the versioned
-# ptrauth ABI (cpusubtype 0x80000002). Xcode 12+ does; theos's bundled Linux
-# clang does not -- it emits 0x00000002, the preview ABI modern ld rejects as
-# "arm64e.old". tools/dependencies/setup-modern-toolchain.sh assembles a Linux toolchain
-# that can, and MODERN_TOOLCHAIN points at it.
-MODERN_TOOLCHAIN=${MODERN_TOOLCHAIN:-$THEOS/toolchain/modern/linux/iphone}
+# Toolchain selection and validation for both arm64e ABIs live in
+# $THEOS/bin/lane.sh, shared with Shadow so the two cannot disagree about which
+# compiler a lane needs. On Linux the new-ABI lanes need a toolchain that stamps
+# arm64e slices with the versioned ptrauth ABI (cpusubtype 0x80000002); theos's
+# bundled clang emits 0x00000002, which modern ld rejects as "arm64e.old".
+# $THEOS/bin/setup-modern-toolchain.sh assembles one that can.
+. "$THEOS/bin/lane.sh"
 
-require_modern_toolchain() {
-    if [ "$(uname -s)" = Darwin ]; then
-        local version major
-        version=$(xcodebuild -version | awk 'NR == 1 { print $2 }')
-        major=${version%%.*}
-        [ "$major" -ge 12 ] || {
-            echo "error: $1 requires Xcode 12 or newer (found $version)" >&2
-            return 1
-        }
-        return
-    fi
+require_modern_toolchain() { theos_abi_require new "$1"; }
+require_oldabi_toolchain()  { theos_abi_require old rootful-legacy; }
 
-    # Probe rather than trust: a toolchain that merely *exists* here is more
-    # dangerous than a missing one, because the wrong compiler produces an
-    # old-ABI arm64e slice that links locally and is rejected everywhere else.
-    [ -x "$MODERN_TOOLCHAIN/bin/clang" ] || {
-        echo "error: $1 needs a new-ABI arm64e toolchain at $MODERN_TOOLCHAIN" >&2
-        echo "       run tools/dependencies/setup-modern-toolchain.sh to assemble one" >&2
-        return 1
-    }
-    bash "$ROOT/tools/dependencies/setup-modern-toolchain.sh" --verify "$MODERN_TOOLCHAIN" >/dev/null || {
-        echo "error: $1: $MODERN_TOOLCHAIN emits old-ABI arm64e" >&2
-        echo "       re-run tools/dependencies/setup-modern-toolchain.sh" >&2
-        return 1
-    }
-}
-
-# Modern-lane make: on Linux the toolchain above replaces theos's default.
+# Lane make wrappers: on Linux the ABI's cross toolchain replaces theos's
+# default, on macOS Xcode already emits the right ABI and needs no overrides.
 modern_make() {
-    if [ "$(uname -s)" = Darwin ]; then
-        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
-    else
-        # Theos's Linux default predates this modern wrapper and otherwise
-        # selects libroot_oldabi.a even when clang emits the new ABI.
-        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" SDKBINPATH="$MODERN_TOOLCHAIN/bin" IS_NEW_ABI=1 "$@"
-    fi
-}
-
-require_oldabi_toolchain() {
-    if [ "$(uname -s)" = Darwin ]; then
-        : "${OLDABI_DEVELOPER_DIR:?set OLDABI_DEVELOPER_DIR to Xcode 11.7/Contents/Developer}"
-        DEVELOPER_DIR="$OLDABI_DEVELOPER_DIR" xcodebuild -version | grep -q '^Xcode 11\.7$' || {
-            echo "error: OLDABI_DEVELOPER_DIR is not Xcode 11.7" >&2
-            return 1
-        }
-        return
-    fi
-
-    OLDABI_TOOLCHAIN=${OLDABI_TOOLCHAIN:-$THEOS/toolchain/oldabi/linux/iphone}
-    OLDABI_SDKS=${OLDABI_SDKS:-$THEOS/sdks}
-    [ -x "$OLDABI_TOOLCHAIN/bin/clang" ] || {
-        echo "error: OLDABI_TOOLCHAIN/bin/clang is not executable" >&2
-        return 1
-    }
-    [ -d "$OLDABI_SDKS/iPhoneOS13.7.sdk" ] || {
-        echo "error: OLDABI_SDKS/iPhoneOS13.7.sdk is missing" >&2
-        return 1
-    }
-
-    local version major
-    version=$("$OLDABI_TOOLCHAIN/bin/clang" -dumpversion)
-    major=${version%%.*}
-    [ "$major" -lt 12 ] || {
-        echo "error: rootful-legacy requires Clang older than 12 (found $version)" >&2
-        return 1
-    }
+    local args; mapfile -t args < <(theos_abi_args new)
+    "$MAKE_COMMAND" "${MAKE_ARGS[@]}" ${args[@]+"${args[@]}"} "$@"
 }
 
 legacy_make() {
     if [ "$(uname -s)" = Darwin ]; then
         DEVELOPER_DIR="$OLDABI_DEVELOPER_DIR" "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
     else
-        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" SDKBINPATH="$OLDABI_TOOLCHAIN/bin" THEOS_SDKS_PATH="$OLDABI_SDKS" "$@"
+        local args; mapfile -t args < <(theos_abi_args old)
+        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" ${args[@]+"${args[@]}"} "$@"
     fi
 }
 

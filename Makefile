@@ -8,26 +8,24 @@ TARGET ?= iphone:clang:16.5:9.0
 
 # Release lanes override inherited make/environment values so a preceding
 # rootless build cannot silently turn a rootful framework into an iOS 15 one.
-ifeq ($(HOOKKIT_LANE),rootful-legacy)
-override ARCHS := armv7 armv7s arm64 arm64e
-override TARGET := iphone:clang:13.7
-override TARGET_OS_DEPLOYMENT_VERSION := 9.0
-override TARGET_OS_DEPLOYMENT_VERSION_arm64e := 12.0
-override THEOS_PACKAGE_SCHEME :=
-else ifeq ($(HOOKKIT_LANE),rootful-modern)
-override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:16.5:14.0
-override THEOS_PACKAGE_SCHEME :=
-else ifeq ($(HOOKKIT_LANE),rootless)
-override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:16.5:15.0
-override THEOS_PACKAGE_SCHEME := rootless
-else ifeq ($(HOOKKIT_LANE),roothide)
-override ARCHS := arm64 arm64e
-override TARGET := iphone:clang:16.5:15.0
-override THEOS_PACKAGE_SCHEME := roothide
-else ifneq ($(HOOKKIT_LANE),)
+# The lane matrix itself lives in $THEOS/bin/lane.sh, shared with Shadow so the
+# two cannot drift on architectures, pinned SDK or packaging scheme.
+ifneq ($(HOOKKIT_LANE),)
+_HK_LANE := $(THEOS)/bin/lane.sh get $(HOOKKIT_LANE)
+override ARCHS := $(shell $(_HK_LANE) ARCHS)
+override TARGET := $(shell $(_HK_LANE) TARGET)
+override THEOS_PACKAGE_SCHEME := $(shell $(_HK_LANE) SCHEME)
+ifeq ($(ARCHS),)
 $(error unknown HOOKKIT_LANE '$(HOOKKIT_LANE)')
+endif
+_HK_DEPLOY := $(shell $(_HK_LANE) DEPLOY)
+ifneq ($(_HK_DEPLOY),)
+override TARGET_OS_DEPLOYMENT_VERSION := $(_HK_DEPLOY)
+endif
+_HK_DEPLOY_ARM64E := $(shell $(_HK_LANE) DEPLOY_ARM64E)
+ifneq ($(_HK_DEPLOY_ARM64E),)
+override TARGET_OS_DEPLOYMENT_VERSION_arm64e := $(_HK_DEPLOY_ARM64E)
+endif
 endif
 
 THEOS_BUILD_DIR := $(CURDIR)/.theos
@@ -73,13 +71,16 @@ HookKit_LDFLAGS =
 # Jailbreak-root seam is compile-time per scheme:
 # rootful = identity, rootless = libroot (auto-linked -lroot by theos),
 # roothide = libroothide's jbroot(). Must append after the base CFLAGS above.
-# THEOS_PACKAGE_SCHEME_ROOTHIDE makes <roothide.h> select the real libroothide
-# API; without it the header falls back to roothide/stub.h whose jbroot()
-# resolves through libroot at runtime — wrong semantics for roothide.
+# <roothide.h> needs THEOS_PACKAGE_SCHEME_ROOTHIDE to select the real
+# libroothide API rather than roothide/stub.h, whose jbroot() resolves through
+# libroot at runtime — wrong semantics for roothide. Theos defines it from the
+# scheme (both this fork and roothide/theos do), and the roothide lane cannot
+# build against a Theos without RootHide support anyway, so it is not repeated
+# here.
 ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
 HookKit_CFLAGS += -DHK_ROOTLESS
 else ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-HookKit_CFLAGS += -DHK_ROOTHIDE -DTHEOS_PACKAGE_SCHEME_ROOTHIDE
+HookKit_CFLAGS += -DHK_ROOTHIDE
 endif
 # The roothide scheme module forces -install_name "@loader_path/.jbroot...",
 # which would override our @rpath install_name (instance LDFLAGS come after
@@ -640,14 +641,14 @@ DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swif
 check-device-smoke-toolchain:
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
-	$(ECHO_NOTHING)bash $(CURDIR)/tools/dependencies/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
+	$(ECHO_NOTHING)bash $(THEOS)/bin/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
 endif
 endif
 
 check-device-canonical-toolchain:
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_CANONICAL_ARCH),arm64e)
-	$(ECHO_NOTHING)bash $(CURDIR)/tools/dependencies/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
+	$(ECHO_NOTHING)bash $(THEOS)/bin/setup-modern-toolchain.sh --verify $(MODERN_TOOLCHAIN)$(ECHO_END)
 endif
 endif
 
