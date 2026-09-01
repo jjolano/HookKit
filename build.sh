@@ -120,19 +120,22 @@ write_control() {
 }
 
 write_gum_control() {
-    local profile=$1 name arch
+    local profile=$1 name arch floor
     case "$profile" in
         rootful-modern)
             name='Modern Rootful'
             arch=iphoneos-arm
+            floor=14.0
             ;;
         rootless)
             name='Rootless'
             arch=iphoneos-arm64
+            floor=15.0
             ;;
         roothide)
             name='RootHide'
             arch=iphoneos-arm64e
+            floor=15.0
             ;;
         *) echo "error: no Gum package profile for $profile" >&2; return 1 ;;
     esac
@@ -140,7 +143,7 @@ write_gum_control() {
     printf '%s\n' \
         'Package: me.jjolano.fmwk.hookkit.gum' \
         "Name: HookKit Frida Gum Provider ($name)" \
-        "Depends: me.jjolano.fmwk.hookkit (= $PACKAGE_VERSION), firmware (>= 15.0)" \
+        "Depends: me.jjolano.fmwk.hookkit (= $PACKAGE_VERSION), firmware (>= $floor)" \
         "Version: $PACKAGE_VERSION" \
         "Architecture: $arch" \
         'Description: Optional Frida Gum provider for HookKit.' \

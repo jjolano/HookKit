@@ -322,8 +322,8 @@ check_gum_package() {
     printf '%s\n' "$depends" | grep -Fq 'me.jjolano.fmwk.hookkit (= 3.0.0-1)' || {
         echo "FAIL Gum package must depend on the matching HookKit package" >&2; return 1;
     }
-    printf '%s\n' "$depends" | grep -Fq 'firmware (>= 15.0)' || {
-        echo "FAIL Gum package must require firmware >= 15.0" >&2; return 1;
+    printf '%s\n' "$depends" | grep -Fq "firmware (>= $floor)" || {
+        echo "FAIL Gum package must require firmware >= $floor" >&2; return 1;
     }
     for field in Recommends Conflicts Replaces Provides; do
         [ -z "$("$DPKG_DEB" -f "$GUM_ARTIFACT" "$field" 2>/dev/null || true)" ] || {
@@ -347,7 +347,7 @@ check_gum_package() {
     [ "$actual_files" = "$expected_files" ] || {
         echo "FAIL Gum package must contain only HKGum.dylib" >&2; return 1;
     }
-    echo "Gum package: $actual_package ($actual_arch), firmware >= 15.0"
+    echo "Gum package: $actual_package ($actual_arch), firmware >= $floor"
     check_binary "$expected_path" "$gum_expected" "$gum_root"
     bash "$ROOT/tools/release/check_exports.sh" "$expected_path"
 }
