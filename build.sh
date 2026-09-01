@@ -92,7 +92,6 @@ write_control() {
             name='HookKit Framework (RootHide)'
             floor=15.0
             arch=iphoneos-arm64e
-            ceiling=', firmware (<< 18.0)'
             conflicts=', me.jjolano.fmwk.hookkit.legacy'
             replaces=', me.jjolano.fmwk.hookkit.legacy'
             provides=

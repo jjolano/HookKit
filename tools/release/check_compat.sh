@@ -49,7 +49,7 @@ case "$PROFILE" in
         package=me.jjolano.fmwk.hookkit
         package_arch=iphoneos-arm64e
         floor=15.0
-        ceiling=18.0
+        ceiling=
         hookkit_expected='arm64=15.0,arm64e=15.0'
         gum_package=me.jjolano.fmwk.hookkit.gum
         gum_arch=iphoneos-arm64e
