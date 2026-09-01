@@ -19,15 +19,6 @@
 #include "../../src/resolvers/HKMachO.h"
 #include "../../src/native/hk_native.h"
 
-static int (*g_native_original)(int);
-static unsigned g_native_hits;
-
-__attribute__((noinline))
-static int native_replacement(int value) {
-    g_native_hits++;
-    return g_native_original(value) + 100;
-}
-
 __attribute__((noinline))
 static int terminal_replacement(int value) {
     return value + 200;
@@ -40,18 +31,9 @@ static bool native_write(void *ctx, uintptr_t address,
 }
 
 static void test_inline_hooks(void *targets) {
-    int (*native_target)(int) =
-        (int (*)(int))dlsym(targets, "hk_live_native_target");
     int (*terminal_target)(int) =
         (int (*)(int))dlsym(targets, "hk_live_terminal_target");
-    assert(native_target && terminal_target);
-
-    assert(native_target(1) == 11);
-    assert(hk_native_hook_function((void *)native_target,
-                                   (void *)native_replacement,
-                                   (void **)&g_native_original));
-    assert(g_native_original && g_native_original(1) == 11);
-    assert(native_target(1) == 111 && g_native_hits == 1);
+    assert(terminal_target);
 
     assert(terminal_target(1) == 27);
     hk_inline_plan_t plan;

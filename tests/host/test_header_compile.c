@@ -20,6 +20,26 @@ typedef struct { HK_STRUCT_HEADER; int x; } hk_test_struct_t;
 _Static_assert(offsetof(hk_test_struct_t, struct_size) == 0, "struct_size must be first");
 _Static_assert(offsetof(hk_test_struct_t, struct_version) == sizeof(uint32_t), "struct_version must be second");
 _Static_assert(offsetof(hk_test_struct_t, x) == 2 * sizeof(uint32_t), "fields after HK_STRUCT_HEADER must follow immediately");
+_Static_assert(offsetof(hk_runtime_config_t, submit) == 2 * sizeof(uint32_t), "submit must follow HK_STRUCT_HEADER");
+_Static_assert(offsetof(hk_runtime_config_t, executor_context) ==
+               offsetof(hk_runtime_config_t, submit) + sizeof(hk_executor_submit_fn),
+               "executor_context must follow submit");
+_Static_assert(offsetof(hk_runtime_config_t, diagnostic_callback) ==
+               offsetof(hk_runtime_config_t, executor_context) + sizeof(void *),
+               "diagnostic_callback must follow executor_context");
+_Static_assert(offsetof(hk_runtime_config_t, diagnostic_context) ==
+               offsetof(hk_runtime_config_t, diagnostic_callback) + sizeof(hk_diagnostic_callback_fn),
+               "diagnostic_context must follow diagnostic_callback");
+_Static_assert(offsetof(hk_runtime_config_t, install_context) ==
+               offsetof(hk_runtime_config_t, diagnostic_context) + sizeof(void *),
+               "install_context must follow diagnostic_context");
+#if UINTPTR_MAX == UINT64_MAX
+_Static_assert(sizeof(hk_runtime_config_t) == 48,
+               "64-bit HookKit 3.0 runtime config ABI size");
+#elif UINTPTR_MAX == UINT32_MAX
+_Static_assert(sizeof(hk_runtime_config_t) == 28,
+               "32-bit HookKit 3.0 runtime config ABI size");
+#endif
 
 _Static_assert(sizeof(hk_id_t) == 16, "hk_id_t is two uint64_t");
 
@@ -123,13 +143,23 @@ int main(void) {
     hk_task_fn task_fn_var = NULL;
     hk_executor_submit_fn submit_fn_var = NULL;
     hk_diagnostic_callback_fn diag_fn_var = NULL;
+    hk_runtime_config_t config = {
+        .struct_size = sizeof(hk_runtime_config_t),
+        .struct_version = HK_ABI_VERSION_3_0,
+        .submit = submit_fn_var,
+        .executor_context = NULL,
+        .diagnostic_callback = diag_fn_var,
+        .diagnostic_context = NULL,
+        .install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS,
+    };
     hk_backend_enumerator_fn backend_enumerator_fn_var = backend_enumerator;
     (void)task_fn_var;
     (void)submit_fn_var;
     (void)diag_fn_var;
     (void)backend_enumerator_fn_var;
 
-    if (spec.target_kind != HK_TARGET_FUNCTION_SYMBOL) {
+    if (spec.target_kind != HK_TARGET_FUNCTION_SYMBOL ||
+        config.install_context != HK_INSTALL_CONTEXT_EARLY_PROCESS) {
         return 1;
     }
 

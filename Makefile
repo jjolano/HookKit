@@ -732,7 +732,7 @@ device-provider-alias-smoke:
 BENCH_CFLAGS = -Wall -Wextra -Werror -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -I. -Iinclude -Itools/bench
 BENCH_LDFLAGS = -lm -lpthread
 
-.PHONY: bench bench-plan bench-resolvers bench-reloc bench-provider device-bench bench-instruments check-bench-regression
+.PHONY: bench bench-plan bench-resolvers bench-reloc bench-provider device-bench bench-instruments
 
 bench: bench-plan bench-resolvers bench-reloc bench-provider
 
@@ -754,6 +754,3 @@ device-bench: check-device-canonical-toolchain
 
 bench-instruments: device-bench
 	$(ECHO_NOTHING)bash $(CURDIR)/tools/bench/run_instruments.sh $(INSTRUMENTS_DEVICE) $(BENCH_ARGS)$(ECHO_END)
-
-check-bench-regression:
-	$(ECHO_NOTHING)python3 tools/bench/check_regression.py tests/benchmarks/baselines/host.json tests/benchmarks/baselines/device.json$(ECHO_END)

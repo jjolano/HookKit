@@ -11,61 +11,22 @@ relevant.
 
 | Directory | Contents | Upstream | Version/SHA | License | Local patches |
 |---|---|---|---|---|---|
-| `vendor/fishhook/` | fishhook.c, fishhook.h | https://github.com/facebook/fishhook | `aadc161ac3b80db07a9908851839a17ba63a9eb1` (2021-10-12); base byte-identical to that commit, recorded in commit 51e1c7b | BSD-3-Clause (header comment, 2013 Facebook) | yes — heavy fork, see below |
-| `vendor/litehook/` | litehook.c, litehook.h, dyld_cache_format.h, fixup-chains.h, LICENSE, APSL-2.0.txt | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); vendored copies byte-identical to pristine upstream at that commit (verified against every upstream commit) | MIT (LICENSE, Lars Fröder 2022-2024); dyld_cache_format.h carries Apple APSL 2.0 header | yes — see below |
+| `vendor/litehook/` | fixup-chains.h, APSL-2.0.txt | https://github.com/opa334/litehook | `cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31); retained files byte-identical to pristine upstream at that commit | APSL-2.0 (Apple header; full text retained) | none (host-test fixture) |
 | `vendor/dobby/` | dobby.h, libdobby.a, LICENSE, dobby.lock, patches/0001-publish-original-before-activation.patch | https://github.com/jmpews/Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` (2024-03-14); lock records source and archive SHA-256 values | Apache-2.0 (LICENSE vendored) | yes — binary rebuilt from source with one reorder patch (publication-before-activation), see below; dobby.h unchanged |
 | `vendor/gum/` | hkgum.c, COPYING, gum.lock (generated devkit ignored) | https://github.com/frida/frida-gum | tag 17.17.0 = `ddc10c5559cbb41a3dd72866bfba6ff3945ffa5c`; official arm64/arm64e devkits are pinned by URL and SHA-256 in gum.lock | wxWindows Library Licence 3.1 (`COPYING` vendored; GNU Library GPL v2-or-later text plus wxWindows exception) | hkgum.c wrapper only — see below |
-| `vendor/libhooker/` | libhooker.h, libblackjack.h, LICENSE | https://github.com/coolstar/libhooker | master; only milestone is OSS 1.6.9 commit `4f85a68dae` (2023-04-17); in-tree headers predate that release (unchanged since HookKit's initial commit 75cdb22) | BSD-4-Clause (LICENSE vendored) | small header deltas — see below |
+| `vendor/libhooker/` | libhooker.h, LICENSE | https://github.com/coolstar/libhooker | master; only milestone is OSS 1.6.9 commit `4f85a68dae` (2023-04-17); in-tree header predates that release (unchanged since HookKit's initial commit 75cdb22) | BSD-4-Clause (LICENSE vendored) | small header deltas — see below |
 | `vendor/substitute/` | substitute.h | https://github.com/comex/substitute | master; header frozen since `83442f9005` (2015-07-16); no v2 git tag exists upstream | public domain / CC0 1.0 for this header (header comment; upstream `LICENSE.txt` expressly places substitute.h and generated files in the public domain) | 2 small deltas — see below |
-| `vendor/substrate/` | substrate.h | no canonical upstream repo (saurik/substrate and saurik/CydiaSubstrate 404; newest mobilesubstrate deb is 0.9.6301, 2017) | 0.9.7101-era header (copyright 2008-2019 saurik), byte-identical to `https://github.com/opa334/Dopamine` BaseBin `_external/include/substrate.h` @ `e89072adc591881146c9513a616fa68b7323d6a7` — pin = that mirror commit | 3-clause BSD (header text) | none (header only) |
 
-## Local patches
+## Component notes
 
-### fishhook (heavily modified fork)
+### Apple fixup-chain test fixture
 
-Base facebook/fishhook @ `aadc161ac3b80db07a9908851839a17ba63a9eb1` (2021-10-12),
-recorded in commit 51e1c7b and byte-verified. Fork additions postdate the
-fork:
-
-- `__AUTH_CONST` scanning.
-- matched/failed rebind stats.
-- side-effect-free import-slot preflight and batch no-op pruning.
-- publish-callback API (`rebind_symbols_hook`).
-- recursive-mutex + add-image callback re-registration guard.
-- `18a29b7` (2026-08-11) — drop `dladdr()` header validation in the rebind
-  scan: the call is dead weight (the `Dl_info` is never used) and a
-  self-hosting hazard — once this library's own `dladdr` slot is rebound, the
-  validation re-enters the replacement and can jump through a still-NULL
-  original (PC=0 SIGSEGV, observed on-device).
-- `a066270` (2026-08-07) — arm64e PAC fix, no-op reporting.
-- `5b9d973` (2026-08-07) — symbol matching and batching kind guards.
-
-Rebuild: none; retained source-only and not compiled or packaged by the
-current Makefile.
-
-### litehook (heavily modified fork)
-
-Base https://github.com/opa334/litehook @
-`cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31). The vendored
-litehook.c/.h, dyld_cache_format.h, fixup-chains.h and LICENSE were
-byte-identical to pristine upstream at that commit (verified against every
-upstream commit). Committed local patches:
-
-- `8c267fd` (2026-08-09) — `litehook_rebind_symbol` commits the global rebind
-  record only on first match and reports a clean unavailable result on zero
-  matches (upstream appended the record unconditionally).
-- side-effect-free address-slot preflight used by automatic backend routing.
-- `d172b0f` (2026-08-09) — hardening: protection restore, locked rebinds,
-  32-bit strategy gates.
-- `a99f14d` (2026-08-10) — crash prevention hardening (~160 lines).
-- `cfc736d` (2026-08-10) — off-by-one fix in rebind record append.
-
-- `fbe2235` (2026-08-11) — removed the DSC parser by stubbing
-  `litehook_locate_dsc` / `litehook_find_dsc_symbol`; `src/native/hk_symbols.c`
-  replaces it.
-
-Rebuild: none; retained source-only and not compiled or packaged by the
-current Makefile.
+`fixup-chains.h` and `APSL-2.0.txt` are byte-identical to LiteHook
+`cb5c5a39f736b367e72ced1aa0bfeb79a8be269e` (main, 2026-07-31).
+`fixup-chains.h` retains Apple's APSL-2.0 header, and `APSL-2.0.txt` retains
+the full license text. `tests/host/test_chained_fixups.c` uses the header to
+cross-check the parser's structs and bitfields. Rebuild: none; host-test
+fixture only.
 
 ### dobby (binary rebuilt from source, one internal reorder patch)
 
@@ -106,17 +67,15 @@ Rebuild: none — `tools/dependencies/fetch-gum.sh` downloads the two Frida 17.1
 devkits, verifies their SHA-256 values from `gum.lock`, and lipo-merges their
 static libraries; `hkgum.c` is compiled by the Makefile (`HKGum` product).
 
-### libhooker (headers only)
+### libhooker (header only)
 
-Base https://github.com/coolstar/libhooker, master. The in-tree headers
-predate the 1.6.9 OSS release (commit `4f85a68dae`, 2023-04-17); they are
+Base https://github.com/coolstar/libhooker, master. The in-tree header
+predates the 1.6.9 OSS release (commit `4f85a68dae`, 2023-04-17); it is
 unchanged since HookKit's initial commit 75cdb22. Deltas vs master:
 
 - `libhooker.h`: +12 lines of local doc-comment paragraphs.
-- `libblackjack.h`: `#include <objc/objc.h>` removed; `@param class` vs
-  upstream's `@param objcClass`.
 
-Rebuild: none — headers only.
+Rebuild: none — header only.
 
 ### substitute (header only)
 
@@ -159,17 +118,8 @@ This validates adapter signatures, return conventions, and publication order
 only. An installed jailbreak package may come from a different commit; PAC,
 dyld, page-protection, and injection behavior remains device-unverified.
 
-### substrate (header only)
-
-No canonical upstream repo exists (saurik/substrate and saurik/CydiaSubstrate
-404; the newest mobilesubstrate deb is 0.9.6301 from 2017). The in-tree
-header is 0.9.7101-era (copyright 2008-2019 saurik), byte-identical to the
-Dopamine BaseBin mirror commit `e89072adc591881146c9513a616fa68b7323d6a7`.
-License: 3-clause BSD per the header text. Rebuild: none — header only.
-
 ## Rebuild commands
 
-- fishhook, litehook: source-only; no release build or package consumes them.
 - dobby: run `bash tools/dependencies/rebuild-dobby.sh --check` before release. To build
   a reviewed candidate, set `DOBBY_SDK` and `DOBBY_TOOLCHAIN`, then run
   `bash tools/dependencies/rebuild-dobby.sh --rebuild`. Replacing `libdobby.a` requires
@@ -183,10 +133,5 @@ License: 3-clause BSD per the header text. Rebuild: none — header only.
 
 1. substitute: no version tag upstream — pinned to master @ `83442f9005`
    (frozen 2015-07-16) with 2 documented deltas.
-2. substrate: no canonical repo — pinned to the opa334/Dopamine BaseBin
-   mirror commit `e89072adc591881146c9513a616fa68b7323d6a7`.
-3. libhooker: vendored headers predate the 1.6.9 OSS release (`4f85a68dae`);
-   the exact upstream commit they were copied from is not recorded.
-4. fishhook: base SHA is recorded only in commit 51e1c7b's message, not
-   in-tree — now byte-verified, but a tree-local pin file would survive
-   history rewrites.
+2. libhooker: vendored header predates the 1.6.9 OSS release (`4f85a68dae`);
+   the exact upstream commit it was copied from is not recorded.

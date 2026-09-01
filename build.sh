@@ -210,7 +210,6 @@ write_gum_control() {
 copy_release_artifact() {
     local artifact=$1 name=$2
     cp -p "$artifact" "$RELEASE_DIR/$name.deb"
-    cp -p "$artifact" "$RELEASE_DIR/$(basename "$artifact")"
 }
 
 build_rootful_legacy() {

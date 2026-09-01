@@ -5,10 +5,9 @@
 //
 // PURE buffer logic, fully host-testable. Nothing here is device-specific.
 //
-// Reuse survey (done before writing): nothing in this repo decodes ULEB128 or
-// walks an export trie. fishhook rebinds GOT slots, litehook does its own
-// scanning, and src/native/hk_symbols.c only reads the symbol table and the
-// shared cache's own index. So this is new code, not a second copy.
+// Reuse survey (done before writing): no retained component decodes ULEB128 or
+// walks an export trie. src/native/hk_symbols.c only reads the symbol table and
+// the shared cache's own index. So this is new code, not a second copy.
 //
 // Safety, all tested: ULEB128 decoding is bounds-checked and rejects both
 // overlong encodings (>10 bytes) and values that would overflow 64 bits;

@@ -13,8 +13,8 @@ package.  That package contains HKGum.dylib and the corresponding component
 inventory and license texts in this directory.  See
 Frida-Gum-17.17.0-SBOM.md and licenses/.
 
-The source tree also vendors fishhook, LiteHook, libhooker, Substitute, and
-Substrate compatibility material.  Those source-only components are not
+The source tree also retains libhooker and Substitute compatibility headers and
+an Apple fixup-chain test fixture. Those source-only materials are not
 installed by these packages and are therefore not represented as packaged
 binary contents here.
 

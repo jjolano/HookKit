@@ -125,7 +125,6 @@ tests/
   macos/
   device/
   fixtures/headers/
-  benchmarks/baselines/       # tracked host.json and device.json
 tools/
   bench/
   conformance/

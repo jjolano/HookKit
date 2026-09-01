@@ -2,12 +2,6 @@
 // install context, and runtime-level functions (create/shutdown/release/
 // drain_pending). See docs/3.0/PUBLIC_C_ABI.md ("Runtime configuration and
 // threading") and docs/3.0/THREADING_AND_INSTALL_CONTEXT.md (pending).
-//
-// Two types referenced by the master spec's hk_runtime_config_t
-// (section 6.29) were never actually defined in its text --
-// hk_plan_config_t and hk_diagnostic_callback_fn. Real gaps, not
-// oversights on this file's part: filled in here (hk_diagnostic_callback_fn)
-// and in HookKitPlan.h (hk_plan_config_t), each noted where it happens.
 
 #ifndef HOOKKIT_RUNTIME_H
 #define HOOKKIT_RUNTIME_H
@@ -36,10 +30,7 @@ typedef enum {
     HK_INSTALL_CONTEXT_ARBITRARY_RUNTIME,
 } hk_install_context_t;
 
-// No internal worker thread is created (docs/3.0/ARCHITECTURE.md invariant #7).
-// Deferred work remains queued until the caller invokes hk_runtime_drain_pending().
-// `submit` is retained for a future event source; no current engine claims
-// future-image reach or registers an automatic image callback.
+// Reserved/no-op callback types retained for HookKit 3.0 ABI compatibility.
 typedef void (*hk_task_fn)(void *task_context);
 
 typedef bool (*hk_executor_submit_fn)(
@@ -47,10 +38,6 @@ typedef bool (*hk_executor_submit_fn)(
     hk_task_fn task,
     void *task_context);
 
-// Real gap in the master spec's text, filled in here: a minimal
-// string-message callback. No default logging exists (spec section 28.1)
-// -- this is the only way diagnostics leave the runtime short of a full
-// report/artifact query.
 typedef void (*hk_diagnostic_callback_fn)(
     void *diagnostic_context,
     hk_string_view_t message);
@@ -71,10 +58,13 @@ typedef bool (*hk_backend_enumerator_fn)(
 typedef struct {
     HK_STRUCT_HEADER;
 
-    hk_executor_submit_fn submit;   // reserved for a future event source
+    // Reserved/no-op in HookKit 3.0; the runtime stores these fields but
+    // never invokes either callback.
+    // ponytail: these four fields cannot be removed before a major ABI break.
+    hk_executor_submit_fn submit;
     void *executor_context;
 
-    hk_diagnostic_callback_fn diagnostic_callback;  // NULL: no diagnostics emitted
+    hk_diagnostic_callback_fn diagnostic_callback;
     void *diagnostic_context;
 
     hk_install_context_t install_context;
@@ -117,10 +107,10 @@ hk_status_t hk_runtime_enumerate_backends(
     hk_backend_enumerator_fn enumerator,
     void *context);
 
-// Applies queued late-image delta work (Milestone 12). A request requiring
-// autonomous late application cannot claim that reach unless the runtime
-// has an execution path -- an executor, or a caller who actually calls
-// this -- capable of applying it. Returns a report of what was applied.
+// No internal worker thread is created (docs/3.0/ARCHITECTURE.md invariant #7).
+// Deferred work remains queued until the caller invokes this function.
+// Applies queued late-image delta work (Milestone 12) and returns a report of
+// what was applied.
 hk_status_t hk_runtime_drain_pending(
     hk_runtime_t *runtime,
     hk_report_t **out_report);

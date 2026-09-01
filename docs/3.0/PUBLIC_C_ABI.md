@@ -522,8 +522,10 @@ Never an aggregate-only result — every hook in a plan gets its own
 
 ## Runtime configuration and threading
 
-The default runtime creates no thread. An external serial executor may be
-supplied:
+The runtime creates no thread. HookKit 3.0 retains the executor and
+diagnostic callback slots below as reserved/no-op ABI fields: the runtime
+stores them but never invokes either callback. Their order is part of the
+HookKit 3.0 ABI and cannot be removed before a major ABI break.
 
 ```c
 typedef void (*hk_task_fn)(void *task_context);
@@ -532,6 +534,10 @@ typedef bool (*hk_executor_submit_fn)(
     void *executor_context,
     hk_task_fn task,
     void *task_context);
+
+typedef void (*hk_diagnostic_callback_fn)(
+    void *diagnostic_context,
+    hk_string_view_t message);
 
 typedef struct {
     uint32_t struct_size;

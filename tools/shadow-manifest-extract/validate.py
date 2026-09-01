@@ -2,9 +2,7 @@
 """Validate a manifest against metadata/schemas/shadow-hook-manifest.schema.json.
 
 Also runs the cross-checks the schema alone can't express (spec section
-18.2's validate.py requirement): every stable_hook_id unique, every
-manual_override entry in manual_overrides.yaml actually corresponds to a
-target in the manifest (catches an override rotting after a source rename).
+18.2's validate.py requirement): every stable_hook_id is unique.
 """
 
 import argparse
@@ -53,26 +51,12 @@ def main():
         else:
             seen_ids[hid] = idx
 
-    overrides_path = os.path.join(os.path.dirname(__file__), "manual_overrides.yaml")
-    if os.path.exists(overrides_path):
-        try:
-            import yaml
-            with open(overrides_path) as f:
-                overrides = (yaml.safe_load(f) or {}).get("overrides", {}) or {}
-            for oid in overrides:
-                if oid not in seen_ids:
-                    print(f"STALE OVERRIDE: manual_overrides.yaml has {oid!r}, "
-                          f"no such stable_hook_id in the manifest", file=sys.stderr)
-                    errors.append(f"stale override {oid!r}")
-        except ImportError:
-            print("note: PyYAML not installed, skipped stale-override check", file=sys.stderr)
-
     if errors:
         print(f"FAIL: {len(errors)} problem(s) in {manifest_path}", file=sys.stderr)
         return 1
 
     print(f"OK: {manifest_path} — {len(manifest.get('targets', []))} targets, "
-          f"schema-valid, no duplicate/stale IDs")
+          f"schema-valid, no duplicate IDs")
     return 0
 
 

@@ -10,15 +10,10 @@ make bench-plan BENCH_ARGS="--iters 500"    # 1/10/100/1000 hooks × symbol/objc
 make bench-resolvers                # export trie, macho peek, catalog 100/1000, symbol candidates
 make bench-reloc                    # hk_arm64_relocate, branch near/far, has_* scans
 make bench-provider                 # enumerate_backends, runtime create/release
-# capture baseline
-mkdir -p .theos/bench
-make bench 2>&1 | tee .theos/bench/host.log
-grep '^{' .theos/bench/host.log > .theos/bench/host-baseline-candidate.json
 ```
 
 Each bench prints a human line and a `{"bench":...,"mean":...}` JSON line.
-Generated logs and candidate baselines belong under `.theos/bench/`; the
-tracked host baseline is `tests/benchmarks/baselines/host.json`.
+Generated logs belong under `.theos/bench/`.
 
 Sources: `tools/bench/bench_common.h` (timing/stats);
 `tools/bench/bench_plan.c` uses `tests/host/fake_engines.h`.
@@ -40,8 +35,7 @@ bash tools/bench/run_device_bench.sh $DEVICE_SSH --iters 5000 --iters-e2e 50 --w
 
 `tests/device/device_bench.c` links `HookKit.framework` like
 `tests/device/device_lifecycle_smoke.c`; signposts use `os_signpost` with the
-`dev.hookkit` subsystem. The tracked device baseline is
-`tests/benchmarks/baselines/device.json`.
+`dev.hookkit` subsystem.
 
 ## Instruments
 
@@ -54,16 +48,6 @@ bash tools/bench/run_instruments.sh <UDID> --iters-e2e 20
 `tools/bench/run_instruments.sh` wraps
 `xcrun xctrace record --template 'Time Profiler'` (see
 `Makefile:bench-instruments`). Traces are written under `.theos/bench/`.
-
-## CI regression
-
-```sh
-python3 tools/bench/check_regression.py \
-  tests/benchmarks/baselines/host.json \
-  tests/benchmarks/baselines/device.json
-```
-
-Currently a placeholder that validates baselines exist; threshold comparison (10% mean regression) is TODO once both host and device baselines are checked in.
 
 ## Adding a new bench
 

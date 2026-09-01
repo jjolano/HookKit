@@ -44,11 +44,8 @@ sub initializers {
         my $cfg = $main::CONFIG{hook_inheritance} // "local_only";
         my $allow_global = ($cfg eq "allow_inherited");
         my $annotated = $method->{_hookkit_allow_inherited} ? 1 : 0;
-        if ($allow_global && $annotated) {
-            $r .= "(void)_hk_hookkit_hook_message_allow_inherited(\"$stable_c\", ".$classvar.", ".$self->selectorRef($method->selector).", (IMP)&".$self->newFunctionName($method).", (IMP*)&".$self->originalFunctionName($method).", ".$isMeta.");";
-        } else {
-            $r .= "(void)_hk_hookkit_hook_message(\"$stable_c\", ".$classvar.", ".$self->selectorRef($method->selector).", (IMP)&".$self->newFunctionName($method).", (IMP*)&".$self->originalFunctionName($method).", ".$isMeta.");";
-        }
+        my $allow_inherited = ($allow_global && $annotated) ? 1 : 0;
+        $r .= "(void)_hk_hookkit_hook_message(\"$stable_c\", ".$classvar.", ".$self->selectorRef($method->selector).", (IMP)&".$self->newFunctionName($method).", (IMP*)&".$self->originalFunctionName($method).", ".$isMeta.", ".$allow_inherited.");";
     } else {
         if (!$method->type) {
             $r .= "char _typeEncoding[1024]; unsigned int i = 0; ";

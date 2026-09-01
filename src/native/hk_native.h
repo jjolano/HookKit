@@ -41,29 +41,8 @@
 #define HK_INTERNAL __attribute__((visibility("hidden")))
 #endif
 
-// Error codes reported by hk_native_last_error() alongside raw kern_return_t
-// values (which are positive).
-#define HK_NATIVE_ERR_UNSUPPORTED    (-1)
-#define HK_NATIVE_ERR_SHORT_FUNCTION (-2)   // target too short to patch without clobbering its neighbour
-#define HK_NATIVE_ERR_RELOCATE       (-3)   // prologue contains something unrelocatable
-#define HK_NATIVE_ERR_NO_MEMORY      (-4)
-#define HK_NATIVE_ERR_UNREADABLE     (-5)   // target/range not mapped readable
-
 // True when this build can hook at all (arm64/arm64e).
 HK_INTERNAL bool hk_native_supported(void);
-
-// Error from the most recent failing call. Process-wide, not per-thread: read
-// it immediately after the call that failed.
-HK_INTERNAL int hk_native_last_error(void);
-
-// Side-effect-free capability preflight: exactly the checks the engine runs
-// before writing (PAC strip, alignment, self-hook, short-function over the
-// actual 4- or 16-byte branch window, with the final overwritten instruction
-// excluded). Returns 0 when hk_native_hook_function would attempt the patch,
-// otherwise an HK_NATIVE_ERR_* code. The engine's own hook path validates
-// through this function, so a preflight accept and the hook can never
-// disagree on the checks they share.
-HK_INTERNAL int hk_native_preflight_function(void *target, void *replacement);
 
 // True when the byte range [addr, addr+len) is mapped and readable in this
 // process. Probes via a Mach VM region walk and never touches the range
@@ -71,10 +50,6 @@ HK_INTERNAL int hk_native_preflight_function(void *target, void *replacement);
 // Used before dereferencing addresses derived from untrusted metadata
 // (class pointers, prologue windows).
 HK_INTERNAL bool hk_native_range_readable(const void *addr, size_t len);
-
-// Inline function hook. On success *out_orig receives a callable pointer to the
-// original implementation (PAC-signed on arm64e).
-HK_INTERNAL bool hk_native_hook_function(void *target, void *replacement, void **out_orig);
 
 // Raw memory patch, no relocation. The region's original protection is restored
 // afterwards, so this is safe on data as well as code.

@@ -3,8 +3,6 @@
 
 #if defined(__arm64__) || defined(__aarch64__)
 
-#include "hk_arm64.h"
-
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
 #include <pthread.h>
@@ -12,7 +10,6 @@
 #include <unistd.h>
 
 #define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
-#define hk_sign_code(p)  ((void *)hk_pac_make_callable((uintptr_t)(p)))
 
 // Tag the anonymous trampoline mapping so a vm_region walk sees a named,
 // expected owner -- a JIT executable allocator, the kind ubiquitous JS engines
@@ -26,14 +23,8 @@
 #define HK_TRAMP_VM_TAG VM_MEMORY_APPLICATION_SPECIFIC_1
 #endif
 
-static int hk_errno = 0;
-
 bool hk_native_supported(void) {
     return true;
-}
-
-int hk_native_last_error(void) {
-    return hk_errno;
 }
 
 #pragma mark - Memory
@@ -323,24 +314,6 @@ HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len) {
 
 #pragma mark - Trampolines
 
-// A slot holds two independent pieces of code:
-//
-//   [0 .. THUNK)   inbound thunk: the absolute jump to the replacement that
-//                  the patched target branches to. Only used when the slot
-//                  landed within +/-128MB of the target (see tramp_map_near);
-//                  its whole purpose is to let the ENTRY patch be a single
-//                  4-byte B, which is one aligned store and therefore atomic
-//                  against a thread entering the function mid-patch.
-//   [THUNK .. )    the trampoline proper: relocated prologue + jump back.
-//                  Reached through a pointer (*out_orig), so its distance
-//                  from the target does not matter.
-//
-// Body worst case: 4 relocated instructions at 24 bytes each, plus a 16-byte
-// absolute jump back.
-#define HK_TRAMPOLINE_THUNK 16
-#define HK_TRAMPOLINE_BODY  (4 * HK_A64_MAX_RELOC_BYTES + HK_A64_MAX_BRANCH_BYTES)
-#define HK_TRAMPOLINE_SLOT  (HK_TRAMPOLINE_THUNK + HK_TRAMPOLINE_BODY)
-
 // ONE PAGE PER TRAMPOLINE, and that is the whole fix for the crash this
 // replaced. The previous design bump-allocated slots out of a shared arena
 // and flipped the entire arena to R-W to build each new trampoline, stripping
@@ -364,12 +337,6 @@ HK_INTERNAL bool hk_native_range_executable(const void *addr, size_t len) {
 // through the R-X one, so packing returns without either view ever being
 // both. Do not attempt it without testing on a PPL device (A12+) — that is
 // exactly where the kernel is most likely to refuse the executable view.
-typedef struct {
-    uint32_t *slot;
-    vm_address_t page;
-    size_t page_size;
-} hk_tramp_lease;
-
 // Allocate `size` bytes, preferring a location within +/-128MB of `anchor` so
 // the entry patch can be a single 4-byte B. Falls back to anywhere, which
 // costs the 16-byte non-atomic patch but is never wrong. Returns 0 on failure.
@@ -426,68 +393,17 @@ static vm_address_t tramp_map_near(uint64_t anchor, size_t size) {
     return addr;
 }
 
-// Returns a writable HK_TRAMPOLINE_SLOT-byte slot on its own page, placed
-// near `anchor` where possible. vm_allocate hands the page back read-write,
-// so it is writable as-is. Every successful call must be paired with
-// tramp_publish (kept) or tramp_release (discarded).
-static hk_tramp_lease tramp_lease(uint64_t anchor) {
-    hk_tramp_lease lease = { NULL, 0, 0 };
-    size_t page = (size_t)getpagesize();
-    vm_address_t fresh = tramp_map_near(anchor, page);
-
-    if(!fresh) {
-        hk_errno = HK_NATIVE_ERR_NO_MEMORY;
-        return lease;
-    }
-
-    lease.slot = (uint32_t *)fresh;
-    lease.page = fresh;
-    lease.page_size = page;
-    return lease;
-}
-
-// Seal read-execute and invalidate. The page has published nothing yet, so
-// dropping WRITE here cannot affect any trampoline that is already running.
-static bool tramp_publish(hk_tramp_lease *lease, size_t used) {
-    kern_return_t kr = vm_protect(mach_task_self(), lease->page, lease->page_size,
-                                  FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
-
-    if(kr != KERN_SUCCESS) {
-        hk_errno = kr;
-        return false;
-    }
-
-    sys_icache_invalidate(lease->slot, used);
-    return true;
-}
-
-// Give the page back without publishing it.
-static void tramp_release(hk_tramp_lease *lease) {
-    if(lease->page) {
-        vm_deallocate(mach_task_self(), lease->page, lease->page_size);
-        lease->page = 0;
-    }
-
-    lease->slot = NULL;
-}
-
 uintptr_t hk_native_reloc_alloc(size_t size, uintptr_t near) {
     size_t page = (size_t)getpagesize();
     if (size == 0 || size > page) {
-        hk_errno = HK_NATIVE_ERR_NO_MEMORY;
         return 0;
     }
-    vm_address_t address = tramp_map_near((uint64_t)near, page);
-    if (!address) {
-        hk_errno = HK_NATIVE_ERR_NO_MEMORY;
-    }
-    return (uintptr_t)address;
+    return (uintptr_t)tramp_map_near((uint64_t)near, page);
 }
 
 bool hk_native_reloc_seal(uintptr_t page, size_t size) {
     (void)size;
     if (!page) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
     kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)page,
@@ -496,7 +412,6 @@ bool hk_native_reloc_seal(uintptr_t page, size_t size) {
     if (kr == KERN_SUCCESS) {
         sys_icache_invalidate((void *)page, (size_t)getpagesize());
     }
-    hk_errno = kr == KERN_SUCCESS ? 0 : kr;
     return kr == KERN_SUCCESS;
 }
 
@@ -511,7 +426,6 @@ void hk_native_reloc_free(uintptr_t page, size_t size) {
 bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
     (void)size;
     if (!page) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
     // VM_PROT_COPY forces a copy-on-write break, which is what makes a pool
@@ -521,184 +435,22 @@ bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
     kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)page,
                                   (vm_size_t)getpagesize(), FALSE,
                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-    hk_errno = kr == KERN_SUCCESS ? 0 : kr;
     return kr == KERN_SUCCESS;
 }
 
-#pragma mark - Hooking
-
-// The engine's own capability gate, shared by hk_native_hook_function and the
-// backend preflight so the two can never disagree on the checks they share.
-int hk_native_preflight_function(void *target, void *replacement) {
-    if(!target || !replacement) {
-        return HK_NATIVE_ERR_UNSUPPORTED;
-    }
-
-    void *raw_target = hk_strip_code(target);
-    void *raw_replacement = hk_strip_code(replacement);
-
-    // AArch64 instructions are 4-byte aligned; a misaligned target is not an
-    // instruction boundary, and patching it would smash whatever it points at.
-    if(((uintptr_t)raw_target & 3u) != 0) {
-        return HK_NATIVE_ERR_UNSUPPORTED;
-    }
-
-    // Hooking a function with itself is a no-op that would clobber the
-    // original bytes with a branch back to the same place.
-    if(raw_target == raw_replacement) {
-        return HK_NATIVE_ERR_UNSUPPORTED;
-    }
-
-    uint64_t target_addr = (uint64_t)(uintptr_t)raw_target;
-    size_t patch_bytes = hk_arm64_branch_size(target_addr, (uint64_t)(uintptr_t)raw_replacement);
-
-    // The window scan below dereferences the target; a bogus non-NULL
-    // address must fail cleanly instead of faulting.
-    if(!hk_native_range_readable(raw_target, patch_bytes)) {
-        return HK_NATIVE_ERR_UNREADABLE;
-    }
-
-    // A function hook overwrites CODE: a readable-only mapping (a data blob)
-    // is not a patchable prologue. Same code as the unreadable case — both
-    // are target-shape capability misses.
-    if(!hk_native_range_executable(raw_target, patch_bytes)) {
-        return HK_NATIVE_ERR_UNREADABLE;
-    }
-
-    // Mirror of the target checks: the replacement is branched to, so it must
-    // sit on an instruction boundary and live in an executable mapping too (a
-    // data blob cannot be jumped to). 4 bytes covers the branch-target
-    // instruction; the page-rounded probe spans whatever it straddles.
-    if(((uintptr_t)raw_replacement & 3u) != 0) {
-        return HK_NATIVE_ERR_UNSUPPORTED;
-    }
-
-    if(!hk_native_range_executable(raw_replacement, 4)) {
-        return HK_NATIVE_ERR_UNREADABLE;
-    }
-
-    const uint32_t *src = (const uint32_t *)raw_target;
-
-    // A terminator before the last instruction we would overwrite means the
-    // function ends inside the patch -- the remaining bytes belong to whatever
-    // follows it. Refuse rather than corrupt an unrelated function. (The
-    // helper recognizes the authenticated forms too: RETAA/RETAB/BRAA-family,
-    // which arm64e micro-thunks use.) The last instruction is excluded
-    // because it is fully replaced by the branch, exactly like the original
-    // loop's `i + 1 < insn_count` bound.
-    if(hk_arm64_has_early_terminator(src, patch_bytes - 4)) {
-        return HK_NATIVE_ERR_SHORT_FUNCTION;
-    }
-
-    return 0;
-}
-
-bool hk_native_hook_function(void *target, void *replacement, void **out_orig) {
-    int preflight_errno = hk_native_preflight_function(target, replacement);
-
-    if(preflight_errno != 0) {
-        hk_errno = preflight_errno;
-        return false;
-    }
-
-    void *raw_target = hk_strip_code(target);
-    void *raw_replacement = hk_strip_code(replacement);
-    uint64_t target_addr = (uint64_t)(uintptr_t)raw_target;
-    const uint32_t *src = (const uint32_t *)raw_target;
-
-    // No lock: each trampoline now owns its page, so two installs share no
-    // mutable state here. (hk_errno is the pre-existing process-wide global,
-    // documented as read-immediately-after-the-call.)
-    hk_tramp_lease lease = tramp_lease(target_addr);
-
-    if(!lease.slot) {
-        return false;
-    }
-
-    uint64_t thunk_addr = (uint64_t)(uintptr_t)lease.slot;
-    uint32_t *body = lease.slot + (HK_TRAMPOLINE_THUNK / 4);
-    uint64_t body_addr = thunk_addr + HK_TRAMPOLINE_THUNK;
-
-    // Route through the slot's inbound thunk when the slot landed in B range,
-    // making the entry patch one aligned 4-byte store — atomic against a
-    // thread entering the target while it is being written. Out of range,
-    // fall back to branching straight at the replacement, which costs the
-    // 16-byte non-atomic sequence.
-    bool via_thunk = hk_arm64_branch_size(target_addr, thunk_addr) == 4;
-    uint64_t entry_dest = via_thunk ? thunk_addr : (uint64_t)(uintptr_t)raw_replacement;
-    size_t patch_bytes = hk_arm64_branch_size(target_addr, entry_dest);
-
-    // Preflight sized its short-function window from target -> replacement,
-    // which is the WIDEST patch this function can emit. Patching fewer bytes
-    // than preflight vetted is always safe (a narrower window clobbers less),
-    // so the two can only disagree by preflight being the more conservative —
-    // never by the hook writing something preflight did not clear.
-    size_t insn_count = patch_bytes / 4;
-
-    size_t written = hk_arm64_relocate(src, target_addr, insn_count, body,
-                                       HK_TRAMPOLINE_BODY - HK_A64_MAX_BRANCH_BYTES);
-
-    if(written == 0) {
-        tramp_release(&lease);
-        hk_errno = HK_NATIVE_ERR_RELOCATE;
-        return false;
-    }
-
-    written += hk_arm64_emit_branch(body + (written / 4), body_addr + written,
-                                    target_addr + patch_bytes);
-
-    size_t slot_used = HK_TRAMPOLINE_THUNK + written;
-
-    if(via_thunk) {
-        // The thunk absorbs the distance the entry patch no longer has to
-        // cover: an absolute jump when the replacement is far, a plain B when
-        // it happens to be near. Either fits the reserved 16 bytes, so unlike
-        // the entry patch this one can never be out of range.
-        hk_arm64_emit_branch(lease.slot, thunk_addr, (uint64_t)(uintptr_t)raw_replacement);
-    }
-
-    // Seal the slot before patching the target: once the target branches away,
-    // both the thunk and the trampoline must already be executable.
-    if(!tramp_publish(&lease, slot_used)) {
-        tramp_release(&lease);
-        return false;
-    }
-
-    // C1: hand the sealed trampoline to the caller BEFORE the write — the
-    // original must be observable from the moment the patch lands, and a
-    // crash mid-write must not lose it. (The slot is already sealed and
-    // executable: tramp_publish ran above, before the target was touched.)
-    if(out_orig) {
-        *out_orig = hk_sign_code(body);
-    }
-
-    uint32_t patch[HK_A64_MAX_BRANCH_BYTES / 4];
-    size_t emitted = hk_arm64_emit_branch(patch, target_addr, entry_dest);
-    kern_return_t kr = hk_write(raw_target, patch, emitted);
-
-    if(kr != KERN_SUCCESS) {
-        hk_errno = kr;
-        return false;
-    }
-
-    hk_errno = 0;
-    return true;
-}
+#pragma mark - Patching
 
 bool hk_native_patch_memory(void *target, const void *data, size_t size) {
     if(!target || !data || size == 0) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
 
     // Patching a region with its own bytes is a no-op that can only fail.
     if(target == data) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
 
     kern_return_t kr = hk_write(hk_strip_code(target), data, size);
-    hk_errno = (kr == KERN_SUCCESS) ? 0 : kr;
     return kr == KERN_SUCCESS;
 }
 
@@ -706,7 +458,6 @@ bool hk_native_patch_pointer(void *slot, void *value) {
     // Alignment is the whole contract: an unaligned store is not single-copy
     // atomic, and a reader could observe half of each pointer.
     if(!slot || ((uintptr_t)slot & (sizeof(void *) - 1)) != 0) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
 
@@ -715,12 +466,10 @@ bool hk_native_patch_pointer(void *slot, void *value) {
     vm_prot_t restore = VM_PROT_NONE;
 
     if(!hk_range_bounds(slot, sizeof(void *), &start, &end)) {
-        hk_errno = HK_NATIVE_ERR_UNSUPPORTED;
         return false;
     }
 
     if(!hk_range_protection(start, end, &restore)) {
-        hk_errno = HK_NATIVE_ERR_UNREADABLE;
         return false;
     }
 
@@ -739,27 +488,12 @@ bool hk_native_patch_pointer(void *slot, void *value) {
 
     pthread_mutex_unlock(&g_write_lock);
 
-    hk_errno = (kr == KERN_SUCCESS) ? 0 : kr;
     return kr == KERN_SUCCESS;
 }
 
 #else   // !arm64
 
 bool hk_native_supported(void) {
-    return false;
-}
-
-int hk_native_last_error(void) {
-    return HK_NATIVE_ERR_UNSUPPORTED;
-}
-
-int hk_native_preflight_function(void *target, void *replacement) {
-    (void)target; (void)replacement;
-    return HK_NATIVE_ERR_UNSUPPORTED;
-}
-
-bool hk_native_hook_function(void *target, void *replacement, void **out_orig) {
-    (void)target; (void)replacement; (void)out_orig;
     return false;
 }
 

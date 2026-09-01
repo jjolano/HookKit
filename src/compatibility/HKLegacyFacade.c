@@ -233,6 +233,11 @@ done:
 
 static uint64_t hk_legacy_spec_counter = 0;
 
+static void init_spec(hk_hook_spec_t *spec, const char *stable_id,
+                      hk_target_kind_t kind, void *replacement,
+                      hk_reachability_t reach,
+                      hk_original_requirement_t original);
+
 // Plans validate stable_hook_id uniqueness, so batched specs need distinct
 // ids; the buffer is caller-owned and must outlive hk_plan_add_hook.
 static void init_spec_id(hk_hook_spec_t *spec, char *id_buf, size_t id_cap,
@@ -241,18 +246,7 @@ static void init_spec_id(hk_hook_spec_t *spec, char *id_buf, size_t id_cap,
                          hk_original_requirement_t original) {
     snprintf(id_buf, id_cap, "%s-%llu", prefix,
              (unsigned long long)(++hk_legacy_spec_counter));
-    memset(spec, 0, sizeof(*spec));
-    spec->struct_size = sizeof(*spec);
-    spec->struct_version = HK_ABI_VERSION_3_0;
-    spec->stable_hook_id = id_buf;
-    spec->target_kind = kind;
-    spec->replacement = replacement;
-    spec->required_reach = reach;
-    spec->preferred_reach = reach;
-    spec->original_requirement = original;
-    spec->continuation_policy = HK_CONTINUATION_ANY;
-    spec->availability = HK_AVAILABILITY_REQUIRED_NOW;
-    spec->role = HK_OPERATION_MANDATORY;
+    init_spec(spec, id_buf, kind, replacement, reach, original);
 }
 
 int hk_legacy_build_objc_spec(void *dispatch_class, void *selector,

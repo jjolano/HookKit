@@ -10,17 +10,13 @@
 // name. All of it is arithmetic over bytes, so all of it is host-testable;
 // only obtaining the image, and later *writing* a slot, is device-only.
 //
-// Reuse survey (done before writing): vendor/fishhook/fishhook.c performs
-// exactly this walk in perform_rebinding_with_section, and is the reference
-// for the mechanism. It is not reusable here, for two reasons. First, its walk
-// is fused with the parts that only exist on device -- VM protection changes,
-// arm64e pointer re-signing for `__auth_got`, and its own rebinding list.
-// Second, and more importantly, it performs *no bounds validation at all*:
-// `indirect_symtab + section->reserved1`, `symtab[symtab_index]`, and
-// `strtab + strtab_offset` are each dereferenced unchecked. That is sound in
-// fishhook's context because dyld has already validated the image, but a
-// parser handed arbitrary bytes cannot assume it. Every one of those three
-// steps is bounds-checked below.
+// Reuse survey (done before writing): no retained component performs this walk
+// in reusable form. Rebinding implementations fuse it with device-only VM
+// protection, arm64e pointer re-signing for `__auth_got`, and rebinding state,
+// and assume dyld has already validated the image. A parser handed arbitrary
+// bytes cannot assume that: `indirect_symtab + section->reserved1`,
+// `symtab[symtab_index]`, and `strtab + strtab_offset` are each bounds-checked
+// below.
 
 #ifndef HK_RESOLVERS_IMPORT_SLOTS_H
 #define HK_RESOLVERS_IMPORT_SLOTS_H

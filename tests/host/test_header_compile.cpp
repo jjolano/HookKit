@@ -89,7 +89,10 @@ int main() {
     config.diagnostic_context = nullptr;
     config.install_context = HK_INSTALL_CONTEXT_EARLY_PROCESS;
 
-    if (!domain.require_all_mandatory_prepared || config.submit != nullptr) {
+    if (!domain.require_all_mandatory_prepared || config.submit != nullptr ||
+        config.executor_context != nullptr || config.diagnostic_callback != nullptr ||
+        config.diagnostic_context != nullptr ||
+        config.install_context != HK_INSTALL_CONTEXT_EARLY_PROCESS) {
         return 1;
     }
     if (mapping.kind != HK_MAPPING_ANONYMOUS || !mapping.protection.read) {

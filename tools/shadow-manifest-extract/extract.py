@@ -47,8 +47,7 @@ mapping tables below, each with its citation), not verified per-hook facts
 Child (pattern_scan) rows are closer to verified: required_reach reflects
 whether the symbol was resolved via runtime dlsym vs. a bare import, and
 original_requirement reflects whether the real call actually passed
-outOldPtr: or not. manual_overrides.yaml corrects either kind without
-re-deriving this script's output.
+outOldPtr: or not.
 """
 
 import argparse
@@ -59,7 +58,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-from logos_preprocess import parse_file as parse_logos_file
+from logos_preprocess import parse_file as parse_logos_file, strip_comments as strip_comments_preserve_lines
 
 MANIFEST_VERSION = "0.2.0-milestone2-partial-decomposition"
 
@@ -90,54 +89,6 @@ CAPABILITY_MAP = {
 }
 
 ROW_RE = re.compile(r"\{([^{}]*)\}")
-
-
-def strip_comments_preserve_lines(text: str) -> str:
-    """Blank out comments and string contents' comment-like substrings are a
-    non-issue here (C identifiers/strings in this file don't contain // or
-    /* ), but real strings ARE preserved verbatim -- only genuine // and
-    /* */ comments are blanked, with newlines kept so line numbers of
-    everything after a comment stay correct. Learned the hard way earlier
-    this session: a naive regex over raw source matched "%hook" inside a
-    plain comment sentence. Do it properly here instead."""
-    out = []
-    i = 0
-    n = len(text)
-    in_string = False
-    while i < n:
-        c = text[i]
-        if in_string:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(text[i + 1])
-                i += 2
-                continue
-            if c == '"':
-                in_string = False
-            i += 1
-            continue
-        if c == '"':
-            in_string = True
-            out.append(c)
-            i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "/":
-            while i < n and text[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "*":
-            out.append("  ")
-            i += 2
-            while i < n and not (text[i] == "*" and i + 1 < n and text[i + 1] == "/"):
-                out.append(" " if text[i] != "\n" else "\n")
-                i += 1
-            out.append("  ")
-            i += 2
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
 
 
 def parse_row_fields(row_body: str):
@@ -425,9 +376,7 @@ def unit_to_manifest_target(unit, source_file_rel):
         # Reasoned default, not verified: Shadow's hooks filter/modify
         # results rather than replace behavior outright, and its native HK3
         # calls request a predecessor when they pass an outOldPtr. Needs
-        # per-hook verification before
-        # Milestone 3 freeze; override in manual_overrides.yaml if wrong for
-        # a specific unit.
+        # per-hook verification before Milestone 3 freeze.
         "original_requirement": "direct_predecessor" if target_kind else "none",
         "continuation_policy": "any",
         "availability": "required_now" if unit["ctor_install"] else "defer_until_available",
@@ -789,32 +738,6 @@ def extract_logos_targets(shadow_repo: str, group_parent_units=None,
     return targets
 
 
-def load_manual_overrides(path):
-    if not os.path.exists(path):
-        return {}
-    try:
-        import yaml
-    except ImportError:
-        print(f"warning: {path} exists but PyYAML isn't installed -- "
-              "overrides NOT applied", file=sys.stderr)
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("overrides", {}) or {}
-
-
-def apply_overrides(targets, overrides):
-    applied = []
-    for t in targets:
-        ov = overrides.get(t["stable_hook_id"])
-        if not ov:
-            continue
-        t.update(ov)
-        t["extraction_method"] = "manual_override"
-        applied.append(t["stable_hook_id"])
-    return applied
-
-
 def resolve_shadow_commit(shadow_repo, explicit_commit=None):
     """Return an explicit provenance value or the checkout's HEAD.
 
@@ -1047,10 +970,6 @@ def main():
 
     targets.extend(child_targets)
 
-    overrides_path = os.path.join(os.path.dirname(__file__), "manual_overrides.yaml")
-    overrides = load_manual_overrides(overrides_path)
-    applied = apply_overrides(targets, overrides)
-
     shadow_commit = resolve_shadow_commit(shadow_repo, args.shadow_commit)
 
     manifest = {
@@ -1072,8 +991,6 @@ def main():
     print(f"  {len(units)} install units, {len(child_targets)} child targets "
           f"from {len(set(decomposed))} decomposed unit(s)")
     print(f"  by extraction_method: {dict(method_counts)}")
-    print(f"  ({len(applied)} overridden by manual_overrides.yaml: {applied})" if applied
-          else "  (no manual overrides applied)")
     return 0
 
 

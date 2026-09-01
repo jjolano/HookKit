@@ -267,16 +267,6 @@ static struct {
 } g_rebind_file_cache[HK_REBIND_FILE_CACHE_SIZE] = {0};
 static uint32_t g_rebind_file_cache_next = 0;
 
-static void __attribute__((unused)) rebind_file_cache_clear_locked(void) {
-    for (int i = 0; i < HK_REBIND_FILE_CACHE_SIZE; i++) {
-        if (!g_rebind_file_cache[i].valid) continue;
-        free(g_rebind_file_cache[i].path);
-        close_file_view(&g_rebind_file_cache[i].file);
-        memset(&g_rebind_file_cache[i], 0, sizeof(g_rebind_file_cache[i]));
-    }
-    g_rebind_file_cache_next = 0;
-}
-
 // Second level: per-(image,symbol) site list cache. 8-entry, per-image.
 #define HK_REBIND_SYMBOL_CACHE_SIZE 8
 static pthread_mutex_t g_rebind_symbol_cache_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -295,16 +285,6 @@ static struct {
     } sites[HK_REBIND_MAX_SITES];
 } g_rebind_symbol_cache[HK_REBIND_SYMBOL_CACHE_SIZE] = {0};
 static uint32_t g_rebind_symbol_cache_next = 0;
-
-static void __attribute__((unused)) rebind_symbol_cache_clear_locked(void) {
-    for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
-        if (!g_rebind_symbol_cache[i].valid) continue;
-        free(g_rebind_symbol_cache[i].path);
-        free(g_rebind_symbol_cache[i].symbol);
-        memset(&g_rebind_symbol_cache[i], 0, sizeof(g_rebind_symbol_cache[i]));
-    }
-    g_rebind_symbol_cache_next = 0;
-}
 
 // Third level: dyld cache patch per-symbol cache. The shared cache's patch table
 // for a given symbol is the same for all hooks in the process, so caching it

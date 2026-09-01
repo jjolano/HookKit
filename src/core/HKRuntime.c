@@ -95,17 +95,10 @@ static bool hk_platform_file_exports(const char *path, const char *symbol) {
 
 #if defined(HOOKKIT_CANONICAL_3) && \
     (defined(__arm64__) || defined(__arm64e__)) && !defined(HK_NO_DOBBY)
+#include "../internal/HKInlinePreflight.h"
 #include "../../vendor/dobby/dobby.h"
 #include "../../vendor/libhooker/libhooker.h"
 
-// HKInlinePreflight.h is Objective-C-facing because provider headers import
-// Foundation. The two C entry points below have no ObjC types; declare that
-// tiny internal seam here so the C-first runtime never imports Foundation
-// merely to read a function prologue.
-extern int hk_inline_preflight_basic(void *function, void *replacement,
-                                     int *out_error);
-extern int hk_inline_preflight(void *function, void *replacement,
-                               size_t window, int *out_error);
 enum { HK_PLATFORM_DOBBY_INSPECTION_BYTES = 16 };
 
 typedef struct {
@@ -878,8 +871,7 @@ static uint32_t hk_runtime_platform_ios_version(void) {
 
 // NULL config is a deliberate design choice beyond what the master spec's
 // text specifies (it never says whether config is required) -- treated as
-// "use every default": no executor (caller must drain_pending()), no
-// diagnostics, HK_INSTALL_CONTEXT_EARLY_PROCESS. Makes the common case
+// "use every default": HK_INSTALL_CONTEXT_EARLY_PROCESS. Makes the common case
 // (a plain hk_runtime_create(NULL, &rt)) not require constructing a
 // struct just to zero it.
 static hk_status_t hk_runtime_create_impl(
@@ -1016,15 +1008,6 @@ hk_id_t hk_runtime_owner_id(const hk_runtime_t *runtime) {
     return runtime->owner_id;
 }
 
-static bool hk_runtime_vtable_has_field(const hk_engine_vtable_t *vtable,
-                                        size_t offset, size_t size) {
-    if (!vtable) {
-        return false;
-    }
-    return (vtable->abi_version == 0 && vtable->struct_size == 0) ||
-           vtable->struct_size >= offset + size;
-}
-
 // The selectable group token an engine belongs to. Falls back to engine_id
 // so an engine that declares no group enumerates and pins as itself.
 static const char *hk_engine_group_token(const hk_engine_capabilities_t *caps) {
@@ -1056,7 +1039,7 @@ hk_status_t hk_runtime_enumerate_backends(
                                          runtime->engine_testing[i])) {
             continue;
         }
-        if (hk_runtime_vtable_has_field(
+        if (hk_engine_vtable_has_field(
                 engine, offsetof(hk_engine_vtable_t, discover),
                 sizeof(engine->discover)) && engine->discover) {
             hk_engine_discovery_t discovery;

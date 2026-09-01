@@ -397,7 +397,7 @@ static void test_catalog_context_rebinds_every_matching_image(void) {
     printf("  catalog-context-rebinds-every-matching-image: PASS\n");
 }
 
-static void test_catalog_bundle_cache_revalidates_changed_slots(void) {
+static void test_catalog_fresh_plan_recaptures_changed_slots(void) {
     uint8_t *img = aligned_alloc(64, IMG_SIZE);
     assert(img);
     build_image(img);
@@ -415,54 +415,55 @@ static void test_catalog_bundle_cache_revalidates_changed_slots(void) {
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
     assert(hk_runtime_register_engine_with_context(rt, hk_rebind_vtable(), &ectx));
 
-    // A later plan can reuse a prepared catalog-wide bundle without becoming a
-    // same-plan duplicate target.
-    hk_hook_spec_t first_spec = symbol_spec("hook.cache.first", "malloc",
-                                            (void *)(uintptr_t)REPLACEMENT);
+    // The first catalog plan captures the original values, then releases its
+    // prepared state without writing either slot.
     hk_plan_t *first_plan = NULL;
     hk_hook_t *first_hook = NULL;
+    hk_hook_spec_t first_spec = symbol_spec("hook.fresh.first", "malloc",
+                                            (void *)(uintptr_t)REPLACEMENT);
     assert(hk_plan_create(rt, NULL, &first_plan) == HK_STATUS_OK);
     assert(hk_plan_add_hook(first_plan, &first_spec, &first_hook) == HK_STATUS_OK);
     assert(hk_plan_analyze(first_plan, NULL) == HK_STATUS_OK);
     assert(hk_plan_prepare(first_plan, NULL) == HK_STATUS_OK);
     assert(first_hook->result.outcome == HK_OUTCOME_PREPARED);
+    assert(slot(img, GOT_OFF) == ORIGINAL && slot(img, GOT_OFF + 8) == ORIGINAL);
     hk_plan_release(first_plan);
 
-    hk_hook_spec_t second_spec = first_spec;
-    second_spec.stable_hook_id = "hook.cache.second";
-    hk_plan_t *cached_plan = NULL;
-    hk_hook_t *second_hook = NULL;
-    assert(hk_plan_create(rt, NULL, &cached_plan) == HK_STATUS_OK);
-    assert(hk_plan_add_hook(cached_plan, &second_spec, &second_hook) == HK_STATUS_OK);
-    assert(hk_plan_analyze(cached_plan, NULL) == HK_STATUS_OK);
-    assert(hk_plan_prepare(cached_plan, NULL) == HK_STATUS_OK);
-    assert(second_hook->result.outcome == HK_OUTCOME_PREPARED);
-    hk_plan_release(cached_plan);
-
-    // A later plan must not use the captured originals after another writer
-    // changed the live slots. The stale cache entry should be discarded and
-    // preparation should recapture these values.
+    // A second plan must recapture the live values after another writer
+    // changed both slots.
     put_u64(img, GOT_OFF, ORIGINAL + 1);
     put_u64(img, GOT_OFF + 8, ORIGINAL + 1);
-    hk_plan_t *fresh_plan = NULL;
-    hk_hook_t *fresh_hook = NULL;
-    assert(hk_plan_create(rt, NULL, &fresh_plan) == HK_STATUS_OK);
-    hk_hook_spec_t fresh_spec = symbol_spec("hook.cache.refresh", "malloc",
-                                            (void *)(uintptr_t)REPLACEMENT);
-    assert(hk_plan_add_hook(fresh_plan, &fresh_spec, &fresh_hook) == HK_STATUS_OK);
-    assert(hk_plan_analyze(fresh_plan, NULL) == HK_STATUS_OK);
-    assert(hk_plan_prepare(fresh_plan, NULL) == HK_STATUS_OK);
-    assert(fresh_hook->result.outcome == HK_OUTCOME_PREPARED);
-    assert(hk_plan_commit(fresh_plan, NULL) == HK_STATUS_OK);
-    assert(fresh_hook->result.outcome == HK_OUTCOME_ACTIVE);
+    hk_plan_t *second_plan = NULL;
+    hk_hook_t *second_hook = NULL;
+    hk_hook_spec_t second_spec = symbol_spec("hook.fresh.second", "malloc",
+                                             (void *)(uintptr_t)REPLACEMENT);
+    assert(hk_plan_create(rt, NULL, &second_plan) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(second_plan, &second_spec, &second_hook) == HK_STATUS_OK);
+    assert(hk_plan_analyze(second_plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(second_plan, NULL) == HK_STATUS_OK);
+    assert(second_hook->result.outcome == HK_OUTCOME_PREPARED);
+    hk_report_t *report = NULL;
+    assert(hk_plan_commit(second_plan, &report) == HK_STATUS_OK);
+    assert(second_hook->result.outcome == HK_OUTCOME_ACTIVE);
     assert(slot(img, GOT_OFF) == REPLACEMENT);
     assert(slot(img, GOT_OFF + 8) == REPLACEMENT);
 
-    hk_plan_release(fresh_plan);
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_count(snap) == 2);
+    hk_artifact_t artifact;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &artifact) == HK_STATUS_OK);
+    assert((uint64_t)(uintptr_t)artifact.original_pointer == ORIGINAL + 1);
+    assert(hk_artifact_snapshot_copy_at(snap, 1, &artifact) == HK_STATUS_OK);
+    assert((uint64_t)(uintptr_t)artifact.original_pointer == ORIGINAL + 1);
+
+    hk_artifact_snapshot_release(snap);
+    hk_report_release(report);
+    hk_plan_release(second_plan);
     hk_runtime_release(rt);
     hk_image_catalog_destroy(catalog);
     free(img);
-    printf("  catalog-bundle-cache-revalidates-changed-slots: PASS\n");
+    printf("  catalog-fresh-plan-recaptures-changed-slots: PASS\n");
 }
 
 static void test_required_original_rejects_ambiguous_catalog(void) {
@@ -519,7 +520,7 @@ int main(void) {
     RUN_TEST(test_caller_image_scope_is_enforced);
     RUN_TEST(test_rebind_refusals_are_distinguishable);
     RUN_TEST(test_catalog_context_rebinds_every_matching_image);
-    RUN_TEST(test_catalog_bundle_cache_revalidates_changed_slots);
+    RUN_TEST(test_catalog_fresh_plan_recaptures_changed_slots);
     RUN_TEST(test_required_original_rejects_ambiguous_catalog);
     #undef RUN_TEST
     hk_ownership_reset_for_testing();

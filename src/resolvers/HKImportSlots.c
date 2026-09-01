@@ -1,5 +1,5 @@
-// Import slot resolution. See HKImportSlots.h for the mechanism and for why
-// fishhook's version of this walk is a reference rather than a reuse.
+// Import slot resolution. See HKImportSlots.h for the mechanism and its
+// bounds-validation rationale.
 
 #include "HKImportSlots.h"
 
@@ -13,7 +13,7 @@ static uint32_t read_u32_at(const uint8_t *p) {
 
 // Returns the NUL-terminated string at `offset`, or NULL if the offset is out
 // of range or the string is not terminated before the table ends. Never reads
-// past `strings_size` -- the check fishhook omits.
+// past `strings_size`.
 static const char *bounded_string(const char *strings, size_t strings_size, uint32_t offset) {
     if (offset >= strings_size) {
         return NULL;
@@ -137,7 +137,7 @@ static bool slots_visit_section(void *ctx, uint8_t n_sect, const hk_macho_sectio
     }
     uint64_t slot_count = section->size / HK_IMPORT_POINTER_SIZE;
 
-    // CHECK 1 (fishhook omits): the section's window into the indirect symbol
+    // CHECK 1: the section's window into the indirect symbol
     // table must actually fit inside it. `reserved1` is attacker-influenced
     // data in a malformed image, not a trusted index.
     if ((uint64_t)section->reserved1 + slot_count > (uint64_t)s->tables->indirect_count) {
@@ -152,14 +152,14 @@ static bool slots_visit_section(void *ctx, uint8_t n_sect, const hk_macho_sectio
             continue;  // names no symbol: not an import
         }
 
-        // CHECK 2 (fishhook omits): the symbol table index must be in range.
+        // CHECK 2: the symbol table index must be in range.
         if (entry >= s->tables->symbols.nlist_count) {
             s->malformed = true;
             return false;
         }
         const hk_macho_nlist64_t *sym = &s->tables->symbols.nlist[entry];
 
-        // CHECK 3 (fishhook omits): the name must be inside the string table
+        // CHECK 3: the name must be inside the string table
         // AND terminated within it.
         const char *name = bounded_string(s->tables->symbols.strings,
                                           s->tables->symbols.strings_size, sym->n_strx);

@@ -258,20 +258,18 @@ static inline __attribute__((unused)) int hk_compat_substitute_hook_functions(co
     (void)recordp; (void)options;
     if (!hooks || nhooks == 0) return 0; // SUBSTITUTE_OK
     hk_hook_spec_t *specs = (hk_hook_spec_t *)calloc(nhooks, sizeof(hk_hook_spec_t));
-    void **origs = (void **)calloc(nhooks, sizeof(void *));
     char (*ids)[32] = (char (*)[32])calloc(nhooks, 32);
-    if (!specs || !origs || !ids) { free(specs); free(origs); free(ids); return 5; /* SUBSTITUTE_ERR_OOM */ }
+    if (!specs || !ids) { free(specs); free(ids); return 5; /* SUBSTITUTE_ERR_OOM */ }
     for (size_t i = 0; i < nhooks; i++) {
         snprintf(ids[i], 32, "compat.substitute.%zu", i);
         _hk_compat_make_function_spec(&specs[i], ids[i], hooks[i].function, hooks[i].replacement);
-        origs[i] = hooks[i].old_ptr; // void *old_ptr is actually void** old_ptr in public header — handle both
     }
     // HookKit batch expects void** const* pointing at storage — we synthesize pointer array to those storages.
     void ***out_ptrs = (void ***)calloc(nhooks, sizeof(void**));
     for (size_t i = 0; i < nhooks; i++) out_ptrs[i] = (void**)hooks[i].old_ptr;
     int ok = _hk_compat_hook_batch(specs, (void**const*)out_ptrs, nhooks);
     free(out_ptrs);
-    free(specs); free(origs); free(ids);
+    free(specs); free(ids);
     if (ok == (int)nhooks) return 0; // SUBSTITUTE_OK
     if (ok == 0) return 1; // SUBSTITUTE_ERR_FUNC_TOO_SHORT (generic fail)
     return 1; // partial still maps to error — caller checks count not ok; HookKit partial is terminal

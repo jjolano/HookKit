@@ -11,6 +11,18 @@
 #include "../../src/core/HKIDs.h"
 #include "../../src/core/HKRuntimeInternal.h"
 
+static bool reserved_submit(void *context, hk_task_fn task, void *task_context) {
+    (void)task;
+    (void)task_context;
+    *(bool *)context = true;
+    return false;
+}
+
+static void reserved_diagnostic(void *context, hk_string_view_t message) {
+    (void)message;
+    *(bool *)context = true;
+}
+
 static void test_create_with_null_config(void) {
     hk_runtime_t *rt = NULL;
     hk_status_t status = hk_runtime_create(NULL, &rt);
@@ -19,20 +31,25 @@ static void test_create_with_null_config(void) {
     assert(rt->config.struct_size == sizeof(hk_runtime_config_t));
     assert(rt->config.struct_version == HK_ABI_VERSION_3_0);
     assert(rt->config.submit == NULL);
+    assert(rt->config.executor_context == NULL);
+    assert(rt->config.diagnostic_callback == NULL);
+    assert(rt->config.diagnostic_context == NULL);
+    assert(rt->config.install_context == HK_INSTALL_CONTEXT_EARLY_PROCESS);
     hk_runtime_release(rt);
     printf("  create-with-null-config: PASS\n");
 }
 
 static void test_create_with_real_config(void) {
-    bool submit_called_flag = false;
+    bool submit_called = false;
+    bool diagnostic_called = false;
     hk_runtime_config_t config;
     memset(&config, 0, sizeof(config));
     config.struct_size = sizeof(config);
     config.struct_version = HK_ABI_VERSION_3_0;
-    config.submit = NULL;
-    config.executor_context = &submit_called_flag;  // arbitrary non-NULL pointer to round-trip
-    config.diagnostic_callback = NULL;
-    config.diagnostic_context = NULL;
+    config.submit = reserved_submit;
+    config.executor_context = &submit_called;
+    config.diagnostic_callback = reserved_diagnostic;
+    config.diagnostic_context = &diagnostic_called;
     config.install_context = HK_INSTALL_CONTEXT_MAIN_THREAD_SERIALIZED;
 
     hk_runtime_t *rt = NULL;
@@ -41,9 +58,14 @@ static void test_create_with_real_config(void) {
     assert(rt != NULL);
     // Real verification the config was actually deep-copied by value, not
     // just that the call succeeded.
-    assert(rt->config.executor_context == &submit_called_flag);
+    assert(rt->config.submit == reserved_submit);
+    assert(rt->config.executor_context == &submit_called);
+    assert(rt->config.diagnostic_callback == reserved_diagnostic);
+    assert(rt->config.diagnostic_context == &diagnostic_called);
     assert(rt->config.install_context == HK_INSTALL_CONTEXT_MAIN_THREAD_SERIALIZED);
+    assert(!submit_called && !diagnostic_called);  // reserved callbacks are not invoked
     hk_runtime_release(rt);
+    assert(!submit_called && !diagnostic_called);
     printf("  create-with-real-config: PASS\n");
 }
 
