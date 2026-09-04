@@ -83,13 +83,13 @@ and artifacts.
 ## Framework identity
 
 Canonical 3.0 build: `@rpath/HookKit.framework/HookKit`,
-`current_version = 3.0.0`, `compatibility_version = 2.5.1`. Exports the new
+`current_version = 3.0.1`, `compatibility_version = 2.5.1`. Exports the new
 `hk_*` C ABI plus `_OBJC_CLASS_$_` / `_OBJC_METACLASS_$_` for all seven v1
 classes. Everything else stays hidden — enforced today by
 `tools/release/check_exports.sh` against
 `packaging/exports/export-HookKit.list`.
 
-Every package is version `3.0.0-1`. Canonical modern packages conflict with
+Every package is version `3.0.1-1`. Canonical modern packages conflict with
 and replace `me.jjolano.fmwk.hookkit.legacy`; the legacy package reciprocally
 conflicts with, replaces, and provides `me.jjolano.fmwk.hookkit`.
 
