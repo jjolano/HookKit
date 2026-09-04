@@ -38,6 +38,51 @@
 
 #include "../../vendor/substitute/substitute.h"
 
+// Jailbreak-root seam. Provider dylibs live under the active jailbreak's root,
+// which is NOT a fixed prefix: rootful is /, rootless is /var/jb, and roothide
+// is a per-install randomized jbroot. Resolving each rootfs-absolute path
+// through libroot/libroothide keeps discovery agnostic instead of hardcoding a
+// /var/jb + / candidate pair (which never matches roothide). The macros come
+// from the Makefile scheme gate; rootful defines neither and stays identity.
+// Only the canonical build discovers providers, so this is gated with its
+// callers -- host tests link HKRuntime.c without HOOKKIT_CANONICAL_3 and would
+// otherwise trip -Wunused-function.
+#if defined(HOOKKIT_CANONICAL_3)
+#include <limits.h>
+#if defined(HK_ROOTHIDE)
+#include <roothide.h>
+#elif defined(HK_ROOTLESS)
+#include <libroot.h>
+#endif
+
+// Resolve a rootfs-absolute provider path to the active jailbreak root. Writes
+// into the caller's buffer (>= PATH_MAX) to stay reentrant; returns that buffer,
+// or the input path unchanged when no translation applies or it fails.
+static const char *hk_jb_path(const char *path, char *buf, size_t buflen) {
+#if defined(HK_ROOTHIDE)
+    (void)buf;
+    (void)buflen;
+    const char *resolved = jbroot(path); // process-lifetime cache, do not free
+    return resolved ? resolved : path;
+#elif defined(HK_ROOTLESS)
+    char tmp[PATH_MAX];
+    const char *resolved = libroot_dyn_jbrootpath(path, tmp);
+    if (resolved) {
+        size_t len = strlen(resolved);
+        if (len < buflen) {
+            memcpy(buf, resolved, len + 1);
+            return buf;
+        }
+    }
+    return path;
+#else
+    (void)buf;
+    (void)buflen;
+    return path;
+#endif
+}
+#endif
+
 // Image-level export check without dlopen side-effects. Uses the same
 // Mach-O / export-trie parser the rebind engine uses (HKMachO.c +
 // HKSymbolResolve.c), so a CydiaSubstrate shim that is really an
@@ -159,16 +204,11 @@ static bool hk_platform_gum_discover(void *ctx) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
             bool available = false;
-            static const char *const paths[] = {
-                "/var/jb/usr/lib/HKGum.dylib",
-                "/usr/lib/HKGum.dylib",
-            };
-            for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-                if (dlopen_preflight(paths[i]) &&
-                    hk_platform_file_exports(paths[i], "hkgum_hook_function")) {
-                    available = true;
-                    break;
-                }
+            char buf[PATH_MAX];
+            const char *path = hk_jb_path("/usr/lib/HKGum.dylib", buf, sizeof(buf));
+            if (dlopen_preflight(path) &&
+                hk_platform_file_exports(path, "hkgum_hook_function")) {
+                available = true;
             }
             cached = available ? 1 : 0;
         }
@@ -195,15 +235,10 @@ static bool hk_platform_gum_prepare(void *ctx, hk_prepare_diag_t *out_diag) {
     bool activated_now = false;
     pthread_mutex_lock(&state->lock);
     if (!state->hook) {
-        static const char *const paths[] = {
-            "/var/jb/usr/lib/HKGum.dylib",
-            "/usr/lib/HKGum.dylib",
-        };
-        for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-            void *handle = dlopen(paths[i], RTLD_LAZY | RTLD_LOCAL);
-            if (!handle) {
-                continue;
-            }
+        char buf[PATH_MAX];
+        const char *path = hk_jb_path("/usr/lib/HKGum.dylib", buf, sizeof(buf));
+        void *handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+        if (handle) {
             int (*hook)(void *, void *, void **) =
                 (int (*)(void *, void *, void **))dlsym(handle,
                                                          "hkgum_hook_function");
@@ -217,14 +252,14 @@ static bool hk_platform_gum_prepare(void *ctx, hk_prepare_diag_t *out_diag) {
                 state->begin_transaction = begin_transaction;
                 state->end_transaction = end_transaction;
                 activated_now = true;
-                break;
+            } else {
+                // A constructor may already have run, so report the attempted
+                // image load/activation even though the ABI was unusable.
+                dlclose(handle);
+                out_diag->observed_effects = HK_EFFECT_PROVIDER_IMAGE_LOAD |
+                                            HK_EFFECT_PROVIDER_ACTIVATION |
+                                            HK_EFFECT_UNKNOWN_PROCESS_MUTATION;
             }
-            // A constructor may already have run, so report the attempted
-            // image load/activation even though the ABI was unusable.
-            dlclose(handle);
-            out_diag->observed_effects = HK_EFFECT_PROVIDER_IMAGE_LOAD |
-                                        HK_EFFECT_PROVIDER_ACTIVATION |
-                                        HK_EFFECT_UNKNOWN_PROCESS_MUTATION;
         }
     }
     bool ready = state->hook && state->begin_transaction && state->end_transaction;
@@ -268,15 +303,15 @@ static bool hk_platform_ellekit_discover(void *ctx) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
             static const char *const paths[] = {
-                "/var/jb/usr/lib/libellekit.dylib",
                 "/usr/lib/libellekit.dylib",
-                "/var/jb/usr/lib/libhooker.dylib",
                 "/usr/lib/libhooker.dylib",
             };
             cached = 0;
             for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-                if (dlopen_preflight(paths[i]) &&
-                    hk_platform_file_exports(paths[i], "LHHookFunctions")) {
+                char buf[PATH_MAX];
+                const char *path = hk_jb_path(paths[i], buf, sizeof(buf));
+                if (dlopen_preflight(path) &&
+                    hk_platform_file_exports(path, "LHHookFunctions")) {
                     cached = 1;
                     break;
                 }
@@ -308,13 +343,13 @@ static bool hk_platform_ellekit_prepare(void *ctx,
     pthread_mutex_lock(&state->lock);
     if (!state->hook_functions) {
         static const char *const paths[] = {
-            "/var/jb/usr/lib/libellekit.dylib",
             "/usr/lib/libellekit.dylib",
-            "/var/jb/usr/lib/libhooker.dylib",
             "/usr/lib/libhooker.dylib",
         };
         for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-            void *handle = dlopen(paths[i], RTLD_LAZY | RTLD_LOCAL);
+            char buf[PATH_MAX];
+            const char *path = hk_jb_path(paths[i], buf, sizeof(buf));
+            void *handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
             if (!handle) {
                 continue;
             }
@@ -400,13 +435,13 @@ static bool hk_platform_substitute_load_locked(
         return true;
     }
     static const char *const paths[] = {
-        "/var/jb/usr/lib/libsubstitute.0.dylib",
         "/usr/lib/libsubstitute.0.dylib",
-        "/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
         "/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
     };
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        void *handle = dlopen(paths[i], RTLD_LAZY | RTLD_LOCAL);
+        char buf[PATH_MAX];
+        const char *path = hk_jb_path(paths[i], buf, sizeof(buf));
+        void *handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
         if (!handle) {
             continue;
         }
@@ -487,26 +522,26 @@ static bool hk_platform_substitute_discover(void *ctx) {
     if (cached < 0) {
         pthread_mutex_lock(&cache_lock);
         if (cached < 0) {
-            bool hasSubstitute = (dlopen_preflight("/var/jb/usr/lib/libsubstitute.0.dylib") &&
-                                  (hk_platform_file_exports("/var/jb/usr/lib/libsubstitute.0.dylib", "substitute_hook_functions") ||
-                                   hk_platform_file_exports("/var/jb/usr/lib/libsubstitute.0.dylib", "SubHookFunction"))) ||
-                                 (dlopen_preflight("/usr/lib/libsubstitute.0.dylib") &&
-                                  (hk_platform_file_exports("/usr/lib/libsubstitute.0.dylib", "substitute_hook_functions") ||
-                                   hk_platform_file_exports("/usr/lib/libsubstitute.0.dylib", "SubHookFunction")));
-            bool hasCydia = (dlopen_preflight("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") &&
-                             hk_platform_file_exports("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "MSHookFunction") &&
-                             !hk_platform_file_exports("/var/jb/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "LHHookFunctions")) ||
-                            (dlopen_preflight("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate") &&
-                             hk_platform_file_exports("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "MSHookFunction") &&
-                             !hk_platform_file_exports("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "LHHookFunctions"));
-            bool hasElleKit = (dlopen_preflight("/var/jb/usr/lib/libellekit.dylib") &&
-                               hk_platform_file_exports("/var/jb/usr/lib/libellekit.dylib", "LHHookFunctions")) ||
-                              (dlopen_preflight("/usr/lib/libellekit.dylib") &&
-                               hk_platform_file_exports("/usr/lib/libellekit.dylib", "LHHookFunctions")) ||
-                              (dlopen_preflight("/var/jb/usr/lib/libhooker.dylib") &&
-                               hk_platform_file_exports("/var/jb/usr/lib/libhooker.dylib", "LHHookFunctions")) ||
-                              (dlopen_preflight("/usr/lib/libhooker.dylib") &&
-                               hk_platform_file_exports("/usr/lib/libhooker.dylib", "LHHookFunctions"));
+            char subp[PATH_MAX];
+            const char *sub = hk_jb_path("/usr/lib/libsubstitute.0.dylib", subp, sizeof(subp));
+            bool hasSubstitute = dlopen_preflight(sub) &&
+                                 (hk_platform_file_exports(sub, "substitute_hook_functions") ||
+                                  hk_platform_file_exports(sub, "SubHookFunction"));
+            char cydiap[PATH_MAX];
+            const char *cydia = hk_jb_path(
+                "/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
+                cydiap, sizeof(cydiap));
+            bool hasCydia = dlopen_preflight(cydia) &&
+                            hk_platform_file_exports(cydia, "MSHookFunction") &&
+                            !hk_platform_file_exports(cydia, "LHHookFunctions");
+            char ekp[PATH_MAX];
+            const char *ek = hk_jb_path("/usr/lib/libellekit.dylib", ekp, sizeof(ekp));
+            char lhp[PATH_MAX];
+            const char *lh = hk_jb_path("/usr/lib/libhooker.dylib", lhp, sizeof(lhp));
+            bool hasElleKit = (dlopen_preflight(ek) &&
+                               hk_platform_file_exports(ek, "LHHookFunctions")) ||
+                              (dlopen_preflight(lh) &&
+                               hk_platform_file_exports(lh, "LHHookFunctions"));
             if (hasSubstitute) {
                 cached = 1;
             } else if (hasCydia && !hasElleKit) {
