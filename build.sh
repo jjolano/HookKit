@@ -58,10 +58,11 @@ write_control() {
     local profile=$1 package name floor arch ceiling conflicts replaces provides
     ceiling=
     replaces=
+    name='HookKit Framework'
     case "$profile" in
         rootful-legacy)
             package=me.jjolano.fmwk.hookkit.legacy
-            name='HookKit Framework (Legacy Rootful)'
+            name='HookKit Framework (Legacy)'
             floor=9.0
             arch=iphoneos-arm
             ceiling=', firmware (<< 14.0)'
@@ -71,7 +72,6 @@ write_control() {
             ;;
         rootful-modern)
             package=me.jjolano.fmwk.hookkit
-            name='HookKit Framework (Modern Rootful)'
             floor=14.0
             arch=iphoneos-arm
             conflicts=', me.jjolano.fmwk.hookkit.legacy'
@@ -80,7 +80,6 @@ write_control() {
             ;;
         rootless)
             package=me.jjolano.fmwk.hookkit
-            name='HookKit Framework (Rootless)'
             floor=15.0
             arch=iphoneos-arm64
             conflicts=', me.jjolano.fmwk.hookkit.legacy'
@@ -89,7 +88,6 @@ write_control() {
             ;;
         roothide)
             package=me.jjolano.fmwk.hookkit
-            name='HookKit Framework (RootHide)'
             floor=15.0
             arch=iphoneos-arm64e
             conflicts=', me.jjolano.fmwk.hookkit.legacy'
@@ -120,20 +118,17 @@ write_control() {
 }
 
 write_gum_control() {
-    local profile=$1 name arch floor
+    local profile=$1 arch floor
     case "$profile" in
         rootful-modern)
-            name='Modern Rootful'
             arch=iphoneos-arm
             floor=14.0
             ;;
         rootless)
-            name='Rootless'
             arch=iphoneos-arm64
             floor=15.0
             ;;
         roothide)
-            name='RootHide'
             arch=iphoneos-arm64e
             floor=15.0
             ;;
@@ -142,7 +137,7 @@ write_gum_control() {
 
     printf '%s\n' \
         'Package: me.jjolano.fmwk.hookkit.gum' \
-        "Name: HookKit Frida Gum Provider ($name)" \
+        'Name: HookKit Frida Gum Provider' \
         "Depends: me.jjolano.fmwk.hookkit (= $PACKAGE_VERSION), firmware (>= $floor)" \
         "Version: $PACKAGE_VERSION" \
         "Architecture: $arch" \
