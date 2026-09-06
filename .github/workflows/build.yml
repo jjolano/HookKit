@@ -11,6 +11,100 @@ env:
   GIT_CONFIG_VALUE_0: "false"
 
 jobs:
+  static:
+    name: static-checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: shellcheck release and dependency scripts
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends shellcheck
+          shellcheck build.sh tools/release/*.sh tools/dependencies/*.sh
+          bash -n build.sh
+          for f in tools/release/*.sh tools/dependencies/*.sh; do bash -n "$f"; done
+
+      # The Mach-O conformance harness parses REAL cross-built Apple-target
+      # binaries instead of synthetic fixtures (see tools/conformance/
+      # macho_conformance.c): the fixtures are two tiny dylibs built with
+      # the Theos cross clang already required below, so no device and no
+      # committed third-party binaries are needed. The assertions pin the
+      # load-bearing properties: well-formed images parse (status=0), the
+      # local symbol resolves identically in file and loaded layouts, and
+      # the importing dylib exposes import slots.
+      - name: Resolver conformance over real Mach-O fixtures
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential curl perl xz-utils git libxml2
+          sudo git clone --recursive --quiet https://github.com/jjolano/theos.git "$THEOS"
+          sudo -E "$THEOS/bin/provision.sh" --downloads \
+            toolchain/linux/iphone sdks/iPhoneOS16.5.sdk
+          sudo chown -R "$(id -u):$(id -g)" "$THEOS/toolchain" "$THEOS/sdks"
+          bash tools/conformance/macho_conformance_fixtures.sh "$RUNNER_TEMP/hkfix"
+          clang -Wall -Wextra -Werror -std=c11 -O1 \
+            -o "$RUNNER_TEMP/macho_conformance" \
+            tools/conformance/macho_conformance.c src/resolvers/*.c
+          "$RUNNER_TEMP/macho_conformance" "$RUNNER_TEMP/hkfix/hkhello.dylib" hk_hello_add \
+            | tee "$RUNNER_TEMP/conformance1.txt"
+          "$RUNNER_TEMP/macho_conformance" "$RUNNER_TEMP/hkfix/hkhello2.dylib" hk_hello_add \
+            | tee "$RUNNER_TEMP/conformance2.txt"
+          grep -q 'header:.*status=0' "$RUNNER_TEMP/conformance1.txt"
+          grep -q 'resolve hk_hello_add.*status=0' "$RUNNER_TEMP/conformance1.txt"
+          grep -q 'slots:.*status=0 n=2' "$RUNNER_TEMP/conformance2.txt"
+          file_raw=$(grep -m1 '\[loaded\] resolve hk_hello_add' "$RUNNER_TEMP/conformance1.txt" | grep -o 'raw=0x[0-9a-f]*')
+          loaded_raw=$(grep -m1 '^     resolve hk_hello_add' "$RUNNER_TEMP/conformance1.txt" | grep -o 'raw=0x[0-9a-f]*')
+          test -n "$file_raw" && test "$file_raw" = "$loaded_raw"
+          if grep -E 'status=[1-9][0-9]*' "$RUNNER_TEMP/conformance1.txt" | grep -v 'chained fixups:'; then
+            echo "error: resolver reported failure on a well-formed image" >&2
+            exit 1
+          fi
+
+  sanitize:
+    name: host-tests-asan-ubsan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # ASan+UBSan over the host suite via the Makefile's HOOKKIT_SANITIZE
+      # hook. One exclusion: the ObjC header-compile modes need cc1obj
+      # (absent on bare Ubuntu; Apple toolchains have it, and the lane jobs
+      # cover those modes). The --wrap interceptor used by the
+      # fault-injection sweep coexists with the sanitizer runtimes, so the
+      # sweep runs in the same lane.
+      - name: Install clang runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            clang libclang-rt-18-dev build-essential python3
+
+      - name: Run host tests under ASan+UBSan
+        env:
+          HOOKKIT_SANITIZE: address,undefined
+          HOOKKIT_SKIP_OBJC: "1"
+        run: |
+          set -euo pipefail
+          make test-header-compile \
+            test-shadow-manifest test-provider-evidence \
+            test-runtime-lifecycle test-plan-lifecycle test-hook-add \
+            test-plan-analyze test-engine-registry test-backend-policy \
+            test-backend-enumeration test-plan-prepare test-plan-commit \
+            test-ownership test-domain-gate test-artifact-ledger \
+            test-installed-original test-plan-model test-fault-injection \
+            test-image-catalog test-symbol-table test-macho test-export-trie \
+            test-symbol-resolve test-import-slots test-chained-fixups \
+            test-pointer-auth test-cache-patches test-rebind-engine \
+            test-rebind-pac test-rebind-wired test-memory-engine \
+            test-memory-wired test-objc-engine test-objc-wired \
+            test-inline-engine test-inline-wired test-image-scope \
+            test-reloc-inline-engine test-reloc-inline-wired \
+            test-static-continuation test-provider-vtable \
+            test-reloc test-swift-abi test-swift-engine
+
   pac:
     name: macos-pac
     runs-on: macos-26
@@ -57,15 +151,30 @@ jobs:
             -arch "${{ matrix.arch }}" -dynamiclib \
             -install_name @rpath/libHookKitLiveTargets.dylib \
             -o "$targets" tests/macos/live_hook_targets.c
+          # Production engine closure: every engine the iOS runtime
+          # registers (minus the provider adapters, which need vendor
+          # dylibs, and the Swift engine, which needs Swift metadata) plus
+          # the resolvers and native layer they link. Compiling this set is
+          # itself a gate -- a file dropped from the closure breaks here,
+          # not on device. HKRuntime.c is excluded on purpose: its platform
+          # registration is TARGET_OS_IOS-gated and contributes nothing on
+          # macOS; the engines are driven directly, as below.
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
             -arch "${{ matrix.arch }}" ${target_link_flags} \
             -framework Foundation -lpthread \
             -o "$out" \
             tests/macos/test_live_hooks.m \
             src/engines/HKInlineEngine.c \
+            src/engines/HKInlineVtable.c \
             src/engines/HKMemoryEngine.c \
+            src/engines/HKMemoryVtable.c \
             src/engines/HKObjCEngine.c \
+            src/engines/HKObjCVtable.c \
             src/engines/HKRebindEngine.c \
+            src/engines/HKRebindVtable.c \
+            src/engines/HKRelocInlineEngine.c \
+            src/engines/HKRelocInlineVtable.c \
+            src/engines/HKStaticPool.c \
             src/resolvers/HKChainedFixups.c \
             src/resolvers/HKDyldCachePatches.c \
             src/resolvers/HKExportTrie.c \
@@ -100,8 +209,25 @@ jobs:
       - name: Build and verify
         run: ./build.sh rootful-legacy
 
+      # Dobby's provider engine is compiled out of the legacy lane
+      # (HK_NO_DOBBY, see Makefile) -- the check runs here only because this
+      # is the one Ubuntu lane, and the script itself needs GNU/shadow
+      # tooling (lipo/vtool/ar/nm) absent on macOS runners. The modern lanes
+      # that actually link -ldobby inherit the pinned archive verified here.
       - name: Verify Dobby provenance
         run: bash tools/dependencies/rebuild-dobby.sh --check
+
+      # Shadow 3.7.6 vendors a historical HookKit commit. Its pin predates
+      # the tag lineage, so the gate asserts the retained facade markers --
+      # the actual contract -- rather than commit ancestry.
+      - name: Verify Shadow 3.7.6 facade contract
+        run: |
+          set -euo pipefail
+          git clone --quiet --branch v3.7.6 --depth 1 \
+            https://github.com/jjolano/shadow.git "$RUNNER_TEMP/shadow"
+          git fetch --quiet origin a40f5157394d7f099af1a01a01b5ddd95e6d2ba3 \
+            || true
+          bash tools/release/check_shadow376_compat.sh "$RUNNER_TEMP/shadow"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -125,7 +251,12 @@ jobs:
             vendor/gum/frida-gum.h
             vendor/gum/libfrida-gum.a
             vendor/gum/.devkit-*
-          key: frida-gum-${{ runner.os }}-${{ hashFiles('vendor/gum/gum.lock') }}
+          # fetch-gum.sh records hashes of the extracted artifacts in
+          # .devkit-*.artifacts and re-verifies them on a cache hit, so a
+          # poisoned cache fails the build instead of linking silently. The
+          # lock hash keys the cache; the script's own hash detects a
+          # verification-logic change that must invalidate stored artifacts.
+          key: frida-gum-${{ runner.os }}-${{ hashFiles('vendor/gum/gum.lock', 'tools/dependencies/fetch-gum.sh') }}
 
       - name: Install Theos
         run: |
@@ -149,6 +280,43 @@ jobs:
         env:
           MAKE_COMMAND: gmake
         run: ./build.sh "${{ matrix.flavor }}"
+
+      # Every device smoke must at least compile: a PR breaking
+      # tests/device/ otherwise stays green (execution needs a jailbroken
+      # device, which CI does not have). -fsyntax-only against the lane's
+      # pinned SDK proves the sources still match the shipped headers.
+      # The floor is the Makefile's per-lane minimum (legacy 9.0, modern
+      # 15.0): device_bench.c uses os_signpost (iOS 12+), so the legacy
+      # pass compiles it at 12.0 -- availability-gated, still parsed.
+      - name: Compile device smokes (no device needed)
+        env:
+          MAKE_COMMAND: gmake
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.flavor }}" == rootful-legacy ]]; then
+            tc="$THEOS/toolchain/oldabi/linux/iphone/bin"
+            sdk="$THEOS/sdks/iPhoneOS13.7.sdk"
+            min=9.0
+          else
+            tc="$THEOS/toolchain/linux/iphone/bin"
+            sdk="$THEOS/sdks/iPhoneOS16.5.sdk"
+            min=15.0
+          fi
+          ls "$tc/clang" "$sdk/SDKSettings.plist" >/dev/null
+          for f in tests/device/*.c; do
+            file_min="$min"
+            if [[ "$f" == *device_bench.c && "$min" == 9.0 ]]; then file_min=12.0; fi
+            "$tc/clang" -Wall -Wextra -Werror -O0 -fno-inline \
+              -target arm64-apple-ios"$file_min" -isysroot "$sdk" \
+              -Iinclude -F"$PWD/.theos/obj" \
+              -fsyntax-only "$f"
+          done
+          for f in tests/device/*.m; do
+            "$tc/clang" -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc \
+              -target arm64-apple-ios"$min" -isysroot "$sdk" \
+              -Iinclude -F"$PWD/.theos/obj" \
+              -fsyntax-only "$f"
+          done
 
       - uses: actions/upload-artifact@v7
         with:

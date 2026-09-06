@@ -29,8 +29,26 @@ static uint32_t a64_blr(uint32_t rn) {
 }
 
 static int64_t sign_extend(uint64_t value, unsigned bits) {
+    // All arithmetic stays unsigned until the final reinterpretation: the
+    // call sites scale the result by 4, and a signed left shift of a
+    // negative offset is UB that UBSan flags (branch_target multiplies
+    // instead). Masking to `bits` first also makes out-of-range inputs
+    // well-defined rather than silently leaking high bits.
+    uint64_t mask = (bits >= 64) ? ~0ULL : ((1ULL << bits) - 1ULL);
+    uint64_t v = value & mask;
     uint64_t sign = 1ULL << (bits - 1);
-    return (int64_t)((value ^ sign) - sign);
+    uint64_t mag = (v ^ sign) - sign;
+    uint64_t extended = (mag & sign) ? (mag | ~mask) : (mag & mask);
+    int64_t out;
+    memcpy(&out, &extended, sizeof(out));
+    return out;
+}
+
+// A branch offset already sign-extended to a signed value, scaled to bytes.
+// Written as multiply-then-add rather than (offset << 2): the offset can be
+// negative and signed left shift of a negative is UB (caught by UBSan).
+static uint64_t branch_target(uint64_t pc, int64_t offset_words) {
+    return (uint64_t)((int64_t)pc + offset_words * 4);
 }
 
 // imm19 occupies bits 23:5 in B.cond, CBZ/CBNZ and the load-literal group.
@@ -238,7 +256,7 @@ static size_t relocate_one(uint32_t insn, uint64_t pc, uint64_t patch_start, uin
 
     // B / BL
     if((insn & 0x7C000000u) == 0x14000000u) {
-        uint64_t target = pc + (uint64_t)(sign_extend(insn & 0x03FFFFFFu, 26) << 2);
+        uint64_t target = branch_target(pc, sign_extend(insn & 0x03FFFFFFu, 26));
 
         if(target >= patch_start && target < patch_end) {
             return 0;   // lands inside the bytes being overwritten
@@ -269,17 +287,17 @@ static size_t relocate_one(uint32_t insn, uint64_t pc, uint64_t patch_start, uin
 
         if((insn & 0xFF000010u) == 0x54000000u) {
             // B.cond
-            target = pc + (uint64_t)(sign_extend((insn >> 5) & 0x7FFFFu, 19) << 2);
+            target = branch_target(pc, sign_extend((insn >> 5) & 0x7FFFFu, 19));
             retargeted = a64_set_imm19(insn, 8);
             conditional = true;
         } else if((insn & 0x7E000000u) == 0x34000000u) {
             // CBZ / CBNZ
-            target = pc + (uint64_t)(sign_extend((insn >> 5) & 0x7FFFFu, 19) << 2);
+            target = branch_target(pc, sign_extend((insn >> 5) & 0x7FFFFu, 19));
             retargeted = a64_set_imm19(insn, 8);
             conditional = true;
         } else if((insn & 0x7E000000u) == 0x36000000u) {
             // TBZ / TBNZ
-            target = pc + (uint64_t)(sign_extend((insn >> 5) & 0x3FFFu, 14) << 2);
+            target = branch_target(pc, sign_extend((insn >> 5) & 0x3FFFu, 14));
             retargeted = a64_set_imm14(insn, 8);
             conditional = true;
         }
@@ -301,7 +319,7 @@ static size_t relocate_one(uint32_t insn, uint64_t pc, uint64_t patch_start, uin
         uint32_t opc = insn >> 30;
         uint32_t v = (insn >> 26) & 1u;
         uint32_t rt = insn & 31u;
-        uint64_t target = pc + (uint64_t)(sign_extend((insn >> 5) & 0x7FFFFu, 19) << 2);
+        uint64_t target = branch_target(pc, sign_extend((insn >> 5) & 0x7FFFFu, 19));
         uint32_t load;
 
         if(opc == 3u && v == 0u) {

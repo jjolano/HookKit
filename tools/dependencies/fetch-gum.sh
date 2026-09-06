@@ -35,9 +35,27 @@ fi
 
 STAMP="$GUM_DIR/.devkit-$GUM_VERSION"
 STAMP_CONTENTS="$GUM_VERSION $GUM_ARM64_SHA256 $GUM_ARM64E_SHA256"
+# A CI cache hit restores these files without re-running the download path,
+# so the stamp alone proves nothing about their contents. The download hashes
+# below cover the original tarballs, which are gone by now -- so record hashes
+# of the extracted artifacts at fetch time (in the stamp file itself) and
+# re-verify them on every stamp hit. That makes a poisoned cache fail here
+# instead of linking a foreign libfrida-gum.a into the shipped HKGum.dylib.
+STAMP_ARTIFACTS="$GUM_DIR/.devkit-$GUM_VERSION.artifacts"
 if [[ -f "$GUM_DIR/frida-gum.h" && -f "$GUM_DIR/libfrida-gum.a" &&
-      -f "$STAMP" && $(<"$STAMP") == "$STAMP_CONTENTS" ]]; then
-    exit 0
+      -f "$STAMP" && $(<"$STAMP") == "$STAMP_CONTENTS" &&
+      -f "$STAMP_ARTIFACTS" ]]; then
+    if command -v shasum >/dev/null; then
+        _sha() { shasum -a 256 "$1" | awk '{print $1}'; }
+    elif command -v sha256sum >/dev/null; then
+        _sha() { sha256sum "$1" | awk '{print $1}'; }
+    else
+        die "shasum or sha256sum is required"
+    fi
+    if [[ "$(_sha "$GUM_DIR/frida-gum.h") $(_sha "$GUM_DIR/libfrida-gum.a")" == "$(<"$STAMP_ARTIFACTS")" ]]; then
+        exit 0
+    fi
+    echo "note: cached Gum artifacts fail verification; re-fetching" >&2
 fi
 
 command -v curl >/dev/null || die "curl is required to fetch Frida Gum"
@@ -105,3 +123,6 @@ mv "$GUM_DIR/frida-gum.h.tmp" "$GUM_DIR/frida-gum.h"
 mv "$TMP/libfrida-gum.a" "$GUM_DIR/libfrida-gum.a"
 printf '%s\n' "$STAMP_CONTENTS" > "$STAMP.tmp"
 mv "$STAMP.tmp" "$STAMP"
+# Hashes of the extracted artifacts, for the stamp-hit verification above.
+printf '%s\n' "$(sha256 "$GUM_DIR/frida-gum.h") $(sha256 "$GUM_DIR/libfrida-gum.a")" > "$STAMP_ARTIFACTS.tmp"
+mv "$STAMP_ARTIFACTS.tmp" "$STAMP_ARTIFACTS"

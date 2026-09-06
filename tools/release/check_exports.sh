@@ -5,7 +5,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 # Mach-O-aware nm: GNU binutils nm cannot read Mach-O files, so the Theos
 # toolchain's own nm (cctools) is preferred over whatever PATH's `nm` is. The
@@ -13,6 +13,7 @@ cd "$ROOT"
 # and the rootful-legacy lane's hand-installed oldabi/linux/iphone/bin), so
 # glob for the bin directory.
 NM=""
+# shellcheck disable=SC2012 # glob-free lookup of one known llvm-nm path; find would be noisier here
 for cand in "$(command -v llvm-nm 2>/dev/null)" \
             "$(ls ~/.local/share/mise/installs/swift/*/usr/bin/llvm-nm 2>/dev/null | tail -n 1)" \
             "${THEOS:-/nonexistent}"/toolchain/*/bin/llvm-nm \
@@ -72,6 +73,7 @@ check_binary() {
 if [ "$#" -gt 0 ]; then
 	bins=("$@")
 else
+	# shellcheck disable=SC2207 # word-splitting find output into an array is the intent; paths contain no spaces here
 	bins=(
 		$(find .theos -path "*HookKit.framework/HookKit" -type f 2>/dev/null)
 		$(find .theos -name "HKGum.dylib" -type f 2>/dev/null)

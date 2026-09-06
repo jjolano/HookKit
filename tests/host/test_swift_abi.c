@@ -26,7 +26,13 @@
 // sign(p, d) keeps p's address bits and stamps 4 bits of d; strip removes the
 // stamp. The comparison sign(strip(old)) == old then holds iff the
 // discriminator used to sign the stored value matches the one the engine
-// blended. 16-byte alignment of the fake code pointers keeps strip exact.
+// blended. strip is exact only on 16-aligned addresses, so everything the
+// test signs lives in g_code -- one 16-aligned slot per fake method -- not
+// in the functions themselves: sanitizers honor function alignment only up
+// to 8, leaving fake_a..d 8-aligned and the strip lossy. The descriptor
+// impl fields still point at the real functions, which dladdr needs for
+// name matching; the engine never compares a slot value against an impl,
+// so the split is sound (prepare reads slots, find_slot reads impls).
 #define HK_TEST_PAC_MASK 0xF
 #define hk_strip_code(p)  ((void *)((uintptr_t)(p) & ~(uintptr_t)HK_TEST_PAC_MASK))
 #define hk_strip_data(p)  (p)
@@ -108,11 +114,12 @@ static char *identity_demangle(const char *mangled, size_t length, char *out, si
 
 // Fake method implementations: real (global, default-visibility) functions so
 // dladdr resolves them through .dynsym — the engine matches names against
-// dli_sname. 16-aligned so the simulated PAC strip recovers them exactly.
-int fake_a(void) __attribute__((aligned(16)));
-int fake_b(void) __attribute__((aligned(16)));
-int fake_c(void) __attribute__((aligned(16)));
-int fake_d(void) __attribute__((aligned(16)));
+// dli_sname. g_code[i] is the address the engine signs, stores and compares
+// for slot i; see the simulated-PAC note above for why it is not &fake_*.
+int fake_a(void);
+int fake_b(void);
+int fake_c(void);
+int fake_d(void);
 
 int fake_a(void) { return 1; }
 int fake_b(void) { return 2; }
@@ -155,6 +162,20 @@ _Static_assert(offsetof(fake_descriptor_t, methods) == 0x34, "descriptor method 
 
 static uint8_t g_metadata[FAKE_METADATA_SIZE] __attribute__((aligned(16)));
 static fake_descriptor_t g_desc;
+
+// The sign/strip/compare addresses: g_code[i] stands in for fake_*'s address
+// in every signed value. They must be distinct 16-aligned addresses, and
+// plain statics will not do: the array elements' own addresses are 8 apart,
+// so only even elements are 16-aligned. Derive the addresses arithmetically
+// from the array base instead -- exact under any toolchain or sanitizer.
+static uint8_t g_code_base[64] __attribute__((aligned(16)));
+static void *hk_code_addr(unsigned i) {
+    return (void *)(g_code_base + (size_t)i * 16);
+}
+#define g_code_a hk_code_addr(0)
+#define g_code_b hk_code_addr(1)
+#define g_code_c hk_code_addr(2)
+#define g_code_d hk_code_addr(3)
 
 // The methods each slot points at; slot i <-> methods[i].
 static void *const g_fns[4] = { (void *)&fake_a, (void *)&fake_b, (void *)&fake_c, (void *)&fake_d };
@@ -208,7 +229,7 @@ static void blob_setup(void) {
 
         // What the runtime wrote when it initialized the vtable.
         uintptr_t disc = hk_blend_disc(slot_ptr(i), (uintptr_t)(i + 1));
-        *(void **)slot_ptr(i) = hk_sign_code(g_fns[i], disc);
+        *(void **)slot_ptr(i) = hk_sign_code(hk_code_addr((unsigned)i), disc);
     }
 }
 
@@ -262,7 +283,7 @@ static void test_validation(void) {
 
     // 1. Null arguments.
     blob_setup();
-    CHECK(!hk_swift_hook_slot(NULL, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot(NULL, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_ARG);
     CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, NULL, NULL));
     expect_error(HK_SWIFT_ERR_ARG);
@@ -270,62 +291,62 @@ static void test_validation(void) {
     // 2. Not a Swift class (stable-ABI Data bit 1 clear).
     blob_setup();
     *(uintptr_t *)(g_metadata + 0x20) = 0;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_NOT_SWIFT);
 
     // The pre-stable marker alone is not a current Swift class tag.
     blob_setup();
     *(uintptr_t *)(g_metadata + 0x20) = 1;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_NOT_SWIFT);
 
     // 3. Artificial/KVO subclass (null Description).
     blob_setup();
     *(uintptr_t *)(g_metadata + 0x40) = 0;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_NOT_SWIFT);
 
     // 4/5. Description not a class descriptor (struct kind).
     blob_setup();
     g_desc.flags = (g_desc.flags & ~HK_SWIFT_DESC_KIND_MASK) | 17;   // Struct
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_NOT_CLASS_DESCRIPTOR);
 
     // 6. No vtable.
     blob_setup();
     g_desc.flags &= ~HK_SWIFT_DESC_CLASS_HAS_VTABLE;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_NO_VTABLE);
 
     // 7. Generic class.
     blob_setup();
     g_desc.flags |= HK_SWIFT_DESC_IS_GENERIC;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNSUPPORTED_LAYOUT);
 
     // 8. Resilient superclass.
     blob_setup();
     g_desc.flags |= HK_SWIFT_DESC_CLASS_HAS_RESILIENT_SUPERCLASS;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNSUPPORTED_LAYOUT);
 
     // 8b. Singleton/foreign metadata initialization (shifts the vtable header).
     blob_setup();
     g_desc.flags |= (1u << 16);     // kind-specific bits 0-1 = init kind 1
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNSUPPORTED_LAYOUT);
 
     // 9. Index out of bounds.
     blob_setup();
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 4, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 4, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_INVALID_INDEX);
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 99, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 99, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_INVALID_INDEX);
 
     // 10. Async slot.
     blob_setup();
     g_desc.methods[1].flags |= HK_SWIFT_METHOD_IS_ASYNC;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 1, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 1, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNSUPPORTED_LAYOUT);
 
     // None of the failures above may have written anything.
@@ -343,27 +364,27 @@ static void test_hook_by_index(void) {
     g_patch_calls = 0;
     void *orig = NULL;
 
-    CHECK(hk_swift_hook_slot((Class)g_metadata, 1, (void *)&fake_c, &orig));
+    CHECK(hk_swift_hook_slot((Class)g_metadata, 1, g_code_c, &orig));
     CHECK(g_patch_calls == 1);
     CHECK(g_patch_dst == slot_ptr(1));
-    CHECK(orig == (void *)&fake_b);
+    CHECK(orig == g_code_b);
 
     uintptr_t disc = hk_blend_disc(slot_ptr(1), 2);
-    void *want = hk_sign_code((void *)&fake_c, disc);
+    void *want = hk_sign_code(g_code_c, disc);
     CHECK(memcmp(g_patch_bytes, &want, sizeof(want)) == 0);
 
     // The engine must not have touched the other slots.
-    CHECK(*(void **)slot_ptr(0) == hk_sign_code((void *)&fake_a, hk_blend_disc(slot_ptr(0), 1)));
-    CHECK(*(void **)slot_ptr(2) == hk_sign_code((void *)&fake_c, hk_blend_disc(slot_ptr(2), 3)));
+    CHECK(*(void **)slot_ptr(0) == hk_sign_code(g_code_a, hk_blend_disc(slot_ptr(0), 1)));
+    CHECK(*(void **)slot_ptr(2) == hk_sign_code(g_code_c, hk_blend_disc(slot_ptr(2), 3)));
 
     // Hook slot 0 as well (multiple independent hooks in one class).
     g_patch_calls = 0;
     orig = NULL;
 
-    CHECK(hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_d, &orig));
+    CHECK(hk_swift_hook_slot((Class)g_metadata, 0, g_code_d, &orig));
     CHECK(g_patch_calls == 1);
     CHECK(g_patch_dst == slot_ptr(0));
-    CHECK(orig == (void *)&fake_a);
+    CHECK(orig == g_code_a);
 
     printf("  PASS\n");
 }
@@ -376,10 +397,10 @@ static void test_self_check(void) {
     // engine must refuse BEFORE writing anything.
     blob_setup();
     uintptr_t tampered = hk_blend_disc(slot_ptr(1), 2 ^ 1);
-    *(void **)slot_ptr(1) = hk_sign_code((void *)&fake_b, tampered);
+    *(void **)slot_ptr(1) = hk_sign_code(g_code_b, tampered);
     g_patch_calls = 0;
 
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 1, (void *)&fake_c, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 1, g_code_c, NULL));
     expect_error(HK_SWIFT_ERR_PAC_MISMATCH);
     CHECK(g_patch_calls == 0);
 
@@ -388,7 +409,7 @@ static void test_self_check(void) {
     blob_setup();
     g_patch_calls = 0;
 
-    CHECK(hk_swift_hook_slot((Class)g_metadata, 2, (void *)&fake_a, NULL));
+    CHECK(hk_swift_hook_slot((Class)g_metadata, 2, g_code_a, NULL));
     CHECK(g_patch_calls == 1);
     CHECK(g_patch_dst == slot_ptr(2));
 
@@ -401,7 +422,7 @@ static void test_unreadable(void) {
     // A bogus non-NULL class pointer must fail cleanly BEFORE any
     // dereference: the readability probe rejects it.
     blob_setup();
-    CHECK(!hk_swift_hook_slot((Class)(uintptr_t)0x1, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)(uintptr_t)0x1, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNREADABLE);
 
     uint32_t index = 99;
@@ -412,7 +433,7 @@ static void test_unreadable(void) {
     // the descriptor path.
     blob_setup();
     *(uintptr_t *)(g_metadata + 0x40) = 0x1;
-    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, (void *)&fake_a, NULL));
+    CHECK(!hk_swift_hook_slot((Class)g_metadata, 0, g_code_a, NULL));
     expect_error(HK_SWIFT_ERR_UNREADABLE);
 
     // None of the failures above may have written anything.
@@ -438,7 +459,7 @@ static void test_find_by_name(void) {
     // Ambiguous: two slots sharing one implementation.
     blob_setup();
     g_desc.methods[3].impl = (int32_t)((char *)&fake_a - (char *)&g_desc.methods[3].impl);   // slot 3 now also fake_a
-    *(void **)slot_ptr(3) = hk_sign_code((void *)&fake_a, hk_blend_disc(slot_ptr(3), 4));
+    *(void **)slot_ptr(3) = hk_sign_code(g_code_a, hk_blend_disc(slot_ptr(3), 4));
     CHECK(!hk_swift_find_slot((Class)g_metadata, "fake_a", &index));
     expect_error(HK_SWIFT_ERR_AMBIGUOUS);
 

@@ -168,6 +168,10 @@ int main(void) {
     }
 
 #if defined(__linux__)
+    // The --wrap interceptor is what makes this a sweep rather than a single
+    // run: a silent interceptor failure (e.g. a toolchain that ignores --wrap)
+    // would pass with zero sites covered. Fail closed on that.
+    assert(n > 1);
     printf("all fault-injection tests passed (%d allocation sites swept, "
            "each failed once)\n", n - 1);
 #else
