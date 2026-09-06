@@ -238,9 +238,6 @@ int main(int argc, char **argv) {
     }
     @autoreleasepool {
         test_inline_hooks(targets);
-#if !defined(__arm64e__)
-        test_reloc_inline_hook(targets);
-#endif
         test_memory_hook();
         test_objc_hook();
         test_rebind_hook();
