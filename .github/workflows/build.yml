@@ -317,6 +317,11 @@ jobs:
               -Iinclude -F"$PWD/.theos/obj" \
               -fsyntax-only "$f"
           done
+          # The Swift probe has no clang equivalent; a parse checks it still
+          # compiles. Xcode-only, so the Ubuntu legacy lane skips it.
+          if [[ "${{ matrix.flavor }}" != rootful-legacy ]]; then
+            xcrun swiftc -parse tests/device/device_swift_real_probe.swift
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
