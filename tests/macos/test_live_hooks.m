@@ -76,7 +76,11 @@ static void test_reloc_inline_hook(void *targets) {
         (int (*)(int))dlsym(targets, "hk_live_reloc_target");
     assert(reloc_target);
 
-    assert(reloc_target(2) == 57);
+    // Baseline is computed how the target computes it, not a magic number:
+    // if the toolchain ever folds this target into another function, the
+    // value assert below catches the fold instead of asserting a stale 57.
+    int baseline = reloc_target(2);
+    assert(baseline == ((2 + 11) * 3 + 13 - 4));
     hk_reloc_plan_t plan;
     uintptr_t target = hk_pac_strip_code((uintptr_t)reloc_target);
     uintptr_t replacement = hk_pac_strip_code((uintptr_t)reloc_replacement);
@@ -89,7 +93,7 @@ static void test_reloc_inline_hook(void *targets) {
            HK_MUTATION_COMPLETE);
     assert(reloc_target(2) == 302);
     int (*original)(int) = (int (*)(int))plan.original_entry;
-    assert(original(2) == 57);
+    assert(original(2) == baseline);
     // Deliberately leaked, like every live trampoline: a page a patched
     // entry still branches to is never reclaimed.
 }

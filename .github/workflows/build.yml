@@ -44,8 +44,10 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends \
             build-essential curl perl xz-utils git libxml2
           sudo git clone --recursive --quiet https://github.com/jjolano/theos.git "$THEOS"
+          # Fixture dylibs need the cross clang (toolchain/linux) and the
+          # pinned SDK row; provision.lock is the pinned source for both.
           sudo -E "$THEOS/bin/provision.sh" --downloads \
-            toolchain/linux/iphone sdks/iPhoneOS16.5.sdk
+            toolchain/linux sdks/iPhoneOS16.5.sdk
           sudo chown -R "$(id -u):$(id -g)" "$THEOS/toolchain" "$THEOS/sdks"
           bash tools/conformance/macho_conformance_fixtures.sh "$RUNNER_TEMP/hkfix"
           clang -Wall -Wextra -Werror -std=c11 -O1 \
