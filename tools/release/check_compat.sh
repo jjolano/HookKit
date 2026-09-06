@@ -151,7 +151,7 @@ actual_version=$("$DPKG_DEB" -f "$ARTIFACT" Version)
 depends=$("$DPKG_DEB" -f "$ARTIFACT" Depends)
 [ "$actual_package" = "$package" ] || { echo "FAIL package '$actual_package' != '$package'" >&2; exit 1; }
 [ "$actual_arch" = "$package_arch" ] || { echo "FAIL architecture '$actual_arch' != '$package_arch'" >&2; exit 1; }
-[ "$actual_version" = 3.0.1-1 ] || { echo "FAIL version '$actual_version' != '3.0.1-1'" >&2; exit 1; }
+[ "$actual_version" = 3.0.2-1 ] || { echo "FAIL version '$actual_version' != '3.0.2-1'" >&2; exit 1; }
 printf '%s\n' "$depends" | grep -Fq "firmware (>= $floor)" || {
     echo "FAIL package dependency does not require firmware >= $floor" >&2; exit 1;
 }
@@ -316,10 +316,10 @@ check_gum_package() {
     [ "$actual_arch" = "$gum_arch" ] || {
         echo "FAIL Gum architecture '$actual_arch' != '$gum_arch'" >&2; return 1;
     }
-    [ "$actual_version" = 3.0.1-1 ] || {
-        echo "FAIL Gum version '$actual_version' != '3.0.1-1'" >&2; return 1;
+    [ "$actual_version" = 3.0.2-1 ] || {
+        echo "FAIL Gum version '$actual_version' != '3.0.2-1'" >&2; return 1;
     }
-    printf '%s\n' "$depends" | grep -Fq 'me.jjolano.fmwk.hookkit (= 3.0.1-1)' || {
+    printf '%s\n' "$depends" | grep -Fq 'me.jjolano.fmwk.hookkit (= 3.0.2-1)' || {
         echo "FAIL Gum package must depend on the matching HookKit package" >&2; return 1;
     }
     printf '%s\n' "$depends" | grep -Fq "firmware (>= $floor)" || {

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 : "${THEOS:?THEOS must point to Theos}"
-PACKAGE_VERSION=3.0.1-1
+PACKAGE_VERSION=3.0.2-1
 MAKE_COMMAND=${MAKE_COMMAND:-make}
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/hookkit-build.XXXXXX")
 MAKE_ARGS=("THEOS_LIBRARY_PATH=$STAGE/lib")
