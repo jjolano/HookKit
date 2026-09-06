@@ -14,19 +14,21 @@ int hk_live_terminal_target(int value) {
 
 // Separate target for the relocating engine: its entry patch displaces the
 // prologue into a trampoline, so sharing the terminal target would leave the
-// two tests patching over each other. Arithmetic-only on purpose: the
-// relocator copies position-independent ALU/add-sub-immediate verbatim, so an
-// MUL or shift risks tripping an unrelocatable refusal (or a code path the
-// host suite never covers). Distinct from the terminal target by constants
-// AND a final scaling step; identical-code folding still has to defeat both.
-// The test asserts the computed baseline, not a magic number, so a future
-// fold is caught as a value mismatch rather than a stale constant.
+// two tests patching over each other. Deliberately LONG and branch-free:
+// the relocating engine's safety scales with prologue length (a terminator
+// or unrelocatable form anywhere in the patch window is fatal), so a stubby
+// 5-instruction body leaves zero margin -- one load-bearing prologue
+// instruction the relocator refuses (auth, literal, system) and prepare
+// fails. Sixteen volatile adds give the window real content while staying
+// in the verbatim-copy class the relocator never refuses. Distinct
+// constants defeat identical-code folding; the test asserts the computed
+// baseline, not a magic number, so a future fold reads as a value mismatch.
 __attribute__((visibility("default"), noinline))
 int hk_live_reloc_target(int value) {
     volatile int result = value;
-    result += 11;
-    result += result;
-    result += 13;
-    result -= 4;
+    result += 11; result += 12; result += 13; result += 14;
+    result += 15; result += 16; result += 17; result += 18;
+    result += 19; result += 20; result += 21; result += 22;
+    result += 23; result += 24; result += 25; result += 26;
     return result;
 }
