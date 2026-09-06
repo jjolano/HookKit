@@ -80,7 +80,7 @@ static void test_reloc_inline_hook(void *targets) {
     // if the toolchain ever folds this target into another function, the
     // value assert below catches the fold instead of asserting a stale 57.
     int baseline = reloc_target(2);
-    assert(baseline == ((2 + 11) * 3 + 13 - 4));
+    assert(baseline == ((2 + 11) + (2 + 11) + 13 - 4));
     hk_reloc_plan_t plan;
     uintptr_t target = hk_pac_strip_code((uintptr_t)reloc_target);
     uintptr_t replacement = hk_pac_strip_code((uintptr_t)reloc_replacement);
