@@ -22,9 +22,12 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends shellcheck
-          shellcheck build.sh tools/release/*.sh tools/dependencies/*.sh
+          # SC1091 (sourcing $THEOS/bin/lane.sh, which lives outside the
+          # repo) is expected: the path is validated at build time by
+          # build.sh's `: "${THEOS:?...}"` guard plus lane.sh's own CLI.
+          shellcheck -e SC1091 build.sh tools/release/*.sh tools/dependencies/*.sh
           bash -n build.sh
-          for f in tools/release/*.sh tools/dependencies/*.sh; do bash -n "$f"; done
+          for f in tools/release/*.sh tools/dependencies/*.sh tools/conformance/*.sh; do bash -n "$f"; done
 
       # The Mach-O conformance harness parses REAL cross-built Apple-target
       # binaries instead of synthetic fixtures (see tools/conformance/
@@ -183,6 +186,7 @@ jobs:
             src/resolvers/HKSymbolResolve.c \
             src/resolvers/HKSymbolTable.c \
             src/core/HKArtifactLedger.c src/core/HKIDs.c \
+            src/core/HKImageCatalog.c src/core/HKImageScope.c \
             src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
           "$out" "$targets"
 
@@ -208,6 +212,23 @@ jobs:
 
       - name: Build and verify
         run: ./build.sh rootful-legacy
+
+      # The legacy lane build covers host tests + packaging; compile the
+      # device smokes too, with the old-ABI toolchain and the 13.7 SDK,
+      # overriding only the compiler/SDK selectors (the single-quoted
+      # '${SDKBINPATH}' defers to lane.sh's abi args expanded by make).
+      - name: Compile device smokes (no device needed)
+        run: |
+          set -euo pipefail
+          . "$THEOS/bin/lane.sh"
+          mapfile -t args < <(theos_lane_args rootful-legacy)
+          make "${args[@]}" device-compile-check \
+            'DEVICE_CANONICAL_CLANG=${SDKBINPATH}/clang' \
+            "DEVICE_CANONICAL_SDK=$THEOS/sdks/iPhoneOS13.7.sdk" \
+            DEVICE_CANONICAL_MIN=9.0 DEVICE_CANONICAL_ARCH=arm64 \
+            DEVICE_CANONICAL_LDID=true 'DEVICE_SMOKE_CLANG=${SDKBINPATH}/clang' \
+            "DEVICE_SMOKE_SDK=$THEOS/sdks/iPhoneOS13.7.sdk" \
+            DEVICE_SMOKE_MIN=9.0 DEVICE_SMOKE_ARCH=arm64 DEVICE_SMOKE_LDID=true
 
       # Dobby's provider engine is compiled out of the legacy lane
       # (HK_NO_DOBBY, see Makefile) -- the check runs here only because this
@@ -281,46 +302,22 @@ jobs:
           MAKE_COMMAND: gmake
         run: ./build.sh "${{ matrix.flavor }}"
 
-      # Every device smoke must at least compile: a PR breaking
-      # tests/device/ otherwise stays green (execution needs a jailbroken
-      # device, which CI does not have). -fsyntax-only against the lane's
-      # pinned SDK proves the sources still match the shipped headers.
-      # The floor is the Makefile's per-lane minimum (legacy 9.0, modern
-      # 15.0): device_bench.c uses os_signpost (iOS 12+), so the legacy
-      # pass compiles it at 12.0 -- availability-gated, still parsed.
+      # Every device smoke target the Makefile defines is built with its own
+      # recipe (minus the device-only sign step, which ldid handles --
+      # building IS the gate; execution needs a jailbroken device). Driving
+      # it from the Makefile keeps the gate honest: a new smoke target is
+      # covered automatically, with its own flags (-lobjc, fixture
+      # includes) from the single recipe. Modern lanes run on macOS
+      # (Xcode clang); the legacy lane runs on Ubuntu (old-ABI toolchain).
       - name: Compile device smokes (no device needed)
         env:
           MAKE_COMMAND: gmake
         run: |
           set -euo pipefail
           if [[ "${{ matrix.flavor }}" == rootful-legacy ]]; then
-            tc="$THEOS/toolchain/oldabi/linux/iphone/bin"
-            sdk="$THEOS/sdks/iPhoneOS13.7.sdk"
-            min=9.0
+            ./build.sh rootful-legacy >/dev/null
           else
-            tc="$THEOS/toolchain/linux/iphone/bin"
-            sdk="$THEOS/sdks/iPhoneOS16.5.sdk"
-            min=15.0
-          fi
-          ls "$tc/clang" "$sdk/SDKSettings.plist" >/dev/null
-          for f in tests/device/*.c; do
-            file_min="$min"
-            if [[ "$f" == *device_bench.c && "$min" == 9.0 ]]; then file_min=12.0; fi
-            "$tc/clang" -Wall -Wextra -Werror -O0 -fno-inline \
-              -target arm64-apple-ios"$file_min" -isysroot "$sdk" \
-              -Iinclude -F"$PWD/.theos/obj" \
-              -fsyntax-only "$f"
-          done
-          for f in tests/device/*.m; do
-            "$tc/clang" -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc \
-              -target arm64-apple-ios"$min" -isysroot "$sdk" \
-              -Iinclude -F"$PWD/.theos/obj" \
-              -fsyntax-only "$f"
-          done
-          # The Swift probe has no clang equivalent; a parse checks it still
-          # compiles. Xcode-only, so the Ubuntu legacy lane skips it.
-          if [[ "${{ matrix.flavor }}" != rootful-legacy ]]; then
-            xcrun swiftc -parse tests/device/device_swift_real_probe.swift
+            gmake device-compile-check
           fi
 
       - uses: actions/upload-artifact@v7

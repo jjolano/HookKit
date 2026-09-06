@@ -31,7 +31,36 @@ endif
 THEOS_BUILD_DIR := $(CURDIR)/.theos
 THEOS_LAYOUT_DIR_NAME := packaging/layout
 
+# Host-test-only mode: `make test` (and every test-* target) must work without
+# Theos installed -- the CI sanitizer/static jobs run on bare Ubuntu. Theos
+# is only needed for framework/library packaging, so skip its include when
+# every goal is a host-side check (test*, check-exports with explicit paths,
+# conformance). Everything below that needs Theos-native variables is guarded
+# the same way.
+HK_HOST_ONLY_GOALS = test test-reloc test-swift-abi test-swift-engine \
+	test-header-compile test-shadow-manifest test-provider-evidence \
+	test-runtime-lifecycle test-plan-lifecycle test-hook-add \
+	test-plan-analyze test-engine-registry test-backend-policy \
+	test-backend-enumeration test-plan-prepare test-plan-commit \
+	test-ownership test-domain-gate test-artifact-ledger \
+	test-installed-original test-plan-model test-fault-injection \
+	test-image-catalog test-symbol-table test-macho test-export-trie \
+	test-symbol-resolve test-import-slots test-chained-fixups \
+	test-pointer-auth test-cache-patches test-rebind-engine \
+	test-rebind-pac test-rebind-wired test-memory-engine \
+	test-memory-wired test-objc-engine test-objc-wired \
+	test-inline-engine test-inline-wired test-image-scope \
+	test-reloc-inline-engine test-reloc-inline-wired \
+	test-static-continuation test-provider-vtable conformance \
+	check-exports check-compat check-shadow376-compat
+HK_NEEDS_THEOS = $(filter-out $(HK_HOST_ONLY_GOALS),$(MAKECMDGOALS))
+ifeq ($(HK_NEEDS_THEOS),)
+THEOS_OBJ_DIR ?= $(CURDIR)/.theos/obj
+ECHO_NOTHING ?=
+ECHO_END ?=
+else
 include $(THEOS)/makefiles/common.mk
+endif
 
 # Current ld64 no longer accepts Theos' legacy duplicate-symbol policy flag.
 # It is safe to remove here: HookKit does not rely on duplicate definitions.
@@ -101,7 +130,9 @@ HookKit_CFLAGS += -DHOOKKIT_CANONICAL_3=1
 HookKit_LDFLAGS += -current_version 3.0.2 -compatibility_version 2.5.1
 HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/packaging/exports/export-HookKit.list
 
+ifneq ($(HK_NEEDS_THEOS),)
 include $(THEOS_MAKE_PATH)/framework.mk
+endif
 
 # Theos flattens a directory supplied through *_PUBLIC_HEADERS. Keep the
 # canonical headers beneath the framework's HookKit/ namespace too.
@@ -145,7 +176,9 @@ HKGum_ARCHS = arm64 arm64e
 # diagnostic useful for other products without reporting these known entries.
 HKGum_LDFLAGS = -Lvendor/gum -lfrida-gum -exported_symbols_list $(CURDIR)/packaging/exports/export-HKGum.list -Wl,-no_warn_inits
 HKGum_INSTALL_PATH = /usr/lib
+ifneq ($(HK_NEEDS_THEOS),)
 include $(THEOS_MAKE_PATH)/library.mk
+endif
 
 # The 76 MB Gum devkit is intentionally not tracked. Fetch its pinned,
 # checksummed release assets only for a lane that builds HKGum.
@@ -640,6 +673,22 @@ DEVICE_CANONICAL_SWIFT_OBJECT = $(DEVICE_CANONICAL_SWIFTC) $(DEVICE_CANONICAL_SW
 	-isysroot $(DEVICE_CANONICAL_SDK) -c -o $(1) $(1).s && rm -f $(1).s
 endif
 endif
+
+# Device-smoke compile gate: build every tests/device target the Makefile
+# itself defines, using its own per-target recipe minus the final sign step.
+# That keeps the gate honest by construction -- a new smoke added to
+# DEVICE_*_TARGETS is compiled here automatically, and per-target flags
+# (-lobjc, fixture includes, -Wno-objc-method-access) come from the one
+# recipe rather than a parallel reimplementation. device-bench is excluded:
+# it needs os_signpost (iOS 12+) and its own run harness. Swift probes are
+# parse-checked where a Swift driver exists.
+.PHONY: device-compile-check
+device-compile-check: $(DEVICE_SMOKE_TARGETS) $(DEVICE_CANONICAL_TARGETS)
+	$(ECHO_NOTHING)if [ "$(HOST_OS)" = Darwin ]; then \
+	  xcrun swiftc -parse tests/device/device_swift_real_probe.swift; \
+	elif swiftc -parse tests/device/device_swift_real_probe.swift >/dev/null 2>&1; then \
+	  :; \
+	else echo "device-compile-check: no Swift driver, probe skipped"; fi$(ECHO_END)
 
 DEVICE_SMOKE_TARGETS := device-smoke
 DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
