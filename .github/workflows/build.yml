@@ -156,14 +156,12 @@ jobs:
             -arch "${{ matrix.arch }}" -dynamiclib \
             -install_name @rpath/libHookKitLiveTargets.dylib \
             -o "$targets" tests/macos/live_hook_targets.c
-          # Production engine closure: every engine the iOS runtime
-          # registers (minus the provider adapters, which need vendor
-          # dylibs, and the Swift engine, which needs Swift metadata) plus
-          # the resolvers and native layer they link. Compiling this set is
-          # itself a gate -- a file dropped from the closure breaks here,
-          # not on device. HKRuntime.c is excluded on purpose: its platform
-          # registration is TARGET_OS_IOS-gated and contributes nothing on
-          # macOS; the engines are driven directly, as below.
+          # arm64e note: the relocating-inline live test is arm64-only. Its
+          # trampoline page comes from vm_allocate + vm_protect(R-X), which
+          # macOS refuses to execute on arm64e (MAP_JIT-less W^X); the same
+          # path passes on arm64 macOS and on iOS, where the transition is
+          # honored. It lives in its own binary so the arm64e job compiles
+          # the full closure but only runs the portable suite.
           xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
             -arch "${{ matrix.arch }}" ${target_link_flags} \
             -framework Foundation -lpthread \
@@ -191,6 +189,20 @@ jobs:
             src/core/HKImageCatalog.c src/core/HKImageScope.c \
             src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
           "$out" "$targets"
+          if [[ "${{ matrix.arch }}" != arm64e ]]; then
+            reloc_out="$RUNNER_TEMP/hookkit-live-reloc-${{ matrix.arch }}"
+            xcrun clang -Wall -Wextra -Werror -O0 -fno-inline -fblocks \
+              -arch "${{ matrix.arch }}" ${target_link_flags} \
+              -framework Foundation -lpthread \
+              -o "$reloc_out" \
+              tests/macos/test_live_reloc_inline.m \
+              src/engines/HKRelocInlineEngine.c \
+              src/resolvers/HKMachO.c src/resolvers/HKSymbolTable.c \
+              src/core/HKArtifactLedger.c src/core/HKIDs.c \
+              src/core/HKImageCatalog.c src/core/HKImageScope.c \
+              src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
+            "$reloc_out" "$targets"
+          fi
 
   legacy:
     name: rootful-legacy
