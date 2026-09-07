@@ -31,17 +31,17 @@ require_oldabi_toolchain()  { theos_abi_require old rootful-legacy; }
 
 # Lane make wrappers: on Linux the ABI's cross toolchain replaces theos's
 # default, on macOS Xcode already emits the right ABI and needs no overrides.
+# (No mapfile: the lane arg lists are single short assignments, and mapfile
+# is a bashism that breaks under `sh` runners.)
 modern_make() {
-    local args; mapfile -t args < <(theos_abi_args new)
-    "$MAKE_COMMAND" "${MAKE_ARGS[@]}" ${args[@]+"${args[@]}"} "$@"
+    "$MAKE_COMMAND" "${MAKE_ARGS[@]}" $(theos_abi_args new) "$@"
 }
 
 legacy_make() {
     if [ "$(uname -s)" = Darwin ]; then
         DEVELOPER_DIR="$OLDABI_DEVELOPER_DIR" "$MAKE_COMMAND" "${MAKE_ARGS[@]}" "$@"
     else
-        local args; mapfile -t args < <(theos_abi_args old)
-        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" ${args[@]+"${args[@]}"} "$@"
+        "$MAKE_COMMAND" "${MAKE_ARGS[@]}" $(theos_abi_args old) "$@"
     fi
 }
 
