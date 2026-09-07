@@ -306,26 +306,38 @@ Fresh `/var/jb/tmp` deployments were hash-checked and
 removed; installed framework/provider hashes were unchanged. No global install,
 Theos refresh, respring, commit, or push occurred.
 
-## OPEN: Rebind Cache Race
+## RESOLVED: Rebind Cache Lifetime
 
-**OPEN, not fixed or deterministically reproduced in this session.** The rebind
-file-cache concern follows from ownership/locking inspection, not a concurrent
-crash reproduction. `src/engines/HKRebindEngine.c:444-451` copies a borrowed
-slice/fixups blob and unlocks before parsing at lines 493-495. Another preparation
-can evict it and `munmap` it at lines 625-630. The miss path likewise transfers
-ownership and unlocks at lines 640-656 before parsing at lines 665-667. Core
-prepare has no enclosing process-wide lock that closes either window.
+Fixed, with a deterministic regression. The file-cache hit path held no lock
+across the binds parse while borrowing the entry's file mapping, and the miss
+path published its entry before parsing: a concurrent prepare could evict the
+entry and `munmap` the blob mid-parse (`src/engines/HKRebindEngine.c`).
 
-No cache code was changed in this follow-up. The bounded recommendation is to
-retain the file-cache lock through cached-view parsing and parse a miss while
-its local mapping is still owned, before publishing it into the cache. Moving
-publication after parsing also avoids the insertion-OOM branch closing the
-mapping before use. A focused deterministic regression is still required: use
-at least five real file-backed synthetic images for the four-entry cache, pause
-a reader after hit unlock or miss publication, force its mapping's eviction,
-then resume parsing. Ensure the symbol-cache lookup misses so it cannot bypass
-the vulnerable parse. Cover both paths; borrowed-buffer fixtures and successful
-single-image rebind smokes do not prove concurrent eviction safety.
+- The hit path now holds the file-cache lock from lookup through the parse
+  and releases it before the symbol-cache population (lock order file ->
+  symbol, documented at the lookup site; no path takes them in reverse).
+- The miss path now parses against its thread-owned mapping first and
+  publishes to the cache after; the unpublishable (`image_path == NULL`) case
+  closes its mapping right after the parse.
+- `tests/host/test_rebind_file_cache.c` (`make -j1 test-rebind-file-cache`):
+  nine file-backed synthetic images (distinct paths, UUIDs, and bound
+  symbols) thrash the 4-entry file cache and 8-entry symbol cache.
+  - `miss-parses-before-publish` and `hit-parses-under-lock`: single-threaded
+    mechanism checks via a test-only seam (`HK_REBIND_TEST`, compiled into
+    host test binaries only -- zero shipped-framework footprint). Both
+    **fail deterministically on the pre-fix code** (entry already published;
+    lock not held) and pass with the fix.
+  - `concurrent-prepare-under-eviction`: 4 threads x 60 rounds x 9 images with
+    exact site assertions; also guards the new lock discipline (no deadlock
+    or lock-order violation under load). Passes repeatedly and under
+    ASan/UBSan.
+- Full `make -j1 test` passes. Source-linked `device-rebind-smoke` (fixed
+  engine compiled in) passed 5/5 on the iPhone 7 via an isolated `/var/jb/tmp`
+  deployment, hash-verified and removed afterwards.
+
+Limits: the stress half is probabilistic coverage, not a proof of every
+interleaving; kernel-fault behavior and arm64e remain device-family gaps, as
+elsewhere in this document.
 
 ## Pre-Facade Execution Results
 

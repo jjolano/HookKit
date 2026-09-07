@@ -47,7 +47,7 @@ HK_HOST_ONLY_GOALS = test test-legacy-bridge test-native-write test-reloc test-s
 	test-image-catalog test-symbol-table test-macho test-export-trie \
 	test-symbol-resolve test-import-slots test-chained-fixups \
 	test-pointer-auth test-cache-patches test-rebind-engine \
-	test-rebind-pac test-rebind-wired test-memory-engine \
+	test-rebind-pac test-rebind-file-cache test-rebind-wired test-memory-engine \
 	test-memory-wired test-objc-engine test-objc-wired \
 	test-inline-engine test-inline-wired test-image-scope \
 	test-reloc-inline-engine test-reloc-inline-wired \
@@ -223,6 +223,13 @@ test-rebind-engine:
 .PHONY: test-rebind-pac
 test-rebind-pac:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -o $(THEOS_OBJ_DIR)/test_rebind_pac tests/host/test_rebind_pac.c src/engines/HKRebindEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c src/core/HKArtifactLedger.c src/core/HKIDs.c && $(THEOS_OBJ_DIR)/test_rebind_pac$(ECHO_END)
+# Rebind file-cache lifetime: concurrent prepares thrashing the 4-entry file
+# cache and 8-entry symbol cache. Catches eviction unmapping a blob another
+# thread is still parsing.
+.PHONY: test-rebind-file-cache
+test-rebind-file-cache:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -DHK_PTRAUTH_TEST=1 -DHK_REBIND_TEST -o $(THEOS_OBJ_DIR)/test_rebind_file_cache tests/host/test_rebind_file_cache.c src/engines/HKRebindEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_symbols.c src/core/HKArtifactLedger.c src/core/HKIDs.c -lpthread && $(THEOS_OBJ_DIR)/test_rebind_file_cache$(ECHO_END)
+
 
 # HookKit 3.0 end-to-end: the plan lifecycle driving the REAL memory-patch
 # engine through its runtime adapter (Milestone 6). Real analyze/prepare/commit,
@@ -342,7 +349,7 @@ HK_TEST_CC = clang $(HK_SANITIZE_FLAGS)
 HK_TEST_CXX = clang++ $(HK_SANITIZE_FLAGS)
 .PHONY: test
 test: test-native-write test-legacy-bridge
-	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-backend-enumeration test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-backend-enumeration test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-file-cache test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
 
 .PHONY: test-legacy-bridge
 test-legacy-bridge:

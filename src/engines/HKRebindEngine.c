@@ -286,6 +286,60 @@ static struct {
 } g_rebind_symbol_cache[HK_REBIND_SYMBOL_CACHE_SIZE] = {0};
 static uint32_t g_rebind_symbol_cache_next = 0;
 
+#ifdef HK_REBIND_TEST
+// Test-only introspection for the file-cache lifetime rule. Compiled only
+// into host test binaries (never the shipped framework): lets a test observe
+// cache state in the middle of a parse, deterministically, without timing
+// luck. The hook fires on the file-cache hit path and the miss path
+// immediately before the binds parse, with (hit, image_path, image_base).
+void (*hk_rebind_parse_hook_for_testing)(bool hit, const char *path,
+                                         const void *base) = NULL;
+
+// True while the file-cache lock is held by the calling thread: the hit-path
+// parse must hold it (it borrows the entry's mapping).
+bool hk_rebind_file_cache_locked_for_testing(void) {
+    if (pthread_mutex_trylock(&g_rebind_file_cache_lock) != 0) {
+        return true;
+    }
+    pthread_mutex_unlock(&g_rebind_file_cache_lock);
+    return false;
+}
+
+// True when an entry for (path, base) is currently cached: a miss-path parse
+// must run before its entry is published, so this is false mid-parse.
+bool hk_rebind_file_cache_contains_for_testing(const char *path,
+                                               const void *base) {
+    bool found = false;
+    pthread_mutex_lock(&g_rebind_file_cache_lock);
+    for (int i = 0; i < HK_REBIND_FILE_CACHE_SIZE; i++) {
+        if (g_rebind_file_cache[i].valid && path &&
+            g_rebind_file_cache[i].path &&
+            strcmp(path, g_rebind_file_cache[i].path) == 0 &&
+            base == g_rebind_file_cache[i].image_base) {
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_rebind_file_cache_lock);
+    return found;
+}
+
+// Drops every symbol-cache entry: lets a test arrange a file-cache hit with
+// a symbol-cache miss (otherwise the larger symbol cache always hits first).
+void hk_rebind_symbol_cache_clear_for_testing(void) {
+    pthread_mutex_lock(&g_rebind_symbol_cache_lock);
+    for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
+        if (g_rebind_symbol_cache[i].valid) {
+            free(g_rebind_symbol_cache[i].path);
+            free(g_rebind_symbol_cache[i].symbol);
+            memset(&g_rebind_symbol_cache[i], 0,
+                   sizeof(g_rebind_symbol_cache[i]));
+        }
+    }
+    pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+}
+#endif
+
 // Third level: dyld cache patch per-symbol cache. The shared cache's patch table
 // for a given symbol is the same for all hooks in the process, so caching it
 // avoids re-scanning the cache's patch table (thousands of entries) per hook.
@@ -421,6 +475,12 @@ static hk_rebind_status_t prepare_file_chains(
 
     // Cached path for file-backed images (device): 4-entry, per-image.
     // ponytail: 4-entry, per-image map if throughput matters (was single-entry, thrash on 2 images).
+    //
+    // Lifetime rule: the cached fixups/slice borrow the entry's file mapping,
+    // so the file-cache lock is held from lookup through the binds parse
+    // below. Releasing it first would let a concurrent miss evict and unmap
+    // the entry mid-parse. Lock order is file-cache -> symbol-cache, never
+    // the reverse (no path takes the file lock while holding the symbol lock).
     bool hit = false;
     int hit_idx = -1;
     hk_chained_fixups_t cached_fixups;
@@ -447,8 +507,10 @@ static hk_rebind_status_t prepare_file_chains(
         memcpy(cached_mappings, g_rebind_file_cache[hit_idx].mappings, sizeof(cached_mappings));
         cached_slice = g_rebind_file_cache[hit_idx].slice;
         cached_slice_size = g_rebind_file_cache[hit_idx].slice_size;
+        // Still locked: the parse below borrows this mapping (see above).
+    } else {
+        pthread_mutex_unlock(&g_rebind_file_cache_lock);
     }
-    pthread_mutex_unlock(&g_rebind_file_cache_lock);
     if (hit) {
         // Second level: per-(image,symbol) site list — 8-entry.
         int sym_idx = -1;
@@ -473,6 +535,9 @@ static hk_rebind_status_t prepare_file_chains(
                 tmp[i].weak = g_rebind_symbol_cache[sym_idx].sites[i].weak;
             }
             pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
+            // The replay below uses only the copied sites, so the file entry
+            // is no longer needed: release it before touching live slots.
+            pthread_mutex_unlock(&g_rebind_file_cache_lock);
             for (uint32_t i = 0; i < cnt; i++) {
                 add_site_status_t st = add_site(plan, tmp[i].address, &tmp[i].schema, tmp[i].addend, tmp[i].weak, true, false);
                 if (st == ADD_SITE_OVERFLOW) return HK_REBIND_TOO_MANY_SITES;
@@ -490,9 +555,18 @@ static hk_rebind_status_t prepare_file_chains(
             .image_size = target->image_size,
             .plan = plan,
         };
+#ifdef HK_REBIND_TEST
+        if (hk_rebind_parse_hook_for_testing) {
+            hk_rebind_parse_hook_for_testing(true, target->image_path,
+                                             target->image_base);
+        }
+#endif
         hk_chained_status_t chained = hk_chained_fixups_iterate_file_binds(
             &cached_fixups, cached_slice, cached_slice_size, cached_mappings, cached_collected.count,
             chained_bind_cb, &ctx);
+        // Parse done: nothing below borrows the cache entry, so release it
+        // before touching the symbol cache (lock order: file -> symbol).
+        pthread_mutex_unlock(&g_rebind_file_cache_lock);
         if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
         if (ctx.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
         if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
@@ -615,7 +689,28 @@ static hk_rebind_status_t prepare_file_chains(
         mappings[i].file_offset = segment->fileoff;
         mappings[i].file_size = segment->filesize;
     }
-    // Populate cache on success path (keep file mapped) — 4-entry with eviction
+    // Parse first against this thread's own mapping; publish to the cache
+    // only after. Publishing first would let a concurrent prepare evict this
+    // entry and unmap the blob while the parse below still reads it.
+    chained_ctx_t ctx = {
+        .fixups = &fixups,
+        .candidates = candidates,
+        .image_base = (uintptr_t)target->image_base,
+        .image_size = target->image_size,
+        .plan = plan,
+    };
+#ifdef HK_REBIND_TEST
+    if (hk_rebind_parse_hook_for_testing) {
+        hk_rebind_parse_hook_for_testing(false, target->image_path,
+                                         target->image_base);
+    }
+#endif
+    chained = hk_chained_fixups_iterate_file_binds(
+        &fixups, slice, slice_size, mappings, collected.count,
+        chained_bind_cb, &ctx);
+    // Populate cache (keep file mapped) — 4-entry with eviction. Runs for
+    // deterministic parse outcomes too, as before: a cached entry replays the
+    // same verdict without re-reading the file.
     if (target->image_path) {
         pthread_mutex_lock(&g_rebind_file_cache_lock);
         int victim = -1;
@@ -654,19 +749,10 @@ static hk_rebind_status_t prepare_file_chains(
             file.mapped = false;
         }
         pthread_mutex_unlock(&g_rebind_file_cache_lock);
-    }
-    chained_ctx_t ctx = {
-        .fixups = &fixups,
-        .candidates = candidates,
-        .image_base = (uintptr_t)target->image_base,
-        .image_size = target->image_size,
-        .plan = plan,
-    };
-    chained = hk_chained_fixups_iterate_file_binds(
-        &fixups, slice, slice_size, mappings, collected.count,
-        chained_bind_cb, &ctx);
-    // Keep file mapped until after iterate; for cached case file was transferred (empty) so no-op
-    if (file.mapped) {
+    } else if (file.mapped) {
+        // No image_path: nothing to publish, and the parse above is done, so
+        // release this thread's mapping here. (When published, the entry owns
+        // the mapping instead and file.mapped is already false.)
         close_file_view(&file);
     }
     if (ctx.overflow) return HK_REBIND_TOO_MANY_SITES;
