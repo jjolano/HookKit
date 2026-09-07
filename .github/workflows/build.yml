@@ -323,6 +323,9 @@ jobs:
       # covered automatically, with its own flags (-lobjc, fixture
       # includes) from the single recipe. Modern lanes run on macOS
       # (Xcode clang); the legacy lane runs on Ubuntu (old-ABI toolchain).
+      # macOS runners resolve the compiler through xcrun (Xcode), like the
+      # Theos lane builds themselves -- the Makefile only hardcodes a Linux
+      # fallback toolchain because bare `gmake` has no lane.sh SDKBINPATH.
       - name: Compile device smokes (no device needed)
         env:
           MAKE_COMMAND: gmake
@@ -331,7 +334,12 @@ jobs:
           if [[ "${{ matrix.flavor }}" == rootful-legacy ]]; then
             ./build.sh rootful-legacy >/dev/null
           else
-            gmake device-compile-check
+            # shellcheck disable=SC2016
+            gmake device-compile-check \
+              'DEVICE_SMOKE_CLANG=$(xcrun -sdk iphoneos -f clang)' \
+              'DEVICE_CANONICAL_CLANG=$(xcrun -sdk iphoneos -f clang)' \
+              'DEVICE_CANONICAL_SWIFTC=$(xcrun -sdk iphoneos -f swiftc)' \
+              'DEVICE_CANONICAL_LD=$(xcrun -sdk iphoneos -f ld)'
           fi
 
       - uses: actions/upload-artifact@v7
