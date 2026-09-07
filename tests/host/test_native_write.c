@@ -1,9 +1,14 @@
 // Execute the actual native writer on host buffers, replacing only Mach/VM
 // operations. This is not a bool-writer simulation and executes no A64 code.
+// The fixture <mach/mach.h> below must come FIRST: on macOS the real
+// pthread.h pulls in the real mach headers, whose types would otherwise win
+// and break the stub signatures.
 #define _DEFAULT_SOURCE 1
 #ifndef __aarch64__
 #define __aarch64__ 1
 #endif
+#include <mach/mach.h>
+#include <libkern/OSCacheControl.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
