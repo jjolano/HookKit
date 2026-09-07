@@ -346,18 +346,29 @@ jobs:
               rootless) WANT=hookkit-rootless; PAYLOAD=var/jb/Library/Frameworks/HookKit.framework ;;
               roothide) WANT=hookkit-roothide; PAYLOAD=Library/Frameworks/HookKit.framework ;;
             esac
-            # build.sh copies the lane package to .theos/release/$WANT.deb,
-            # but the raw theos packages/ row is the fallback if layout moves.
+            # build.sh records each lane package path in .theos/last_package
+            # (absolute path into .theos/packages/); copy_release_artifact
+            # additionally mirrors it to .theos/release/$WANT.deb.
             DEB=""
-            for cand in ".theos/release/$WANT.deb" .theos/*.deb packages/*.deb; do
-              for f in $cand; do
-                [ -f "$f" ] || continue
-                case "$f" in
+            if [ -f .theos/last_package ]; then
+              while IFS= read -r line; do
+                case "$line" in
                   *gum*) continue ;;
-                  *"$WANT"*|*hookkit*) DEB="$f"; break 2 ;;
+                  *.deb) [ -f "$line" ] && { DEB="$line"; break; } ;;
                 esac
+              done < .theos/last_package
+            fi
+            if [ -z "$DEB" ]; then
+              for cand in ".theos/release/$WANT.deb" .theos/*.deb packages/*.deb; do
+                for f in $cand; do
+                  [ -f "$f" ] || continue
+                  case "$f" in
+                    *gum*) continue ;;
+                    *"$WANT"*|*hookkit*) DEB="$f"; break 2 ;;
+                  esac
+                done
               done
-            done
+            fi
             test -n "$DEB" || { echo "error: no $WANT package found" >&2; exit 1; }
             echo "staging $DEB for device-smoke link"
             dpkg-deb -x "$DEB" "$STAGE"
