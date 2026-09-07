@@ -7,6 +7,9 @@
 #include <unistd.h>
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
+// pthread.h LAST: on macOS it injects the real <mach/mach.h> types, which
+// would collide with the native-vm test fixture shadowing the same headers.
+// hk_native.c only needs the mutex API, which has no mach-type dependency.
 #include <pthread.h>
 
 #define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
