@@ -105,8 +105,11 @@ typedef enum {
 // Obtain an executable page of `size` bytes. `near` is a placement HINT, not a
 // requirement -- landing within a B's reach of it lets the entry patch be a
 // single atomic store, and failing to is handled rather than fatal. Returns 0
-// on failure.
-typedef uintptr_t (*hk_reloc_alloc_fn)(void *ctx, size_t size, uintptr_t near);
+// on failure. On success, fill mapping kind/base/size with the actual backing
+// extent (reserved pool slot or anonymous allocation), not the buffer request.
+// The engine supplies identity and final R-X protection after successful seal.
+typedef uintptr_t (*hk_reloc_alloc_fn)(void *ctx, size_t size, uintptr_t near,
+                                      hk_artifact_mapping_t *mapping);
 // Transition the page from writable to executable. Returns false if refused.
 typedef bool (*hk_reloc_seal_fn)(void *ctx, uintptr_t page, size_t size);
 // Give a page back. Called ONLY for a page nothing can be executing: one whose
@@ -120,9 +123,10 @@ typedef bool (*hk_reloc_write_fn)(void *ctx, uintptr_t address,
 
 typedef struct {
     uintptr_t address;                     // the entry being patched
+    uintptr_t replacement;                 // caller's replacement pointer
     uintptr_t trampoline;                  // the page, as handed back
     size_t trampoline_size;
-    hk_id_t mapping_id;                    // stable identity for this continuation mapping
+    hk_artifact_mapping_t mapping;         // actual backing, distinct from buffer span
     // What a caller invokes to reach the original: the body, not the page.
     uintptr_t original_entry;
     uint8_t original[HK_RELOC_MAX_PATCH];  // bytes the patch replaces
@@ -161,7 +165,6 @@ hk_reloc_status_t hk_reloc_prepare_continuation(
 
 // Shared description for every HookKit-built relocation continuation.
 void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
-                                    bool static_continuation,
                                     hk_continuation_info_t *out_info);
 
 // Phase 2. Revalidates the entry against what prepare read, then patches it.
@@ -174,7 +177,7 @@ void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
 // artifacts is the honest report when nothing persists. `free_page` may be
 // NULL, in which case the page is kept and an artifact IS recorded, so it
 // stays accounted for even though it cannot be reclaimed.
-hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
+hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
                                     hk_reloc_write_fn write, void *write_ctx,
                                     hk_reloc_free_fn free_page, void *seam_ctx,
                                     hk_artifact_sink_t *sink);

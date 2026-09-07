@@ -29,12 +29,17 @@ typedef struct {
     unsigned seal_calls;
     unsigned write_calls;
     unsigned free_calls;
+    bool refuse_write;
 } seam_t;
 
-static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near,
+                             hk_artifact_mapping_t *mapping) {
     seam_t *s = ctx; s->alloc_calls++; (void)near;
     s->page = aligned_alloc(16, (size + 15) & ~(size_t)15);
     assert(s->page); memset(s->page, 0, size);
+    mapping->kind = HK_MAPPING_ANONYMOUS;
+    mapping->base = (uintptr_t)s->page;
+    mapping->size = (size + 15) & ~(size_t)15;
     return (uintptr_t)s->page;
 }
 static bool seam_seal(void *ctx, uintptr_t page, size_t size) {
@@ -42,6 +47,7 @@ static bool seam_seal(void *ctx, uintptr_t page, size_t size) {
 }
 static bool seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     seam_t *s = ctx; s->write_calls++;
+    if (s->refuse_write) return false;
     memcpy((void *)address, data, size);
     return true;
 }
@@ -95,12 +101,13 @@ static hk_hook_spec_t address_spec(const char *id, uintptr_t target, void *repla
     return spec;
 }
 
-static void test_full_lifecycle_installs_and_reports(void) {
+static void test_full_lifecycle_installs_and_reports(bool refuse_write) {
     const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
     uint32_t *fn = make_fn(body, 5);
     uintptr_t target = (uintptr_t)fn;
 
     seam_t s; memset(&s, 0, sizeof(s));
+    s.refuse_write = refuse_write;
     hk_reloc_engine_ctx_t ectx = reloc_ctx(&s);
     hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
@@ -115,7 +122,8 @@ static void test_full_lifecycle_installs_and_reports(void) {
     assert(hook->matched_engine == hk_reloc_inline_vtable());
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
-    assert(hook->result.declared_prepare_effects == HK_EFFECT_EXECUTABLE_ALLOCATION);
+    assert(hook->result.declared_prepare_effects ==
+           (HK_EFFECT_EXECUTABLE_ALLOCATION | HK_EFFECT_STATIC_CONTINUATION_USE));
     assert(hook->result.observed_prepare_effects == HK_EFFECT_EXECUTABLE_ALLOCATION);
     assert(hook->has_prepared_continuation);
     assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC);
@@ -132,6 +140,20 @@ static void test_full_lifecycle_installs_and_reports(void) {
 
     hk_report_t *report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+    if (refuse_write) {
+        assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE && hook->result.mutation == HK_MUTATION_NONE);
+        assert(s.free_calls == 1 && !s.page && fn[0] == A64_NOP);
+        assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_NONE);
+        assert(hook->result.continuation.address == 0 && hook->result.continuation.mapping_size == 0);
+        assert(!hook->result.continuation.executable_memory_allocated);
+        assert(hook->result.artifact_count == 0 && hook->result.observed_commit_effects == 0);
+        hk_report_release(report);
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        free(fn);
+        puts("  refused-write-clears-reclaimed-continuation: PASS");
+        return;
+    }
     assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
     assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC);
     assert(hook->result.continuation.address != 0);
@@ -152,6 +174,7 @@ static void test_full_lifecycle_installs_and_reports(void) {
     assert(t.mapping.mapping_id.high == hook->result.continuation.mapping_id.high &&
            t.mapping.mapping_id.low == hook->result.continuation.mapping_id.low);
     assert(a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH && a.mechanically_reversible);
+    assert(a.replacement_pointer == spec.replacement);
     assert(a.request_id.high == hook->hook_id.high && a.request_id.low == hook->hook_id.low);
 
     hk_artifact_snapshot_release(snap);
@@ -547,7 +570,10 @@ static void test_effect_and_forbid_layouts_are_not_conflated(void) {
 
 int main(void) {
     #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
-    RUN_TEST(test_full_lifecycle_installs_and_reports);
+    hk_ownership_reset_for_testing();
+    test_full_lifecycle_installs_and_reports(false);
+    hk_ownership_reset_for_testing();
+    test_full_lifecycle_installs_and_reports(true);
     RUN_TEST(test_both_inline_engines_coexist);
     RUN_TEST(test_registration_order_is_a_cost_decision);
     RUN_TEST(test_refusals_are_distinguishable);

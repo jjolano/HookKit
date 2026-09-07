@@ -786,13 +786,23 @@ static uintptr_t hk_static_pool_take(size_t size, uintptr_t near,
 // executable region for a hooking scan to flag -- whenever it can serve this
 // target atomically, and fall back to a near, tagged anonymous page otherwise.
 // This makes the stealthy continuation the default with no caller opt-in.
-static uintptr_t hk_platform_reloc_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t hk_platform_reloc_alloc(void *ctx, size_t size, uintptr_t near,
+                                        hk_artifact_mapping_t *mapping) {
     (void)ctx;
     uintptr_t slot = hk_static_pool_take(size, near, true);
     if (slot) {
+        mapping->kind = HK_MAPPING_STATIC_HOOKKIT_SECTION;
+        mapping->base = slot;
+        mapping->size = HK_STATIC_TRAMP_PAGE;
         return slot;
     }
-    return hk_native_reloc_alloc(size, near);
+    uintptr_t page = hk_native_reloc_alloc(size, near);
+    if (page) {
+        mapping->kind = HK_MAPPING_ANONYMOUS;
+        mapping->base = page;
+        mapping->size = (size_t)getpagesize();
+    }
+    return page;
 }
 
 static bool hk_platform_reloc_seal(void *ctx, uintptr_t page, size_t size) {
@@ -816,9 +826,16 @@ static void hk_platform_reloc_free(void *ctx, uintptr_t page, size_t size) {
 // Forbid-dynamic backing: the same pool, but pool-only -- no anonymous
 // fallback, because the request refused dynamic executable memory outright. A
 // far or exhausted pool fails the hook honestly rather than allocating.
-static uintptr_t hk_platform_static_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t hk_platform_static_alloc(void *ctx, size_t size, uintptr_t near,
+                                         hk_artifact_mapping_t *mapping) {
     (void)ctx;
-    return hk_static_pool_take(size, near, false);
+    uintptr_t slot = hk_static_pool_take(size, near, false);
+    if (slot) {
+        mapping->kind = HK_MAPPING_STATIC_HOOKKIT_SECTION;
+        mapping->base = slot;
+        mapping->size = HK_STATIC_TRAMP_PAGE;
+    }
+    return slot;
 }
 #endif
 #endif
@@ -1298,7 +1315,6 @@ static void hk_runtime_register_platform_engines(hk_runtime_t *runtime) {
         runtime->static_engine.seal = hk_platform_reloc_seal;     // shared (pool or page)
         runtime->static_engine.free_page = hk_platform_reloc_free;  // address-discriminated
         runtime->static_engine.seam_ctx = NULL;  // seams use the process-global pool
-        runtime->static_engine.static_continuation = true;
         (void)hk_runtime_register_engine_with_context(
             runtime, hk_static_inline_vtable(), &runtime->static_engine);
     }

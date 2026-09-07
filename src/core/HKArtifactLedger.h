@@ -72,10 +72,6 @@ typedef struct {
     bool require_predecessor_match;
     void *required_predecessor;
 
-    // Adapter hint for the shared relocating engine's artifact kind/effect.
-    // It is only meaningful to that engine and is reset by the core per hook.
-    bool static_continuation;
-
     // A real mutation whose artifact could not be recorded is not safely
     // classifiable as complete; the core upgrades that commit to UNKNOWN.
     bool record_failed;

@@ -30,13 +30,15 @@ static hk_engine_capabilities_t reloc_describe(void) {
     // The page is obtained and sealed during preparation; only the entry is
     // changed during commit. Keeping the phases separate is what lets the
     // router honor a no-dynamic-memory request before any target mutation.
-    caps.prepare_effects = HK_EFFECT_EXECUTABLE_ALLOCATION;
+    caps.prepare_effects = HK_EFFECT_EXECUTABLE_ALLOCATION |
+                           HK_EFFECT_STATIC_CONTINUATION_USE;
     // The continuation artifact is published with the commit report, so
     // retain the resource effect in this upper bound as well as the target
     // mutation. The prepare declaration is what makes pre-commit routing
     // constraints enforceable.
     caps.commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION |
-                          HK_EFFECT_EXECUTABLE_ALLOCATION;
+                          HK_EFFECT_EXECUTABLE_ALLOCATION |
+                          HK_EFFECT_STATIC_CONTINUATION_USE;
     return caps;
 }
 
@@ -127,17 +129,14 @@ static hk_prepare_result_t reloc_prepare_one_ctx_status(void *engine_ctx,
         return HK_PREPARE_FAILED;
     }
 
-    out_diag->observed_effects = ctx->static_continuation
+    // Keep the caller's callable pointer, including PAC, separate from the
+    // stripped branch destination used to emit instructions.
+    plan->replacement = (uintptr_t)spec->replacement;
+    out_diag->observed_effects = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
         ? HK_EFFECT_STATIC_CONTINUATION_USE
         : HK_EFFECT_EXECUTABLE_ALLOCATION;
     *out_prepared = plan;
     return HK_PREPARE_OK;
-}
-
-static void reloc_fill_continuation(const hk_reloc_engine_ctx_t *ctx,
-                                    const hk_reloc_plan_t *plan,
-                                    hk_continuation_info_t *out) {
-    hk_reloc_describe_continuation(plan, ctx->static_continuation, out);
 }
 
 static hk_verify_result_t reloc_inspect_continuation(
@@ -154,7 +153,7 @@ static hk_verify_result_t reloc_inspect_continuation(
             "relocating-inline continuation inspection received invalid state";
         return HK_VERIFY_FAILED;
     }
-    reloc_fill_continuation(ctx, (const hk_reloc_plan_t *)prepared, out_info);
+    hk_reloc_describe_continuation((const hk_reloc_plan_t *)prepared, out_info);
     return HK_VERIFY_OK;
 }
 
@@ -167,16 +166,16 @@ static hk_mutation_state_t reloc_commit_one_ctx(void *engine_ctx,
     if (!ctx || !prepared) {
         return HK_MUTATION_NONE;
     }
-    const hk_reloc_plan_t *plan = (const hk_reloc_plan_t *)prepared;
-    if (sink) {
-        sink->static_continuation = ctx->static_continuation;
-    }
+    hk_reloc_plan_t *plan = prepared;
     hk_mutation_state_t state =
         hk_reloc_commit(plan, ctx->write, ctx->write_ctx,
                         ctx->free_page, ctx->seam_ctx, sink);
-    if (state == HK_MUTATION_COMPLETE && sink) {
-        sink->published_original = (void *)hk_pac_make_callable(plan->original_entry);
-        reloc_fill_continuation(ctx, plan, &sink->continuation);
+    if (sink) {
+        if (state == HK_MUTATION_COMPLETE) {
+            sink->published_original = (void *)hk_pac_make_callable(plan->original_entry);
+        }
+        // Override the core's cached prepared description even after reclaim.
+        hk_reloc_describe_continuation(plan, &sink->continuation);
         sink->has_continuation = true;
     }
     return state;

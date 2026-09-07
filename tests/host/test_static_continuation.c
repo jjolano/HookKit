@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "../../src/core/HKPlanInternal.h"
+#include "../../src/core/HKOwnership.h"
 #include "../../src/core/HKReportInternal.h"
 #include "../../src/core/HKRuntimeInternal.h"
 #include "../../src/engines/HKRelocInlineVtable.h"
@@ -21,6 +22,7 @@
 #define A64_NOP 0xD503201Fu
 #define A64_RET 0xD65F03C0u
 #define SLOTS   4u
+#define SLOT_BYTES 16384u
 
 // ---- pool-backed seams --------------------------------------------------
 //
@@ -35,39 +37,68 @@ typedef struct {
     unsigned seals;
     unsigned releases;
     bool sealed_before_any_release;
+    bool fallback;
+    bool refuse_alloc;
+    bool refuse_seal;
+    bool refuse_write;
+    uint8_t *dynamic_page;
 } pool_seam_t;
 
-static uintptr_t pool_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t pool_alloc(void *ctx, size_t size, uintptr_t near,
+                             hk_artifact_mapping_t *mapping) {
     pool_seam_t *p = ctx;
+    if (p->refuse_alloc) return 0;
     uintptr_t slot = hk_static_pool_claim(&p->pool, size, near);
-    if (slot) p->claims++;
+    if (slot) {
+        p->claims++;
+        mapping->kind = HK_MAPPING_STATIC_HOOKKIT_SECTION;
+        mapping->base = slot;
+        mapping->size = p->pool.slot_size;
+    } else if (p->fallback) {
+        p->dynamic_page = aligned_alloc(SLOT_BYTES, SLOT_BYTES);
+        if (!p->dynamic_page) return 0;
+        slot = (uintptr_t)p->dynamic_page;
+        mapping->kind = HK_MAPPING_ANONYMOUS;
+        mapping->base = slot;
+        mapping->size = SLOT_BYTES;
+    }
     return slot;   // on device: also make the slot writable
 }
 static bool pool_seal(void *ctx, uintptr_t slot, size_t size) {
     pool_seam_t *p = ctx; (void)slot; (void)size;
     p->seals++;
-    return true;   // on device: restore the slot to executable
+    return !p->refuse_seal;   // on device: restore the slot to executable
 }
 static void pool_free(void *ctx, uintptr_t slot, size_t size) {
     pool_seam_t *p = ctx; (void)size;
     p->releases++;
-    hk_static_pool_release(&p->pool, slot);
+    if (hk_static_pool_contains(&p->pool, slot)) {
+        hk_static_pool_release(&p->pool, slot);
+    } else {
+        assert(slot == (uintptr_t)p->dynamic_page);
+        free(p->dynamic_page);
+        p->dynamic_page = NULL;
+    }
 }
 static bool pool_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
-    (void)ctx;
+    pool_seam_t *p = ctx;
+    if (p->refuse_write) return false;
     memcpy((void *)address, data, size);
     return true;
 }
 
 static void pool_seam_init(pool_seam_t *p) {
     memset(p, 0, sizeof(*p));
-    p->region = aligned_alloc(16, HK_RELOC_PAGE_BYTES * SLOTS);
+    p->region = aligned_alloc(SLOT_BYTES, SLOT_BYTES * SLOTS);
     assert(p->region);
-    memset(p->region, 0, HK_RELOC_PAGE_BYTES * SLOTS);
+    memset(p->region, 0, SLOT_BYTES * SLOTS);
     assert(hk_static_pool_init(&p->pool, (uintptr_t)p->region,
-                               HK_RELOC_PAGE_BYTES, SLOTS));
+                               SLOT_BYTES, SLOTS));
 }
-static void pool_seam_free(pool_seam_t *p) { free(p->region); p->region = NULL; }
+static void pool_seam_free(pool_seam_t *p) {
+    free(p->region); p->region = NULL;
+    free(p->dynamic_page); p->dynamic_page = NULL;
+}
 
 static hk_reloc_engine_ctx_t static_ctx(pool_seam_t *p) {
     hk_reloc_engine_ctx_t c;
@@ -75,7 +106,6 @@ static hk_reloc_engine_ctx_t static_ctx(pool_seam_t *p) {
     c.alloc = pool_alloc; c.seal = pool_seal; c.free_page = pool_free;
     c.seam_ctx = p;
     c.write = pool_write; c.write_ctx = p;
-    c.static_continuation = true;
     return c;
 }
 
@@ -165,41 +195,56 @@ static void test_pool_rejects_bad_input_and_stray_releases(void) {
 
 // ---- the static engine --------------------------------------------------
 
-static void test_static_continuation_allocates_nothing(void) {
+static void test_backing_metadata(bool static_route, bool exhaust) {
+    hk_ownership_reset_for_testing();
     const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
     uint32_t *fn = make_fn(body, 5);
     uintptr_t target = (uintptr_t)fn;
 
     pool_seam_t p; pool_seam_init(&p);
+    p.fallback = !static_route;
+    if (exhaust) {
+        for (unsigned i = 0; i < SLOTS; i++)
+            assert(hk_static_pool_claim(&p.pool, HK_RELOC_PAGE_BYTES, target));
+    }
     hk_reloc_engine_ctx_t ectx = static_ctx(&p);
+    const hk_engine_vtable_t *vtable = static_route
+        ? hk_static_inline_vtable() : hk_reloc_inline_vtable();
+    hk_effects_t effect = exhaust ? HK_EFFECT_EXECUTABLE_ALLOCATION : HK_EFFECT_STATIC_CONTINUATION_USE;
+    hk_mapping_kind_t kind = exhaust ? HK_MAPPING_ANONYMOUS : HK_MAPPING_STATIC_HOOKKIT_SECTION;
 
     hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
-    assert(hk_runtime_register_engine_with_context(rt, hk_static_inline_vtable(), &ectx));
+    assert(hk_runtime_register_engine_with_context(rt, vtable, &ectx));
     assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
 
     // The request that the DYNAMIC engine is refused for: a callable original
     // with no new executable memory. This is the whole point of the milestone.
     hk_hook_spec_t spec = address_spec("h.static", target, (void *)(target + 0x1000));
-    spec.continuation_policy = HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY;
+    spec.continuation_policy = static_route ? HK_CONTINUATION_NO_DYNAMIC_EXECUTABLE_MEMORY : HK_CONTINUATION_ANY;
 
     hk_hook_t *hook = NULL;
     assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
     assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
-    assert(hook->matched_engine == hk_static_inline_vtable());   // eligible now
+    assert(hook->matched_engine == vtable);
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_PREPARED);
-    assert(hook->result.declared_prepare_effects == HK_EFFECT_STATIC_CONTINUATION_USE);
-    assert(hook->result.observed_prepare_effects == HK_EFFECT_STATIC_CONTINUATION_USE);
+    assert(hook->result.declared_prepare_effects == vtable->describe().prepare_effects);
+    assert(hook->result.observed_prepare_effects == effect);
+    assert(hook->result.continuation.mapping_kind == kind);
+    assert(hook->result.continuation.mapping_size == SLOT_BYTES);
+    hk_continuation_info_t prepared = hook->result.continuation;
     // A slot was taken from the fixed budget -- not a page from the system.
-    assert(p.claims == 1 && p.seals == 1);
-    assert(hk_static_pool_free_count(&p.pool) == SLOTS - 1);
+    assert(p.claims == (exhaust ? 0u : 1u) && p.seals == 1);
+    assert(hk_static_pool_free_count(&p.pool) == (exhaust ? 0 : SLOTS - 1));
 
     hk_report_t *report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
     assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
-    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_STATIC);
-    assert(!hook->result.continuation.executable_memory_allocated);
+    assert(hook->result.continuation.kind == (exhaust ? HK_CONTINUATION_KIND_DYNAMIC : HK_CONTINUATION_KIND_STATIC));
+    assert(hook->result.continuation.executable_memory_allocated == exhaust);
+    assert(hook->result.observed_commit_effects == (effect | HK_EFFECT_TARGET_TEXT_MUTATION));
+    assert(memcmp(&prepared, &hook->result.continuation, sizeof(prepared)) == 0);
     assert(fn[0] != A64_NOP);
 
     // The artifacts say the same thing the capabilities did: a text patch, and
@@ -207,6 +252,16 @@ static void test_static_continuation_allocates_nothing(void) {
     hk_artifact_snapshot_t *snap = NULL;
     assert(hk_report_copy_artifacts(report, &snap) == HK_STATUS_OK);
     assert(hk_artifact_snapshot_count(snap) == 2);
+    hk_artifact_t t, a;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &t) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_copy_at(snap, 1, &a) == HK_STATUS_OK);
+    assert(t.kind == (exhaust ? HK_ARTIFACT_TRAMPOLINE : HK_ARTIFACT_STATIC_CONTINUATION));
+    assert(t.effects == effect && t.size == HK_RELOC_PAGE_BYTES);
+    assert(t.mapping.kind == kind && t.mapping.base == t.address && t.mapping.size == SLOT_BYTES);
+    assert(t.mapping.base == prepared.mapping_base && t.mapping.size == prepared.mapping_size);
+    assert(t.mapping.mapping_id.high == prepared.mapping_id.high && t.mapping.mapping_id.low == prepared.mapping_id.low);
+    assert(t.mapping.protection.read && t.mapping.protection.execute && !t.mapping.protection.write);
+    assert(a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH && a.replacement_pointer == spec.replacement);
 
     hk_artifact_snapshot_release(snap);
     hk_report_release(report);
@@ -214,7 +269,7 @@ static void test_static_continuation_allocates_nothing(void) {
     hk_runtime_release(rt);
     pool_seam_free(&p);
     free(fn);
-    printf("  static-continuation-allocates-nothing: PASS\n");
+    printf("  backing-metadata static-route=%d exhausted=%d: PASS\n", static_route, exhaust);
 }
 
 // The two vtables differ in exactly one observable way, and it is the routing
@@ -228,7 +283,6 @@ static void test_static_is_eligible_where_dynamic_is_not(void) {
     hk_reloc_engine_ctx_t sctx = static_ctx(&p);
     hk_reloc_engine_ctx_t dctx = static_ctx(&p);   // same seams; only the
                                                    // DECLARATION differs
-    dctx.static_continuation = false;
 
     hk_runtime_t *rt = NULL; hk_plan_t *plan = NULL;
     assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
@@ -351,11 +405,82 @@ static void test_pool_contains_bounds(void) {
     printf("  pool-contains-bounds: PASS\n");
 }
 
+static void test_backing_failure_metadata(void) {
+    for (unsigned dynamic = 0; dynamic < 2; dynamic++) {
+        for (unsigned failure = 0; failure < 5; failure++) {
+            uint32_t fn[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+            pool_seam_t p; pool_seam_init(&p);
+            p.fallback = dynamic;
+            if (dynamic) {
+                for (unsigned i = 0; i < SLOTS; i++)
+                    assert(hk_static_pool_claim(&p.pool, HK_RELOC_PAGE_BYTES, 0));
+            }
+            p.refuse_alloc = failure == 0;
+            p.refuse_seal = failure == 1;
+            p.refuse_write = failure == 2 || failure == 3;
+            hk_reloc_plan_t plan;
+            hk_reloc_status_t status = hk_reloc_prepare((uintptr_t)fn, (uintptr_t)fn + 0x1000,
+                NULL, 0, pool_alloc, pool_seal, pool_free, &p, &plan);
+            hk_effects_t effect = dynamic ? HK_EFFECT_EXECUTABLE_ALLOCATION : HK_EFFECT_STATIC_CONTINUATION_USE;
+            if (failure < 2) {
+                assert(status == HK_RELOC_NO_TRAMPOLINE && !plan.captured);
+                assert(plan.mapping.kind == HK_MAPPING_NONE && plan.trampoline == 0);
+                hk_continuation_info_t info;
+                hk_reloc_describe_continuation(&plan, &info);
+                assert(info.kind == HK_CONTINUATION_KIND_NONE && info.mapping_size == 0);
+                assert(p.releases == (failure == 1 ? 1u : 0u));
+                assert(hk_static_pool_free_count(&p.pool) == (dynamic ? 0 : SLOTS));
+                assert(!p.dynamic_page && fn[0] == A64_NOP);
+            } else {
+                assert(status == HK_RELOC_OK);
+                hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+                assert(ledger);
+                // An unavailable ledger must not turn a completed write into
+                // a clean refusal. The core checks record_failed separately.
+                hk_artifact_sink_t sink = {.ledger = failure == 4 ? NULL : ledger};
+                assert(hk_reloc_commit(&plan, pool_write, &p,
+                    failure == 3 ? NULL : pool_free, &p, &sink) ==
+                    (failure == 4 ? HK_MUTATION_COMPLETE : HK_MUTATION_NONE));
+                assert(p.releases == (failure == 2 ? 1u : 0u));
+                if (failure == 2) {
+                    hk_continuation_info_t info;
+                    hk_reloc_describe_continuation(&plan, &info);
+                    assert(!plan.captured && plan.trampoline == 0);
+                    assert(info.kind == HK_CONTINUATION_KIND_NONE && info.address == 0 && info.mapping_size == 0);
+                }
+                assert(hk_artifact_ledger_count(ledger) == (failure == 3 ? 1u : 0u));
+                if (failure == 3) {
+                    hk_artifact_snapshot_t *snapshot = NULL;
+                    assert(hk_artifact_snapshot_from_ledger(ledger, &snapshot) == HK_STATUS_OK);
+                    hk_artifact_t t;
+                    assert(hk_artifact_snapshot_copy_at(snapshot, 0, &t) == HK_STATUS_OK);
+                    assert(t.effects == effect && t.mapping.size == SLOT_BYTES);
+                    assert(t.kind == (dynamic ? HK_ARTIFACT_TRAMPOLINE : HK_ARTIFACT_STATIC_CONTINUATION));
+                    assert(t.mapping.kind == plan.mapping.kind && t.mapping.base == plan.mapping.base);
+                    assert(t.replacement_pointer == NULL && fn[0] == A64_NOP);
+                    hk_artifact_snapshot_release(snapshot);
+                }
+                if (failure == 4) {
+                    assert(sink.record_failed);
+                    assert(sink.observed_effects == 0); // no ledger accepted a record
+                    assert(fn[0] != A64_NOP);
+                }
+                hk_artifact_ledger_destroy(ledger);
+            }
+            pool_seam_free(&p);
+        }
+    }
+    puts("  backing-failure-metadata: PASS");
+}
+
 int main(void) {
     test_pool_claim_release_and_exhaustion();
     test_pool_rejects_bad_input_and_stray_releases();
     test_pool_contains_bounds();
-    test_static_continuation_allocates_nothing();
+    test_backing_metadata(true, false);
+    test_backing_metadata(false, false);
+    test_backing_metadata(false, true);
+    test_backing_failure_metadata();
     test_static_is_eligible_where_dynamic_is_not();
     test_pool_exhaustion_fails_cleanly();
     test_failed_preparation_returns_its_slot();

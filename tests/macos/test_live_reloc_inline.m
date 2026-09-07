@@ -10,6 +10,7 @@
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "../../src/internal/HKPointerAuth.h"
 #include "../../src/engines/HKRelocInlineEngine.h"
@@ -30,9 +31,16 @@ static bool native_write(void *ctx, uintptr_t address,
 // through the trampoline. Uses the real native page seams
 // (vm_allocate/vm_protect), which needs live executable allocation, not a buffer stand-in --
 // the reason this runs as its own binary rather than inside the suite.
-static uintptr_t live_reloc_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t live_reloc_alloc(void *ctx, size_t size, uintptr_t near,
+                                   hk_artifact_mapping_t *mapping) {
     (void)ctx;
-    return hk_native_reloc_alloc(size, near);
+    uintptr_t page = hk_native_reloc_alloc(size, near);
+    if (page) {
+        mapping->kind = HK_MAPPING_ANONYMOUS;
+        mapping->base = page;
+        mapping->size = (size_t)getpagesize();
+    }
+    return page;
 }
 
 static bool live_reloc_seal(void *ctx, uintptr_t page, size_t size) {

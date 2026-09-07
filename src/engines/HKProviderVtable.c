@@ -103,9 +103,11 @@ static const provider_profile_t g_ellekit_profile = {
     .prepare_effects = HK_EFFECT_PROVIDER_IMAGE_LOAD |
                        HK_EFFECT_PROVIDER_ACTIVATION |
                        HK_EFFECT_EXECUTABLE_ALLOCATION |
+                       HK_EFFECT_STATIC_CONTINUATION_USE |
                        HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
     .commit_effects = HK_EFFECT_TARGET_TEXT_MUTATION |
                       HK_EFFECT_EXECUTABLE_ALLOCATION |
+                      HK_EFFECT_STATIC_CONTINUATION_USE |
                       HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
     .activation_happens_at_commit = false,
     .publishes_original_before_activation = false,
@@ -411,7 +413,8 @@ static hk_prepare_result_t provider_prepare(void *engine_ctx,
         return HK_PREPARE_FAILED;
     }
     if (hybrid) {
-        out_diag->observed_effects |= HK_EFFECT_EXECUTABLE_ALLOCATION;
+        out_diag->observed_effects |= prepared->continuation.mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
+            ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
     }
     *out_prepared = prepared;
     return HK_PREPARE_OK;
@@ -489,10 +492,7 @@ static void provider_record(hk_artifact_sink_t *sink,
         artifact.mapping.struct_size = sizeof(artifact.mapping);
         artifact.mapping.struct_version = HK_ABI_VERSION_3_0;
         if (prepared && prepared->hybrid) {
-            artifact.mapping.kind = HK_MAPPING_ANONYMOUS;
-            artifact.mapping.mapping_id = prepared->continuation.mapping_id;
-            artifact.mapping.base = prepared->continuation.trampoline;
-            artifact.mapping.size = prepared->continuation.trampoline_size;
+            artifact.mapping = prepared->continuation.mapping;
             artifact.fully_inspected = true;
         } else {
             artifact.mapping.kind = HK_MAPPING_PROVIDER_OWNED;
@@ -514,9 +514,10 @@ static void provider_record_hybrid_continuation(
     memset(&artifact, 0, sizeof(artifact));
     artifact.struct_size = sizeof(artifact);
     artifact.struct_version = HK_ABI_VERSION_3_0;
-    artifact.kind = HK_ARTIFACT_TRAMPOLINE;
+    const bool is_static = prepared->continuation.mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION;
+    artifact.kind = is_static ? HK_ARTIFACT_STATIC_CONTINUATION : HK_ARTIFACT_TRAMPOLINE;
     artifact.state = HK_ARTIFACT_COMMITTED;
-    artifact.effects = HK_EFFECT_EXECUTABLE_ALLOCATION;
+    artifact.effects = is_static ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
     artifact.engine_id.data = profile->engine_id;
     artifact.engine_id.length = strlen(profile->engine_id);
     artifact.mechanism_id.data = "hookkit-provider-hybrid";
@@ -527,12 +528,7 @@ static void provider_record_hybrid_continuation(
         hk_pac_make_callable(prepared->continuation.original_entry);
     artifact.jump_back_destination = prepared->target +
                                      prepared->continuation.patch_size;
-    artifact.mapping.struct_size = sizeof(artifact.mapping);
-    artifact.mapping.struct_version = HK_ABI_VERSION_3_0;
-    artifact.mapping.kind = HK_MAPPING_ANONYMOUS;
-    artifact.mapping.mapping_id = prepared->continuation.mapping_id;
-    artifact.mapping.base = prepared->continuation.trampoline;
-    artifact.mapping.size = prepared->continuation.trampoline_size;
+    artifact.mapping = prepared->continuation.mapping;
     artifact.current_protection.read = true;
     artifact.current_protection.execute = true;
     artifact.fully_inspected = true;
@@ -564,7 +560,7 @@ static void provider_fill_hybrid_continuation(
     if (!sink || !prepared || !prepared->hybrid) {
         return;
     }
-    hk_reloc_describe_continuation(&prepared->continuation, false,
+    hk_reloc_describe_continuation(&prepared->continuation,
                                    &sink->continuation);
     sink->has_continuation = true;
 }
@@ -654,7 +650,9 @@ static hk_mutation_state_t provider_commit(void *engine_ctx,
                     HK_EFFECT_TARGET_TEXT_MUTATION, prepared, spec, original);
     if (original) {
         provider_record(sink, profile, HK_ARTIFACT_ORIGINAL_POINTER,
-                        HK_EFFECT_EXECUTABLE_ALLOCATION, prepared, spec, original);
+                        hybrid && prepared->continuation.mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
+                            ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION,
+                        prepared, spec, original);
     }
     if (sink) {
         sink->published_original = publish_original ? original : NULL;
@@ -764,7 +762,7 @@ static hk_verify_result_t provider_inspect_continuation(
     if (!prepared->hybrid) {
         return HK_VERIFY_UNAVAILABLE;
     }
-    hk_reloc_describe_continuation(&prepared->continuation, false, out_info);
+    hk_reloc_describe_continuation(&prepared->continuation, out_info);
     return HK_VERIFY_OK;
 }
 

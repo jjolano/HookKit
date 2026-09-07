@@ -131,28 +131,47 @@ static int test_provider(const char *engine_id, int_function_t target,
 
     CHECK(engine_id, "prepare", hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     CHECK(engine_id, "prepare result", hk_hook_copy_result(hook, &result) == HK_STATUS_OK &&
-          result.outcome == HK_OUTCOME_PREPARED &&
-          result.observed_prepare_effects == prepare_effects);
+          result.outcome == HK_OUTCOME_PREPARED);
     CHECK(engine_id, "prepare is non-mutating", target(1) == baseline);
+    hk_continuation_info_t prepared = result.continuation;
+    bool static_backing = hookkit_continuation &&
+        prepared.mapping_kind == HK_MAPPING_STATIC_HOOKKIT_SECTION;
+    hk_effects_t backing_effect = static_backing
+        ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
     if (hookkit_continuation) {
         CHECK(engine_id, "prepared continuation",
-              result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC &&
-              result.continuation.mapping_kind == HK_MAPPING_ANONYMOUS &&
+              result.continuation.kind == (static_backing
+                  ? HK_CONTINUATION_KIND_STATIC : HK_CONTINUATION_KIND_DYNAMIC) &&
+              result.continuation.mapping_kind == (static_backing
+                  ? HK_MAPPING_STATIC_HOOKKIT_SECTION : HK_MAPPING_ANONYMOUS) &&
+              result.continuation.executable_memory_allocated == !static_backing &&
+              result.continuation.mapping_base && result.continuation.mapping_size >= 128 &&
+              result.continuation.address &&
+              (result.continuation.mapping_id.high || result.continuation.mapping_id.low) &&
+              result.continuation.mapping_protection == 5u &&
               result.continuation.relocated_instruction_count == 4 &&
               result.continuation.fully_inspected);
+        prepare_effects |= backing_effect;
+        commit_effects |= backing_effect;
     }
+    CHECK(engine_id, "prepare effects", result.observed_prepare_effects == prepare_effects);
 
     CHECK(engine_id, "commit", hk_plan_commit(plan, &report) == HK_STATUS_OK && report);
     CHECK(engine_id, "commit result", hk_hook_copy_result(hook, &result) == HK_STATUS_OK &&
           result.outcome == HK_OUTCOME_ACTIVE && result.mutation == HK_MUTATION_COMPLETE &&
           result.observed_commit_effects == commit_effects && !result.verified &&
-          result.original_available && result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC &&
+          result.original_available && result.continuation.kind == (static_backing
+              ? HK_CONTINUATION_KIND_STATIC : HK_CONTINUATION_KIND_DYNAMIC) &&
           result.continuation.mapping_kind == (hookkit_continuation
-              ? HK_MAPPING_ANONYMOUS : HK_MAPPING_PROVIDER_OWNED) &&
-          result.continuation.executable_memory_allocated &&
+              ? prepared.mapping_kind : HK_MAPPING_PROVIDER_OWNED) &&
+          result.continuation.executable_memory_allocated == !static_backing &&
           !result.continuation.mechanically_reversible &&
           !result.continuation.safe_to_reverse_after_activation &&
           result.continuation.fully_inspected == hookkit_continuation);
+    if (hookkit_continuation) {
+        CHECK(engine_id, "continuation preserved across commit",
+              memcmp(&prepared, &result.continuation, sizeof(prepared)) == 0);
+    }
     CHECK(engine_id, "replacement", target(1) == hooked);
     void *original = hk_original_slot_load(hk_hook_original_slot(hook));
     CHECK(engine_id, "original", original && ((int_function_t)original)(1) == baseline);
@@ -162,10 +181,29 @@ static int test_provider(const char *engine_id, int_function_t target,
     CHECK(engine_id, "target artifact", snapshot_has(artifacts,
           HK_ARTIFACT_TARGET_TEXT_PATCH, HK_EFFECT_TARGET_TEXT_MUTATION, engine_id));
     CHECK(engine_id, "original artifact", snapshot_has(artifacts,
-          HK_ARTIFACT_ORIGINAL_POINTER, HK_EFFECT_EXECUTABLE_ALLOCATION, engine_id));
+          HK_ARTIFACT_ORIGINAL_POINTER, backing_effect, engine_id));
     if (hookkit_continuation) {
         CHECK(engine_id, "HookKit trampoline artifact", snapshot_has(artifacts,
-              HK_ARTIFACT_TRAMPOLINE, HK_EFFECT_EXECUTABLE_ALLOCATION, engine_id));
+              static_backing ? HK_ARTIFACT_STATIC_CONTINUATION : HK_ARTIFACT_TRAMPOLINE,
+              backing_effect, engine_id));
+        for (size_t i = 0; i < hk_artifact_snapshot_count(artifacts); i++) {
+            hk_artifact_t a;
+            CHECK(engine_id, "artifact read", hk_artifact_snapshot_copy_at(artifacts, i, &a) == HK_STATUS_OK);
+            if (a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH) {
+                CHECK(engine_id, "target replacement", a.replacement_pointer == spec.replacement);
+                continue;
+            }
+            CHECK(engine_id, "artifact backing matches prepared continuation",
+                  a.effects == backing_effect && a.mapping.kind == prepared.mapping_kind &&
+                  a.mapping.base == prepared.mapping_base && a.mapping.size == prepared.mapping_size &&
+                  a.mapping.mapping_id.high == prepared.mapping_id.high &&
+                  a.mapping.mapping_id.low == prepared.mapping_id.low &&
+                  a.mapping.protection.read && a.mapping.protection.execute && !a.mapping.protection.write &&
+                  a.continuation_address == prepared.address);
+        }
+        printf("HookKit HK provider %s: backing=%d mapping=%d size=%zu executable_memory_allocated=%d\n",
+               engine_id, prepared.kind, prepared.mapping_kind, prepared.mapping_size,
+               prepared.executable_memory_allocated);
     }
     if (strcmp(engine_id, "provider-dobby") == 0) {
         CHECK(engine_id, "activation artifact", snapshot_has(artifacts,
@@ -205,9 +243,7 @@ int main(void) {
                          ellekit_replacement, 14, 71,
                          HK_EFFECT_PROVIDER_IMAGE_LOAD |
                              HK_EFFECT_PROVIDER_ACTIVATION |
-                             HK_EFFECT_EXECUTABLE_ALLOCATION |
                              HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
-                         HK_EFFECT_TARGET_TEXT_MUTATION |
-                             HK_EFFECT_EXECUTABLE_ALLOCATION,
+                         HK_EFFECT_TARGET_TEXT_MUTATION,
                          3, true);
 }

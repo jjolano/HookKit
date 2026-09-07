@@ -48,8 +48,15 @@ static hk_reloc_status_t reloc_prepare(uintptr_t target, uintptr_t replacement,
     // The page comes first because the entry patch's SIZE depends on where it
     // landed: a thunk within a B's reach makes the patch 4 bytes, otherwise it
     // has to be the 16-byte form. Nothing about the target is touched here.
-    const uintptr_t page = alloc(seam_ctx, HK_RELOC_PAGE_BYTES, target);
-    if (page == 0 || (page & 3u) != 0) {
+    hk_artifact_mapping_t mapping = {0};
+    const uintptr_t page = alloc(seam_ctx, HK_RELOC_PAGE_BYTES, target, &mapping);
+    if (page == 0 || (page & 3u) != 0 ||
+        (mapping.kind != HK_MAPPING_STATIC_HOOKKIT_SECTION &&
+         mapping.kind != HK_MAPPING_ANONYMOUS) ||
+        mapping.base == 0 || mapping.base > page ||
+        mapping.size < HK_RELOC_PAGE_BYTES ||
+        mapping.size > UINTPTR_MAX - mapping.base ||
+        page - mapping.base > mapping.size - HK_RELOC_PAGE_BYTES) {
         // A misaligned page is still a page: give it back rather than drop it.
         return reloc_release_and_fail(free_page, seam_ctx, page, HK_RELOC_NO_TRAMPOLINE);
     }
@@ -167,9 +174,14 @@ static hk_reloc_status_t reloc_prepare(uintptr_t target, uintptr_t replacement,
     }
 
     out_plan->address = target;
+    out_plan->replacement = replacement;
     out_plan->trampoline = page;
     out_plan->trampoline_size = HK_RELOC_PAGE_BYTES;
-    out_plan->mapping_id = hk_id_generate();
+    out_plan->mapping = mapping;
+    out_plan->mapping.struct_size = sizeof(mapping);
+    out_plan->mapping.struct_version = HK_ABI_VERSION_3_0;
+    out_plan->mapping.mapping_id = hk_id_generate();
+    out_plan->mapping.protection = (hk_vm_protection_t){.read = true, .execute = true};
     // The ORIGINAL is the body, not the page: a caller invoking the page front
     // would hit the thunk and land back on the replacement, which is a loop.
     out_plan->original_entry = body_addr;
@@ -202,7 +214,6 @@ hk_reloc_status_t hk_reloc_prepare_continuation(
 }
 
 void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
-                                    bool static_continuation,
                                     hk_continuation_info_t *out_info) {
     if (!plan || !out_info) {
         return;
@@ -210,15 +221,16 @@ void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
     memset(out_info, 0, sizeof(*out_info));
     out_info->struct_size = sizeof(*out_info);
     out_info->struct_version = HK_ABI_VERSION_3_0;
+    if (!plan->captured) return;
+    const bool static_continuation = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION;
     out_info->kind = static_continuation
         ? HK_CONTINUATION_KIND_STATIC : HK_CONTINUATION_KIND_DYNAMIC;
     out_info->address = hk_pac_make_callable(plan->original_entry);
     out_info->jump_back_destination = plan->address + plan->patch_size;
-    out_info->mapping_id = plan->mapping_id;
-    out_info->mapping_kind = static_continuation
-        ? HK_MAPPING_STATIC_HOOKKIT_SECTION : HK_MAPPING_ANONYMOUS;
-    out_info->mapping_base = plan->trampoline;
-    out_info->mapping_size = plan->trampoline_size;
+    out_info->mapping_id = plan->mapping.mapping_id;
+    out_info->mapping_kind = plan->mapping.kind;
+    out_info->mapping_base = plan->mapping.base;
+    out_info->mapping_size = plan->mapping.size;
     out_info->mapping_protection = 5u;
     out_info->executable_memory_allocated = !static_continuation;
     out_info->relocated_instruction_count = plan->displaced_count;
@@ -228,7 +240,7 @@ void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
     out_info->fully_inspected = true;
 }
 
-hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
+hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
                                     hk_reloc_write_fn write, void *write_ctx,
                                     hk_reloc_free_fn free_page, void *seam_ctx,
                                     hk_artifact_sink_t *sink) {
@@ -256,17 +268,23 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         // one for -- the target was never written.
         if (free_page && plan->trampoline) {
             free_page(seam_ctx, plan->trampoline, plan->trampoline_size);
+            // The prepared description must not advertise reclaimed storage.
+            plan->captured = false;
+            plan->trampoline = 0;
+            plan->trampoline_size = 0;
+            plan->original_entry = 0;
+            memset(&plan->mapping, 0, sizeof(plan->mapping));
         } else if (sink && plan->trampoline) {
             // No way to reclaim it: it stays, so it must stay ACCOUNTED FOR.
             hk_artifact_t t;
             memset(&t, 0, sizeof(t));
             t.struct_size = sizeof(t);
             t.struct_version = HK_ABI_VERSION_3_0;
-            t.kind = sink->static_continuation
+            t.kind = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
                 ? HK_ARTIFACT_STATIC_CONTINUATION
                 : HK_ARTIFACT_TRAMPOLINE;
             t.state = HK_ARTIFACT_COMMITTED;
-            t.effects = sink->static_continuation
+            t.effects = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
                 ? HK_EFFECT_STATIC_CONTINUATION_USE
                 : HK_EFFECT_EXECUTABLE_ALLOCATION;
             t.engine_id.data = "inline-relocating";
@@ -275,14 +293,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
             t.size = plan->trampoline_size;
             t.continuation_address = hk_pac_make_callable(plan->original_entry);
             t.jump_back_destination = plan->address + plan->patch_size;
-            t.mapping.kind = sink->static_continuation
-                ? HK_MAPPING_STATIC_HOOKKIT_SECTION
-                : HK_MAPPING_ANONYMOUS;
-            t.mapping.struct_size = sizeof(t.mapping);
-            t.mapping.struct_version = HK_ABI_VERSION_3_0;
-            t.mapping.mapping_id = plan->mapping_id;
-            t.mapping.base = plan->trampoline;
-            t.mapping.size = plan->trampoline_size;
+            t.mapping = plan->mapping;
             t.current_protection.read = true;
             t.current_protection.execute = true;
             t.mechanically_reversible = false;
@@ -299,11 +310,11 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         memset(&t, 0, sizeof(t));
         t.struct_size = sizeof(t);
         t.struct_version = HK_ABI_VERSION_3_0;
-        t.kind = sink->static_continuation
+        t.kind = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
             ? HK_ARTIFACT_STATIC_CONTINUATION
             : HK_ARTIFACT_TRAMPOLINE;
         t.state = HK_ARTIFACT_COMMITTED;
-        t.effects = sink->static_continuation
+        t.effects = plan->mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION
             ? HK_EFFECT_STATIC_CONTINUATION_USE
             : HK_EFFECT_EXECUTABLE_ALLOCATION;
         t.engine_id.data = "inline-relocating";
@@ -312,14 +323,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         t.size = plan->trampoline_size;
         t.continuation_address = hk_pac_make_callable(plan->original_entry);
         t.jump_back_destination = plan->address + plan->patch_size;
-        t.mapping.kind = sink->static_continuation
-            ? HK_MAPPING_STATIC_HOOKKIT_SECTION
-            : HK_MAPPING_ANONYMOUS;
-        t.mapping.struct_size = sizeof(t.mapping);
-        t.mapping.struct_version = HK_ABI_VERSION_3_0;
-        t.mapping.mapping_id = plan->mapping_id;
-        t.mapping.base = plan->trampoline;
-        t.mapping.size = plan->trampoline_size;
+        t.mapping = plan->mapping;
         t.current_protection.read = true;
         t.current_protection.execute = true;
         // An executable page cannot be un-allocated safely while a thread may
@@ -344,7 +348,7 @@ hk_mutation_state_t hk_reloc_commit(const hk_reloc_plan_t *plan,
         a.original_bytes.inline_bytes.size = plan->patch_size;
         a.original_bytes.length = plan->patch_size;
         a.original_pointer = (void *)hk_pac_make_callable(plan->original_entry);
-        a.replacement_pointer = (void *)plan->address;
+        a.replacement_pointer = (void *)plan->replacement;
         // The entry bytes are held and can be put back. That restores dispatch
         // but does NOT reclaim the page -- which is why the two artifacts carry
         // different reversibility rather than one verdict for the install.

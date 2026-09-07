@@ -52,7 +52,8 @@ static bool page_protect(static_pool_ctx_t *ctx, vm_prot_t protection) {
                       protection) == KERN_SUCCESS;
 }
 
-static uintptr_t static_pool_alloc(void *opaque, size_t size, uintptr_t near) {
+static uintptr_t static_pool_alloc(void *opaque, size_t size, uintptr_t near,
+                                    hk_artifact_mapping_t *mapping) {
     static_pool_ctx_t *ctx = opaque;
     uintptr_t slot = hk_static_pool_claim(&ctx->pool, size, near);
     if (!slot || !page_protect(ctx, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)) {
@@ -60,6 +61,9 @@ static uintptr_t static_pool_alloc(void *opaque, size_t size, uintptr_t near) {
         return 0;
     }
     ctx->alloc_calls++;
+    mapping->kind = HK_MAPPING_STATIC_HOOKKIT_SECTION;
+    mapping->base = slot;
+    mapping->size = ctx->page_size;
     return slot;
 }
 
@@ -180,6 +184,11 @@ static void test_default_prefers_in_image_pool(void) {
     // base carries no PAC; an arm64e build would strip it first.)
     uintptr_t base = hook->result.continuation.mapping_base;
     assert(base >= sect_lo && base < sect_hi);
+    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_STATIC);
+    assert(hook->result.continuation.mapping_kind == HK_MAPPING_STATIC_HOOKKIT_SECTION);
+    assert(hook->result.continuation.mapping_size == DEVICE_PAGE_BYTES);
+    assert(!hook->result.continuation.executable_memory_allocated);
+    assert(hook->result.observed_prepare_effects == HK_EFFECT_STATIC_CONTINUATION_USE);
 
     hk_report_release(report);
     hk_plan_release(plan);
@@ -210,7 +219,6 @@ int main(void) {
     engine.write = static_pool_write;
     engine.write_ctx = &pool;
     engine.allow_non_atomic_entry_patch = false;
-    engine.static_continuation = true;
 
     hk_runtime_t *runtime = NULL;
     hk_plan_t *plan = NULL;

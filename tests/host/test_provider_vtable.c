@@ -32,6 +32,7 @@ typedef struct {
     unsigned alloc_calls;
     unsigned seal_calls;
     unsigned free_calls;
+    bool static_backing;
 } fake_provider_t;
 
 static void fake_original(void) {}
@@ -84,10 +85,14 @@ static int fake_hook(void *opaque, void *target, void *replacement,
     return 0;
 }
 
-static uintptr_t fake_alloc(void *opaque, size_t size, uintptr_t near) {
+static uintptr_t fake_alloc(void *opaque, size_t size, uintptr_t near,
+                             hk_artifact_mapping_t *mapping) {
     fake_provider_t *fake = opaque;
     (void)near;
     fake->alloc_calls++;
+    mapping->kind = fake->static_backing ? HK_MAPPING_STATIC_HOOKKIT_SECTION : HK_MAPPING_ANONYMOUS;
+    mapping->base = (uintptr_t)fake->page;
+    mapping->size = sizeof(fake->page);
     return size <= sizeof(fake->page) ? (uintptr_t)fake->page : 0;
 }
 
@@ -320,7 +325,7 @@ static void test_gum_activation_and_constraints(void) {
     puts("  gum-activation-and-constraints: PASS");
 }
 
-static void test_ellekit_uses_hookkit_hybrid_continuation(void) {
+static void test_ellekit_uses_hookkit_hybrid_continuation(bool static_backing) {
     fake_provider_t fake = fake_provider();
     hk_provider_engine_ctx_t ctx =
         provider_context(HK_PROVIDER_ELLEKIT, &fake, true, false);
@@ -360,6 +365,7 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(void) {
     reset_test_state();
 
     fake = fake_provider();
+    fake.static_backing = static_backing;
     ctx = provider_context(HK_PROVIDER_ELLEKIT, &fake, true, false);
     runtime = NULL;
     plan = NULL;
@@ -375,11 +381,17 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(void) {
     assert(hook->matched_engine == hk_ellekit_provider_vtable());
     assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
     assert(fake.alloc_calls == 1 && fake.seal_calls == 1);
-    assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_DYNAMIC);
+    assert(hook->result.continuation.kind == (static_backing ? HK_CONTINUATION_KIND_STATIC : HK_CONTINUATION_KIND_DYNAMIC));
     assert(hook->result.continuation.address != 0);
     assert(hook->result.continuation.jump_back_destination ==
            (uintptr_t)fake.entry + 16);
-    assert(hook->result.continuation.mapping_kind == HK_MAPPING_ANONYMOUS);
+    assert(hook->result.continuation.mapping_kind == (static_backing ? HK_MAPPING_STATIC_HOOKKIT_SECTION : HK_MAPPING_ANONYMOUS));
+    assert(hook->result.continuation.mapping_base == (uintptr_t)fake.page);
+    assert(hook->result.continuation.mapping_size == sizeof(fake.page));
+    assert(hook->result.continuation.executable_memory_allocated == !static_backing);
+    hk_effects_t effect = static_backing ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
+    assert(hook->result.observed_prepare_effects ==
+           (HK_EFFECT_PROVIDER_IMAGE_LOAD | HK_EFFECT_PROVIDER_ACTIVATION | HK_EFFECT_UNKNOWN_PROCESS_MUTATION | effect));
     assert(hook->result.continuation.relocated_instruction_count == 4);
     assert(hook->result.continuation.fully_inspected);
 
@@ -397,10 +409,22 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(void) {
            (uintptr_t)fake.visible_original);
     assert(hk_report_copy_artifacts(report, &snapshot) == HK_STATUS_OK);
     assert(hk_artifact_snapshot_count(snapshot) == 3);
-    assert(snapshot_has(snapshot, HK_ARTIFACT_TRAMPOLINE,
-                        HK_EFFECT_EXECUTABLE_ALLOCATION));
+    assert(snapshot_has(snapshot, static_backing ? HK_ARTIFACT_STATIC_CONTINUATION : HK_ARTIFACT_TRAMPOLINE,
+                        effect));
     assert(snapshot_has(snapshot, HK_ARTIFACT_ORIGINAL_POINTER,
-                        HK_EFFECT_EXECUTABLE_ALLOCATION));
+                        effect));
+    assert(hook->result.observed_commit_effects == (HK_EFFECT_TARGET_TEXT_MUTATION | effect));
+    for (size_t i = 0; i < hk_artifact_snapshot_count(snapshot); i++) {
+        hk_artifact_t a;
+        assert(hk_artifact_snapshot_copy_at(snapshot, i, &a) == HK_STATUS_OK);
+        if (a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH) {
+            assert(a.replacement_pointer == spec.replacement);
+        } else {
+            assert(a.mapping.kind == hook->result.continuation.mapping_kind);
+            assert(a.mapping.base == (uintptr_t)fake.page && a.mapping.size == sizeof(fake.page));
+            assert(a.mapping.protection.read && a.mapping.protection.execute && !a.mapping.protection.write);
+        }
+    }
     hk_artifact_snapshot_release(snapshot);
     hk_report_release(report);
     hk_plan_release(plan);
@@ -526,7 +550,8 @@ static void test_substitute_old_lane_lifecycle(void) {
 int main(void) {
     test_dobby_full_lifecycle();
     test_gum_activation_and_constraints();
-    test_ellekit_uses_hookkit_hybrid_continuation();
+    test_ellekit_uses_hookkit_hybrid_continuation(false);
+    test_ellekit_uses_hookkit_hybrid_continuation(true);
     test_stale_and_provider_failure_are_not_retried();
     test_dynamic_continuation_policy_refuses_route();
     test_substitute_old_lane_lifecycle();

@@ -696,7 +696,7 @@ DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swif
 	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
 	device-legacy-facade-smoke device-rebind-adapter-smoke \
 	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
-	device-provider-lifecycle-smoke device-provider-alias-smoke
+	device-provider-lifecycle-smoke device-provider-alias-smoke device-observability
 .PHONY: check-device-smoke-toolchain check-device-canonical-toolchain
 check-device-smoke-toolchain:
 ifeq ($(HOST_OS),Linux)
@@ -722,6 +722,12 @@ device-smoke:
 .PHONY: device-lifecycle-smoke
 device-lifecycle-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_lifecycle_smoke tests/device/device_lifecycle_smoke.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_lifecycle_smoke$(ECHO_END)
+
+DEVICE_OBSERVABILITY_FRAMEWORK_DIR ?= $(CURDIR)/.theos/obj
+.PHONY: device-observability
+device-compile-check: device-observability
+device-observability:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(DEVICE_OBSERVABILITY_FRAMEWORK_DIR) -framework HookKit -lobjc -rpath @executable_path -o $(THEOS_OBJ_DIR)/device_observability tests/device/device_observability.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_observability$(ECHO_END)
 
 .PHONY: device-objc-smoke
 device-objc-smoke:

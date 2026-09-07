@@ -1315,7 +1315,6 @@ hk_status_t hk_runtime_drain_pending(hk_runtime_t *runtime, hk_report_t **out_re
         sink.published_original = NULL;
         sink.has_continuation = false;
         memset(&sink.continuation, 0, sizeof(sink.continuation));
-        sink.static_continuation = false;
         sink.record_failed = false;
         sink.observed_effects = 0;
         size_t artifact_start = hk_artifact_ledger_count(ledger);
@@ -2242,7 +2241,6 @@ static hk_status_t hk_plan_commit_group(
         sink->published_original = NULL;
         sink->has_continuation = hook->has_prepared_continuation;
         sink->continuation = hook->prepared_continuation;
-        sink->static_continuation = false;
         sink->record_failed = false;
         sink->observed_effects = 0;
 
@@ -2475,7 +2473,6 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
     sink.published_original = NULL;    // reset per hook below
     sink.has_continuation = false;
     memset(&sink.continuation, 0, sizeof(sink.continuation));
-    sink.static_continuation = false;
     sink.record_failed = false;
     sink.observed_effects = 0;
 
@@ -2586,7 +2583,6 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
         sink.continuation = hook->prepared_continuation;
         sink.require_predecessor_match = ownership.present;
         sink.required_predecessor = ownership.head_replacement;
-        sink.static_continuation = false;
         sink.record_failed = false;
         sink.observed_effects = 0;
         size_t artifact_start = hk_artifact_ledger_count(ledger);

@@ -34,11 +34,13 @@ typedef struct {
     bool refuse_alloc;
     bool refuse_seal;
     bool refuse_write;
+    bool invalid_mapping;
     unsigned free_calls;
     unsigned write_calls;
 } seam_t;
 
-static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near) {
+static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near,
+                             hk_artifact_mapping_t *mapping) {
     seam_t *s = ctx;
     s->alloc_calls++;
     if (s->refuse_alloc) return 0;
@@ -47,6 +49,10 @@ static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near) {
     assert(s->page);
     memset(s->page, 0, size);
     s->page_size = size;
+    mapping->kind = HK_MAPPING_ANONYMOUS;
+    mapping->base = (uintptr_t)s->page;
+    mapping->size = (size + 15) & ~(size_t)15;
+    if (s->invalid_mapping) mapping->size = size - 1;
     return (uintptr_t)s->page;
 }
 static bool seam_seal(void *ctx, uintptr_t page, size_t size) {
@@ -167,6 +173,10 @@ static void test_prepare_builds_a_trampoline_and_commit_patches(void) {
     assert(a.kind == HK_ARTIFACT_TARGET_TEXT_PATCH);
     assert(a.mechanically_reversible);
     assert(a.original_pointer == (void *)plan.original_entry);
+    assert(a.replacement_pointer == (void *)replacement);
+    assert(t.mapping.kind == HK_MAPPING_ANONYMOUS);
+    assert(t.mapping.base == (uintptr_t)s.page && t.mapping.size == s.page_size);
+    assert(t.mapping.protection.read && t.mapping.protection.execute && !t.mapping.protection.write);
     assert(memcmp(a.original_bytes.inline_bytes.data, body, 4) == 0);
 
     hk_artifact_snapshot_release(snap);
@@ -269,6 +279,15 @@ static void test_seam_refusals(void) {
     assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
                             seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
     assert(fn[0] == A64_NOP);
+
+    // A successful allocation with an invalid extent must be reclaimed before
+    // the engine writes the buffer or advertises a prepared continuation.
+    memset(&s, 0, sizeof(s));
+    s.invalid_mapping = true;
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_NO_TRAMPOLINE);
+    assert(!plan.captured && plan.mapping.kind == HK_MAPPING_NONE);
+    assert(s.free_calls == 1 && s.seal_calls == 0 && !s.page);
 
     // Built but never sealed: unusable, so preparation fails rather than
     // handing back a writable "trampoline" a hook would branch into -- and the
