@@ -323,8 +323,11 @@ jobs:
       # covered automatically, with its own flags (-lobjc, fixture
       # includes) from the single recipe. Modern lanes run on macOS
       # (Xcode clang); the legacy lane runs on Ubuntu (old-ABI toolchain).
-      # Resolve the compiler the same way Theos does (xcrun): passing the
-      # result as a make variable avoids a second shell expansion eating it.
+      # Resolve the compilers the same way Theos does (xcrun): passing the
+      # results as make variables avoids a second shell expansion eating
+      # them. The lane build above already produced the .deb, so extract its
+      # framework into a staging dir for the -F search path (device smokes
+      # link, not just parse, so they need the real built product).
       - name: Compile device smokes (no device needed)
         env:
           MAKE_COMMAND: gmake
@@ -336,11 +339,20 @@ jobs:
             CLANG=$(xcrun -sdk iphoneos -f clang)
             SWIFTC=$(xcrun -sdk iphoneos -f swiftc)
             LD=$(xcrun -sdk iphoneos -f ld)
+            STAGE="$RUNNER_TEMP/hkfw-${{ matrix.flavor }}"
+            rm -rf "$STAGE" && mkdir -p "$STAGE"
+            case "${{ matrix.flavor }}" in
+              rootful-modern) DEB=.theos/release/hookkit-rootful-modern.deb; PAYLOAD=Library/Frameworks/HookKit.framework ;;
+              rootless) DEB=.theos/release/hookkit-rootless.deb; PAYLOAD=var/jb/Library/Frameworks/HookKit.framework ;;
+              roothide) DEB=.theos/release/hookkit-roothide.deb; PAYLOAD=Library/Frameworks/HookKit.framework ;;
+            esac
+            dpkg-deb -x "$DEB" "$STAGE"
             gmake device-compile-check \
               "DEVICE_SMOKE_CLANG=$CLANG" \
               "DEVICE_CANONICAL_CLANG=$CLANG" \
               "DEVICE_CANONICAL_SWIFTC=$SWIFTC" \
-              "DEVICE_CANONICAL_LD=$LD"
+              "DEVICE_CANONICAL_LD=$LD" \
+              "DEVICE_OBSERVABILITY_FRAMEWORK_DIR=$STAGE/$(dirname "$PAYLOAD")"
           fi
 
       - uses: actions/upload-artifact@v7
