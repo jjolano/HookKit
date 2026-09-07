@@ -7,10 +7,10 @@
 #include <unistd.h>
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
-// pthread.h LAST: on macOS it injects the real <mach/mach.h> types, which
-// would collide with the native-vm test fixture shadowing the same headers.
-// hk_native.c only needs the mutex API, which has no mach-type dependency.
-#include <pthread.h>
+// No pthread.h here: on macOS it injects the real <mach/mach.h> types, which
+// collide with the native-vm test fixture shadowing the same headers. The
+// write lock below needs only C11 atomics, which have no such dependency.
+#include <stdatomic.h>
 
 #define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
 
@@ -183,7 +183,33 @@ static bool hk_range_protection(vm_address_t start, vm_address_t end, vm_prot_t 
 // threads snapshot the page and the second remap silently discards the first
 // patch, leaving a hook whose caller holds a live trampoline but whose target
 // was never redirected.
-static pthread_mutex_t g_write_lock = PTHREAD_MUTEX_INITIALIZER;
+// Byte and pointer writers share this lock across protection queries, writes
+// and restoration. Without it two patches landing on the same page
+// race the protect/restore pair — the second memcpy hits a page the first has
+// already resealed read-execute, which faults — and on the remap path both
+// threads snapshot the page and the second remap silently discards the first
+// patch, leaving a hook whose caller holds a live trampoline but whose target
+// was never redirected.
+//
+// A spinlock, not pthread_mutex_t: <pthread.h> on macOS injects the real
+// <mach/mach.h> types, which collide with the native-vm test fixture
+// shadowing the same headers. The critical sections only wrap a few syscalls
+// and a memcpy (never block indefinitely), so spinning is proportionate.
+static atomic_flag g_write_lock = ATOMIC_FLAG_INIT;
+
+static void hk_write_lock(void) {
+    while (atomic_flag_test_and_set_explicit(&g_write_lock, memory_order_acquire)) {
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_ia32_pause();
+#elif defined(__arm64__) || defined(__aarch64__)
+        __asm__ volatile("yield" ::: "memory");
+#endif
+    }
+}
+
+static void hk_write_unlock(void) {
+    atomic_flag_clear_explicit(&g_write_lock, memory_order_release);
+}
 
 // Write `size` bytes over `dst`, which may be read-only or read/execute-only.
 // Callers go through hk_write; this is the body, run under g_write_lock.
@@ -277,10 +303,10 @@ static hk_mutation_state_t hk_write_locked(void *dst, const void *src, size_t si
 }
 
 static hk_mutation_state_t hk_write(void *dst, const void *src, size_t size) {
-    pthread_mutex_lock(&g_write_lock);
+    hk_write_lock();
     hk_mutation_state_t mutation = hk_write_locked(dst, src, size);
     hk_memo_region.valid = false;
-    pthread_mutex_unlock(&g_write_lock);
+    hk_write_unlock();
     return mutation;
 }
 
@@ -472,9 +498,9 @@ hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value) {
         return HK_MUTATION_NONE;
     }
 
-    pthread_mutex_lock(&g_write_lock);
+    hk_write_lock();
     if(!hk_range_protection(start, end, &restore)) {
-        pthread_mutex_unlock(&g_write_lock);
+        hk_write_unlock();
         return HK_MUTATION_NONE;
     }
 
@@ -492,7 +518,7 @@ hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value) {
     }
 
     hk_memo_region.valid = false;
-    pthread_mutex_unlock(&g_write_lock);
+    hk_write_unlock();
 
     return mutation;
 }
