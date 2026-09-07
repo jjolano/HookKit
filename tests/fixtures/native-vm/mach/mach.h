@@ -2,7 +2,7 @@
 #define HK_TEST_MACH_H
 #include <stddef.h>
 #include <stdint.h>
-#if !defined(mach_port_t) && !defined(__darwin_mach_port_t)
+#if !defined(mach_port_t) && !defined(__darwin_mach_port_t) && !defined(_MACH_PORT_T)
 // On macOS the real <mach/mach.h> may already be pulled in (e.g. via
 // pthread.h) before hk_native.c's include resolves here. Guard every name
 // so the fixture degrades to "already provided" instead of redefinition.
