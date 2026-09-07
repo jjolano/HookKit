@@ -104,11 +104,11 @@ static void build_fixups(uint8_t *file) {
 
 typedef struct { unsigned calls; } writer_t;
 
-static bool write_slot(void *opaque, uintptr_t address, uint64_t value) {
+static hk_mutation_state_t write_slot(void *opaque, uintptr_t address, uint64_t value) {
     writer_t *writer = opaque;
     writer->calls++;
     memcpy((void *)address, &value, sizeof(value));
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 
 static void setup(uint8_t *live, uint8_t *file, writer_t *writer,

@@ -174,6 +174,15 @@ static void hk_hook_release_prepared(struct hk_hook *hook) {
                                                hook->prepared_state);
     }
     hook->prepared_state = NULL;
+    // Fresh results must not advertise released preparation storage. Historical
+    // reports remain snapshots; potentially published continuations stay intact.
+    if (hook->result.mutation == HK_MUTATION_NONE) {
+        memset(&hook->result.continuation, 0, sizeof(hook->result.continuation));
+        hook->result.continuation.struct_size = sizeof(hook->result.continuation);
+        hook->result.continuation.struct_version = HK_ABI_VERSION_3_0;
+        hook->result.original_available = false;
+        hook->result.currently_valid = false;
+    }
     hook->has_prepared_continuation = false;
     memset(&hook->prepared_continuation, 0,
            sizeof(hook->prepared_continuation));
@@ -1531,7 +1540,7 @@ static size_t hk_release_prepared_domain_members(
         out->outcome = HK_OUTCOME_FAILED_SAFE;
         out->mutation = HK_MUTATION_NONE;
         out->retryable = false;
-        out->currently_valid = true;
+        out->currently_valid = false;
         out->error_domain.data = "core";
         out->error_domain.length = 4;
         out->error_code = HK_STATUS_INVALID_STATE;

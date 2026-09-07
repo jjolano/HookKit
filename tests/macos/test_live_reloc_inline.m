@@ -21,7 +21,7 @@ static int reloc_replacement(int value) {
     return value + 300;
 }
 
-static bool native_write(void *ctx, uintptr_t address,
+static hk_mutation_state_t native_write(void *ctx, uintptr_t address,
                          const uint8_t *data, size_t size) {
     (void)ctx;
     return hk_native_patch_memory((void *)address, data, size);

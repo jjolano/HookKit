@@ -13,14 +13,14 @@
 static const uint8_t ORIGINAL[REGION]    = {0x11, 0x22, 0x33, 0x44};
 static const uint8_t REPLACEMENT[REGION] = {0xAA, 0xBB, 0xCC, 0xDD};
 
-static bool buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     (void)ctx;
     memcpy((void *)address, data, size);
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
-static bool refuse_write(void *ctx, uintptr_t a, const uint8_t *d, size_t s) {
+static hk_mutation_state_t refuse_write(void *ctx, uintptr_t a, const uint8_t *d, size_t s) {
     (void)ctx; (void)a; (void)d; (void)s;
-    return false;
+    return HK_MUTATION_NONE;
 }
 
 static hk_bytes_view_t view(const uint8_t *d, size_t n) {

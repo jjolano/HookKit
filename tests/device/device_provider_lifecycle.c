@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "../../src/core/HKRuntimeInternal.h"
+#include "../../src/engines/HKStaticPool.h"
 
 __attribute__((noinline)) static int dobby_target(int value) {
     volatile int result = value;
@@ -94,7 +95,8 @@ static bool snapshot_has(const hk_artifact_snapshot_t *snapshot,
 static int test_provider(const char *engine_id, int_function_t target,
                          int_function_t replacement, int baseline, int hooked,
                          hk_effects_t prepare_effects, hk_effects_t commit_effects,
-                         size_t artifact_count, bool hookkit_continuation) {
+                          size_t artifact_count, bool hookkit_continuation,
+                          bool force_dynamic) {
     hk_runtime_t *runtime = NULL;
     hk_plan_t *plan = NULL;
     hk_hook_t *hook = NULL;
@@ -105,6 +107,26 @@ static int test_provider(const char *engine_id, int_function_t target,
     CHECK(engine_id, "baseline", target(1) == baseline);
     CHECK(engine_id, "runtime create", hk_runtime_create(NULL, &runtime) == HK_STATUS_OK);
     CHECK(engine_id, "registered binding", select_registered_provider(runtime, engine_id));
+    uintptr_t held[HK_STATIC_POOL_MAX_SLOTS];
+    size_t held_count = 0;
+    if (force_dynamic) {
+        hk_reloc_engine_ctx_t *pool = &runtime->static_engine;
+        CHECK(engine_id, "pool callbacks", pool->alloc && pool->seal && pool->free_page);
+        // Fresh-process mode: reserve and seal unused slots, without changing
+        // provider bindings or writing the pool bitmap directly.
+        for (;;) {
+            hk_artifact_mapping_t mapping = {0};
+            uintptr_t page = pool->alloc(pool->seam_ctx, HK_RELOC_PAGE_BYTES,
+                                         (uintptr_t)target, &mapping);
+            if (!page) break;
+            CHECK(engine_id, "pool bound", held_count < HK_STATIC_POOL_MAX_SLOTS);
+            CHECK(engine_id, "pool backing", mapping.kind == HK_MAPPING_STATIC_HOOKKIT_SECTION);
+            CHECK(engine_id, "seal reserved slot",
+                  pool->seal(pool->seam_ctx, page, HK_RELOC_PAGE_BYTES));
+            held[held_count++] = page;
+        }
+        CHECK(engine_id, "reserved static pool", held_count != 0);
+    }
     CHECK(engine_id, "plan create", hk_plan_create(runtime, NULL, &plan) == HK_STATUS_OK);
 
     hk_hook_spec_t spec;
@@ -136,6 +158,18 @@ static int test_provider(const char *engine_id, int_function_t target,
     hk_continuation_info_t prepared = result.continuation;
     bool static_backing = hookkit_continuation &&
         prepared.mapping_kind == HK_MAPPING_STATIC_HOOKKIT_SECTION;
+    if (force_dynamic) {
+        CHECK(engine_id, "dynamic fallback backing",
+              prepared.mapping_kind == HK_MAPPING_ANONYMOUS &&
+              prepared.kind == HK_CONTINUATION_KIND_DYNAMIC);
+        for (size_t i = 0; i < held_count; i++) {
+            CHECK(engine_id, "fallback is not reserved slot", prepared.mapping_base != held[i]);
+            runtime->static_engine.free_page(runtime->static_engine.seam_ctx,
+                                             held[i], HK_RELOC_PAGE_BYTES);
+        }
+        printf("HookKit HK provider %s: dynamic-fallback reserved-slots=%zu\n",
+               engine_id, held_count);
+    }
     hk_effects_t backing_effect = static_backing
         ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
     if (hookkit_continuation) {
@@ -173,7 +207,8 @@ static int test_provider(const char *engine_id, int_function_t target,
               memcmp(&prepared, &result.continuation, sizeof(prepared)) == 0);
     }
     CHECK(engine_id, "replacement", target(1) == hooked);
-    void *original = hk_original_slot_load(hk_hook_original_slot(hook));
+    const hk_original_slot_t *slot = hk_hook_original_slot(hook);
+    void *original = hk_original_slot_load(slot);
     CHECK(engine_id, "original", original && ((int_function_t)original)(1) == baseline);
 
     CHECK(engine_id, "artifact snapshot", hk_report_copy_artifacts(report, &artifacts) == HK_STATUS_OK &&
@@ -217,17 +252,32 @@ static int test_provider(const char *engine_id, int_function_t target,
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(runtime);
+    CHECK(engine_id, "replacement after release", target(1) == hooked);
+    CHECK(engine_id, "original after release",
+          hk_original_slot_load(slot) == original && ((int_function_t)original)(1) == baseline);
     printf("HookKit HK provider %s: PASS\n", engine_id);
     return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "dynamic-fallback") == 0) {
+        return test_provider("provider-ellekit", ellekit_target,
+                             ellekit_replacement, 14, 71,
+                             HK_EFFECT_PROVIDER_IMAGE_LOAD |
+                                 HK_EFFECT_PROVIDER_ACTIVATION |
+                                 HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
+                             HK_EFFECT_TARGET_TEXT_MUTATION, 3, true, true);
+    }
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [dynamic-fallback]\n", argv[0]);
+        return 1;
+    }
     if (test_provider("provider-dobby", dobby_target, dobby_replacement, 8, 43,
                       0, HK_EFFECT_TARGET_TEXT_MUTATION |
                              HK_EFFECT_EXECUTABLE_ALLOCATION |
                              HK_EFFECT_PROVIDER_ACTIVATION |
                              HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
-                      4, false) != 0) {
+                      4, false, false) != 0) {
         return 1;
     }
     if (test_provider("provider-gum", gum_target, gum_replacement, 12, 56,
@@ -236,7 +286,7 @@ int main(void) {
                           HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
                       HK_EFFECT_TARGET_TEXT_MUTATION |
                           HK_EFFECT_EXECUTABLE_ALLOCATION,
-                      2, false) != 0) {
+                      2, false, false) != 0) {
         return 1;
     }
     return test_provider("provider-ellekit", ellekit_target,
@@ -245,5 +295,5 @@ int main(void) {
                              HK_EFFECT_PROVIDER_ACTIVATION |
                              HK_EFFECT_UNKNOWN_PROCESS_MUTATION,
                          HK_EFFECT_TARGET_TEXT_MUTATION,
-                         3, true);
+                         3, true, false);
 }

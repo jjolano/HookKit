@@ -50,11 +50,9 @@ typedef enum {
     HK_MEMPATCH_PRECONDITION_FAILED, // region does not hold expected_bytes
 } hk_mempatch_status_t;
 
-// The device-only store: writes `size` bytes of `data` at `address`. Returns
-// false if the store could not be performed (protection change refused, ...).
-// Modeled as all-or-nothing; a device implementation that can write a region
-// partially must report that to its caller so commit can return PARTIAL.
-typedef bool (*hk_mempatch_write_fn)(void *ctx, uintptr_t address,
+// The device-only store. NONE proves no write; COMPLETE includes protection
+// restoration. Partial or uncertain writes must return PARTIAL or UNKNOWN.
+typedef hk_mutation_state_t (*hk_mempatch_write_fn)(void *ctx, uintptr_t address,
                                      const uint8_t *data, size_t size);
 
 typedef struct {
@@ -79,7 +77,7 @@ hk_mempatch_status_t hk_mempatch_prepare(uintptr_t address, size_t size,
 //   NONE      nothing written -- revalidation failed, or the store refused
 //             before touching anything. A clean refusal.
 //   COMPLETE  the region was written.
-// PARTIAL is not produced by a single-region patch here; see the seam note.
+//   PARTIAL/UNKNOWN propagate the writer's unsafe-to-retry outcome.
 hk_mutation_state_t hk_mempatch_commit(uintptr_t address,
                                        const hk_mempatch_plan_t *plan,
                                        hk_bytes_view_t replacement,

@@ -29,14 +29,15 @@ static int map_status(hk_status_t status) {
     }
 }
 
-static int map_result(const hk_hook_t *hook, void **out_original,
-                      void *prepared_original) {
+static int map_result(const hk_hook_t *hook, void **out_original) {
     hk_hook_result_t result;
-    if (out_original) {
-        *out_original = prepared_original;
-    }
     if (hk_hook_copy_result(hook, &result) != HK_STATUS_OK) {
         return HK_LEGACY_ERR;
+    }
+    // A live replacement may already use an early-published original. Only
+    // proven NONE may clear it, including when preparation backing was freed.
+    if (out_original && result.mutation == HK_MUTATION_NONE) {
+        *out_original = NULL;
     }
     switch (result.outcome) {
         case HK_OUTCOME_ACTIVE:
@@ -56,18 +57,12 @@ static int map_result(const hk_hook_t *hook, void **out_original,
             return *out_original ? HK_LEGACY_OK : HK_LEGACY_ERR;
         case HK_OUTCOME_NO_ROUTE:
         case HK_OUTCOME_FAILED_SAFE:
-            if (out_original) {
-                *out_original = NULL;
-            }
             return HK_LEGACY_ERR_NOT_SUPPORTED;
         case HK_OUTCOME_FAILED_PARTIAL:
             return HK_LEGACY_ERR_PARTIAL;
         case HK_OUTCOME_FAILED_UNKNOWN:
             return HK_LEGACY_ERR;
         default:
-            if (out_original) {
-                *out_original = NULL;
-            }
             return HK_LEGACY_ERR;
     }
 }
@@ -160,7 +155,6 @@ static int apply_plan(const hk_hook_spec_t *spec, void **out_original,
     hk_plan_t *plan = NULL;
     hk_hook_t *hook = NULL;
     hk_report_t *report = NULL;
-    void *prepared_original = NULL;
     int result = HK_LEGACY_ERR;
 
     hk_runtime_config_t runtime_config;
@@ -209,18 +203,14 @@ static int apply_plan(const hk_hook_spec_t *spec, void **out_original,
         // A provider-owned continuation is published by the HookKit commit path;
         // do not reject an otherwise valid provider just because its pointer
         // becomes known there.
-        prepared_original = (void *)prepared_result.continuation.address;
-        if (prepared_original) {
-            *out_original = prepared_original;
+        if (prepared_result.continuation.address) {
+            *out_original = (void *)prepared_result.continuation.address;
         }
     }
-    if (hk_plan_commit(plan, &report) != HK_STATUS_OK) {
-        if (out_original) {
-            *out_original = NULL;
-        }
-        goto done;
-    }
-    result = map_result(hook, out_original, prepared_original);
+    status = hk_plan_commit(plan, &report);
+    result = map_result(hook, out_original);
+    // Report allocation can fail after mutation; map the settled hook first.
+    if (status != HK_STATUS_OK) result = map_status(status);
 
 done:
     hk_report_release(report);
@@ -379,8 +369,7 @@ int hk_legacy_apply_specs_with_backend_ids(const hk_hook_spec_t *specs,
         if (!hooks[i]) {
             continue;  // add_hook already wrote the per-op status
         }
-        out_results[i] = map_result(hooks[i], originals ? originals[i] : NULL,
-                                    NULL);
+        out_results[i] = map_result(hooks[i], originals ? originals[i] : NULL);
         succeeded += out_results[i] == HK_LEGACY_OK;
     }
 

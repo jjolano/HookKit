@@ -244,6 +244,7 @@ hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
                                     hk_reloc_write_fn write, void *write_ctx,
                                     hk_reloc_free_fn free_page, void *seam_ctx,
                                     hk_artifact_sink_t *sink) {
+    if (plan && plan->activated) return HK_MUTATION_UNKNOWN;
     if (!plan || !plan->captured || !write || plan->address == 0 ||
         plan->patch_size == 0 || plan->patch_size > HK_RELOC_MAX_PATCH) {
         return HK_MUTATION_NONE;
@@ -252,11 +253,11 @@ hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
     // Invariant #3. If the entry changed since prepare read it, something else
     // patched it -- refuse rather than overwrite a live hook and report an
     // original that is already stale.
-    if (memcmp((const void *)plan->address, plan->original, plan->patch_size) != 0) {
-        return HK_MUTATION_NONE;
+    hk_mutation_state_t mutation = HK_MUTATION_NONE;
+    if (memcmp((const void *)plan->address, plan->original, plan->patch_size) == 0) {
+        mutation = write(write_ctx, plan->address, plan->patch, plan->patch_size);
     }
-
-    if (!write(write_ctx, plan->address, plan->patch, plan->patch_size)) {
+    if (mutation == HK_MUTATION_NONE) {
         // Refused before touching the entry. Nothing branches to the
         // trampoline, so nothing can be executing in it -- reclaim it rather
         // than leave an executable page behind for a hook that never happened.
@@ -302,6 +303,11 @@ hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
         return HK_MUTATION_NONE;
     }
 
+    // Any possible publication is permanent, even if protection restoration or
+    // later verification fails. Only explicit NONE permits reclaim/retry.
+    plan->activated = true;
+    if (mutation != HK_MUTATION_COMPLETE && mutation != HK_MUTATION_PARTIAL)
+        mutation = HK_MUTATION_UNKNOWN;
     if (sink) {
         // The trampoline, recorded first: it existed before the entry patch,
         // and an artifact ledger that implied otherwise would misdescribe the
@@ -337,7 +343,7 @@ hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
         a.struct_size = sizeof(a);
         a.struct_version = HK_ABI_VERSION_3_0;
         a.kind = HK_ARTIFACT_TARGET_TEXT_PATCH;
-        a.state = HK_ARTIFACT_COMMITTED;
+        a.state = mutation == HK_MUTATION_COMPLETE ? HK_ARTIFACT_COMMITTED : HK_ARTIFACT_PARTIALLY_APPLIED;
         a.effects = HK_EFFECT_TARGET_TEXT_MUTATION;
         a.engine_id.data = "inline-relocating";
         a.engine_id.length = 17;
@@ -353,8 +359,8 @@ hk_mutation_state_t hk_reloc_commit(hk_reloc_plan_t *plan,
         // but does NOT reclaim the page -- which is why the two artifacts carry
         // different reversibility rather than one verdict for the install.
         a.mechanically_reversible = true;
-        a.safe_to_reverse_after_activation = true;
+        a.safe_to_reverse_after_activation = mutation == HK_MUTATION_COMPLETE;
         (void)hk_artifact_sink_record(sink, &a);
     }
-    return HK_MUTATION_COMPLETE;
+    return mutation;
 }

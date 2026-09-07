@@ -910,7 +910,7 @@ bool hk_rebind_replacement_for_site(const hk_rebind_site_t *site,
 }
 
 static void record_artifact(hk_artifact_sink_t *sink, const hk_rebind_site_t *site,
-                            uint64_t replacement) {
+                            uint64_t replacement, hk_mutation_state_t mutation) {
     if (!sink) {
         return;
     }
@@ -919,7 +919,7 @@ static void record_artifact(hk_artifact_sink_t *sink, const hk_rebind_site_t *si
     a.struct_size = sizeof(a);
     a.struct_version = HK_ABI_VERSION_3_0;
     a.kind = HK_ARTIFACT_IMPORT_SLOT;
-    a.state = HK_ARTIFACT_COMMITTED;
+    a.state = mutation == HK_MUTATION_COMPLETE ? HK_ARTIFACT_COMMITTED : HK_ARTIFACT_PARTIALLY_APPLIED;
     a.effects = HK_EFFECT_IMPORT_MUTATION;
     a.engine_id.data = "fishhook";
     a.engine_id.length = 8;
@@ -930,7 +930,7 @@ static void record_artifact(hk_artifact_sink_t *sink, const hk_rebind_site_t *si
     // Restoring a slot is a plain store of the value we already hold, so this
     // is genuinely reversible -- unlike a relocated inline patch.
     a.mechanically_reversible = true;
-    a.safe_to_reverse_after_activation = true;
+    a.safe_to_reverse_after_activation = mutation == HK_MUTATION_COMPLETE;
     (void)hk_artifact_sink_record(sink, &a);
 }
 
@@ -980,14 +980,18 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
             return (written == 0) ? HK_MUTATION_NONE : HK_MUTATION_PARTIAL;
         }
 
-        if (!target->write(target->write_ctx, site->address, site_replacement)) {
+        hk_mutation_state_t mutation = target->write(target->write_ctx, site->address, site_replacement);
+        if (mutation != HK_MUTATION_NONE)
+            record_artifact(sink, site, site_replacement, mutation);
+        if (mutation != HK_MUTATION_COMPLETE) {
             if (out_written) { *out_written = written; }
             // Invariant #4: after a partial mutation no fallback may be
             // attempted, so this must be reported as PARTIAL, never as a
             // clean failure the router could retry elsewhere.
-            return (written == 0) ? HK_MUTATION_NONE : HK_MUTATION_PARTIAL;
+            if (mutation == HK_MUTATION_NONE)
+                return (written == 0) ? HK_MUTATION_NONE : HK_MUTATION_PARTIAL;
+            return mutation == HK_MUTATION_PARTIAL ? HK_MUTATION_PARTIAL : HK_MUTATION_UNKNOWN;
         }
-        record_artifact(sink, site, site_replacement);
         written++;
     }
 

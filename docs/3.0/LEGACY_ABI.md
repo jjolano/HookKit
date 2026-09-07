@@ -55,6 +55,9 @@ router and backend implementations are not linked into canonical packages.
   function entrypoint when its audited ABI is present. A provider failure that
   may have mutated state is terminal and is never retried through an old
   fallback.
+- An early-published original survives partial/unknown mutation and post-write
+  verification/report failure. Only proven `HK_MUTATION_NONE` clears it; a
+  generic API error does not prove that the replacement is unreachable.
 - ARMv7/ARMv7s memory and Swift routes fail closed when no certified HK3
   engine exists; no raw legacy writer or ARM/Thumb relocator is retained.
 - `getLibErrno:` returns the normalized final HookKit status and always writes

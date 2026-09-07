@@ -30,6 +30,8 @@ typedef struct {
     unsigned write_calls;
     unsigned free_calls;
     bool refuse_write;
+    bool corrupt_write;
+    hk_mutation_state_t write_failure;
 } seam_t;
 
 static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near,
@@ -45,11 +47,12 @@ static uintptr_t seam_alloc(void *ctx, size_t size, uintptr_t near,
 static bool seam_seal(void *ctx, uintptr_t page, size_t size) {
     seam_t *s = ctx; s->seal_calls++; (void)page; (void)size; return true;
 }
-static bool seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     seam_t *s = ctx; s->write_calls++;
-    if (s->refuse_write) return false;
+    if (s->refuse_write) return HK_MUTATION_NONE;
     memcpy((void *)address, data, size);
-    return true;
+    if (s->corrupt_write) ((uint8_t *)address)[0] ^= 1;
+    return s->write_failure != HK_MUTATION_NONE ? s->write_failure : HK_MUTATION_COMPLETE;
 }
 
 static void seam_free_page(void *ctx, uintptr_t page, size_t size) {
@@ -181,6 +184,7 @@ static void test_full_lifecycle_installs_and_reports(bool refuse_write) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
+    assert(s.free_calls == 0 && s.page);  // published storage survives release
     free(s.page); free(fn);
     printf("  full-lifecycle-installs-and-reports: PASS\n");
 }
@@ -568,6 +572,69 @@ static void test_effect_and_forbid_layouts_are_not_conflated(void) {
     printf("  effect-and-forbid-layouts-are-not-conflated: PASS\n");
 }
 
+static void test_prepared_storage_lifetime(void) {
+    // Abandon, stale entry/catalog, failed readback, missing reclaim seam,
+    // and writers reporting UNKNOWN/PARTIAL after a store.
+    for (unsigned mode = 0; mode < 7; mode++) {
+        hk_ownership_reset_for_testing();
+        const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+        uint32_t *fn = make_fn(body, 5);
+        seam_t s = {0};
+        hk_reloc_engine_ctx_t ctx = reloc_ctx(&s);
+        if (mode == 4) ctx.free_page = NULL;
+        hk_image_catalog_t *owned_catalog = NULL;
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        hk_hook_t *hook = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_with_context(rt, hk_reloc_inline_vtable(), &ctx));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_spec_t spec = address_spec("lifetime", (uintptr_t)fn,
+            (void *)((uintptr_t)fn + 0x1000), HK_ORIGINAL_CALLABLE_CONTINUATION);
+        assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+        assert(s.alloc_calls == 1 && s.seal_calls == 1 && s.free_calls == 0);
+        assert(hk_hook_original_slot(hook) == NULL);
+        if (mode == 1) fn[0] = A64_RET;
+        if (mode == 2) {
+            if (!rt->catalog) rt->catalog = owned_catalog = hk_image_catalog_create();
+            hk_image_entry_t entry = {.path = "/late-image"};
+            assert(hk_image_catalog_add_entry(rt->catalog, &entry));
+        }
+        s.corrupt_write = mode == 3;
+        s.write_failure = mode == 5 ? HK_MUTATION_UNKNOWN :
+            mode == 6 ? HK_MUTATION_PARTIAL : HK_MUTATION_NONE;
+        if (mode != 0 && mode != 4) {
+            assert(hk_plan_commit(plan, NULL) == HK_STATUS_OK);
+            assert(hook->result.outcome == (mode == 1 ? HK_OUTCOME_FAILED_SAFE :
+                mode == 2 ? HK_OUTCOME_STALE_PLAN :
+                mode == 6 ? HK_OUTCOME_FAILED_PARTIAL : HK_OUTCOME_FAILED_UNKNOWN));
+            if (mode >= 5) {
+                assert(hook->result.mutation == s.write_failure && !hook->result.retryable);
+                assert(hook->result.artifact_count == 2 && !hook->result.verified);
+            }
+            if (mode == 1) {
+                assert(s.free_calls == 1 && !s.page);
+                assert(hook->result.continuation.kind == HK_CONTINUATION_KIND_NONE);
+                assert(hook->result.continuation.address == 0);
+            }
+        }
+        hk_plan_release(plan);
+        if (owned_catalog) {
+            hk_image_catalog_destroy(owned_catalog);
+            rt->catalog = NULL;
+        }
+        hk_runtime_release(rt);
+        assert(s.write_calls == (mode == 3 || mode >= 5 ? 1u : 0u));
+        assert(s.free_calls == (mode >= 3 ? 0u : 1u));
+        assert((s.page != NULL) == (mode >= 3));
+        free(s.page);  // fixture teardown only; unknown publication stays retained
+        free(fn);
+    }
+    puts("  prepared-storage-lifetime: PASS");
+}
+
 int main(void) {
     #define RUN_TEST(test) do { hk_ownership_reset_for_testing(); test(); } while (0)
     hk_ownership_reset_for_testing();
@@ -582,6 +649,7 @@ int main(void) {
     RUN_TEST(test_forbidding_executable_allocation_routes_to_terminal);
     RUN_TEST(test_continuation_policy_forbids_allocation_too);
     RUN_TEST(test_effect_and_forbid_layouts_are_not_conflated);
+    RUN_TEST(test_prepared_storage_lifetime);
     #undef RUN_TEST
     hk_ownership_reset_for_testing();
     printf("all relocating inline wired tests passed\n");

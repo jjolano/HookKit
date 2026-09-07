@@ -24,7 +24,7 @@ static int terminal_replacement(int value) {
     return value + 200;
 }
 
-static bool native_write(void *ctx, uintptr_t address,
+static hk_mutation_state_t native_write(void *ctx, uintptr_t address,
                          const uint8_t *data, size_t size) {
     (void)ctx;
     return hk_native_patch_memory((void *)address, data, size);
@@ -170,7 +170,7 @@ static int replacement_puts(const char *message) {
     return g_original_puts(message);
 }
 
-static bool write_pointer(void *ctx, uintptr_t address, uint64_t value) {
+static hk_mutation_state_t write_pointer(void *ctx, uintptr_t address, uint64_t value) {
     (void)ctx;
     return hk_native_patch_pointer((void *)address, (void *)(uintptr_t)value);
 }

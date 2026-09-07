@@ -37,7 +37,7 @@ THEOS_LAYOUT_DIR_NAME := packaging/layout
 # every goal is a host-side check (test*, check-exports with explicit paths,
 # conformance). Everything below that needs Theos-native variables is guarded
 # the same way.
-HK_HOST_ONLY_GOALS = test test-reloc test-swift-abi test-swift-engine \
+HK_HOST_ONLY_GOALS = test test-legacy-bridge test-native-write test-reloc test-swift-abi test-swift-engine \
 	test-header-compile test-shadow-manifest test-provider-evidence \
 	test-runtime-lifecycle test-plan-lifecycle test-hook-add \
 	test-plan-analyze test-engine-registry test-backend-policy \
@@ -341,8 +341,16 @@ HK_SANITIZE_FLAGS = $(if $(HOOKKIT_SANITIZE),-fsanitize=$(HOOKKIT_SANITIZE) -fno
 HK_TEST_CC = clang $(HK_SANITIZE_FLAGS)
 HK_TEST_CXX = clang++ $(HK_SANITIZE_FLAGS)
 .PHONY: test
-test:
+test: test-native-write test-legacy-bridge
 	$(ECHO_NOTHING)$(MAKE) test-reloc test-swift-abi test-swift-engine test-header-compile test-shadow-manifest test-provider-evidence test-runtime-lifecycle test-plan-lifecycle test-hook-add test-plan-analyze test-engine-registry test-backend-policy test-backend-enumeration test-plan-prepare test-plan-commit test-ownership test-domain-gate test-artifact-ledger test-installed-original test-plan-model test-fault-injection test-image-catalog test-symbol-table test-macho test-export-trie test-symbol-resolve test-import-slots test-chained-fixups test-pointer-auth test-cache-patches test-rebind-engine test-rebind-pac test-rebind-wired test-memory-engine test-memory-wired test-objc-engine test-objc-wired test-inline-engine test-inline-wired test-image-scope test-reloc-inline-engine test-reloc-inline-wired test-static-continuation test-provider-vtable$(ECHO_END)
+
+.PHONY: test-legacy-bridge
+test-legacy-bridge:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_legacy_bridge tests/host/test_legacy_bridge.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c src/engines/HKSwiftEngine.c src/native/hk_swift.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_legacy_bridge$(ECHO_END)
+
+.PHONY: test-native-write
+test-native-write:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -Itests/fixtures/native-vm -o $(THEOS_OBJ_DIR)/test_native_write tests/host/test_native_write.c src/core/HKIDs.c src/core/HKArtifactLedger.c src/core/HKImageCatalog.c $(filter-out src/native/hk_native.c,$(HK_PLATFORM_ENGINE_SOURCES)) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_native_write$(ECHO_END)
 
 .PHONY: test-pointer-auth
 test-pointer-auth:
@@ -694,7 +702,7 @@ DEVICE_SMOKE_TARGETS := device-smoke
 DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
 	device-swift-real-smoke device-swift-facade-real-smoke \
 	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
-	device-legacy-facade-smoke device-rebind-adapter-smoke \
+	device-legacy-facade-smoke device-legacy-bridge-smoke device-rebind-adapter-smoke \
 	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
 	device-provider-lifecycle-smoke device-provider-alias-smoke device-observability
 .PHONY: check-device-smoke-toolchain check-device-canonical-toolchain
@@ -764,6 +772,10 @@ device-rebind-smoke:
 device-legacy-facade-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_legacy_facade_smoke tests/device/device_legacy_facade.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_facade_smoke$(ECHO_END)
 
+.PHONY: device-legacy-bridge-smoke
+device-legacy-bridge-smoke:
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -std=c11 -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -o $(THEOS_OBJ_DIR)/device_legacy_bridge tests/device/device_legacy_bridge.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c src/engines/HKStaticPool.c src/engines/HKSwiftEngine.c src/native/hk_swift.c $(HK_PLATFORM_ENGINE_SOURCES) -lobjc -framework CoreFoundation && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_legacy_bridge$(ECHO_END)
+
 .PHONY: device-rebind-adapter-smoke
 device-rebind-adapter-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke tests/device/device_rebind_adapter.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_rebind_adapter_smoke$(ECHO_END)
@@ -778,7 +790,10 @@ device-legacy-abi-smoke:
 device-shadow376-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -F$(CURDIR)/.theos/obj -framework Foundation -framework HookKit -lobjc -rpath /Library/Frameworks -rpath /var/jb/Library/Frameworks -o $(THEOS_OBJ_DIR)/device_shadow376_smoke tests/device/device_shadow376_compat.m && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_shadow376_smoke$(ECHO_END)
 
-.PHONY: device-static-smoke
+# Controlled native modes reuse this source-linked internal-seam probe. Build
+# only; tools/run-native-coverage.sh is an explicit, separate device action.
+.PHONY: device-native-coverage device-static-smoke
+device-native-coverage: device-static-smoke
 device-static-smoke:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -I$(CURDIR)/src/core -I$(CURDIR)/src/engines -I$(CURDIR)/src/resolvers -I$(CURDIR)/src/native -lobjc -framework CoreFoundation -o $(THEOS_OBJ_DIR)/device_static_smoke tests/device/device_static_continuation.c src/core/HKArtifactLedger.c src/core/HKIDs.c src/core/HKImageCatalog.c src/core/HKImageScope.c src/core/HKInstalled.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKRuntime.c src/engines/HKInlineEngine.c src/engines/HKInlineVtable.c src/engines/HKMemoryEngine.c src/engines/HKMemoryVtable.c src/engines/HKObjCEngine.c src/engines/HKObjCVtable.c src/engines/HKRebindEngine.c src/engines/HKRebindVtable.c src/engines/HKRelocInlineEngine.c src/engines/HKRelocInlineVtable.c src/engines/HKStaticPool.c src/engines/HKSwiftEngine.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c src/native/hk_swift.c && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_static_smoke$(ECHO_END)
 

@@ -19,10 +19,10 @@
 #define A64_NOP 0xD503201Fu
 #define A64_RET 0xD65F03C0u
 
-static bool buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     (void)ctx;
     memcpy((void *)address, data, size);
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 
 static uint32_t *make_fn(const uint32_t *insns, size_t count) {

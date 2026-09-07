@@ -38,6 +38,17 @@ __attribute__((noinline)) static int hk_terminal_replacement(void) {
 static volatile int hk_memory_value = 3;
 static volatile int hk_batched_memory_value = 5;
 
+static void *hk_batched_original;
+
+__attribute__((noinline)) static int hk_batched_function(void) {
+    volatile int value = 23;
+    return value;
+}
+
+__attribute__((noinline)) static int hk_batched_replacement(void) {
+    return hk_batched_original ? ((int (*)(void))hk_batched_original)() + 100 : -1;
+}
+
 static int fail(const char *message) {
     fprintf(stderr, "HookKit canonical facade: FAIL: %s\n", message);
     return 1;
@@ -116,6 +127,13 @@ int main(void) {
     hookkit_status_t (*execute_hooks)(id, SEL) =
         (hookkit_status_t (*)(id, SEL))objc_msgSend;
     set_batching(batched, sel_registerName("setBatching:"), true);
+    if (send_function_hook(batched,
+                           sel_registerName("hookFunction:withReplacement:outOldPtr:"),
+                           (void *)hk_batched_function, (void *)hk_batched_replacement,
+                           &hk_batched_original) != HK_OK ||
+        hk_batched_original || hk_batched_function() != 23) {
+        return fail("queued function is unpublished");
+    }
     int second_replacement = 13;
     if (send_memory_hook(batched,
                           sel_registerName("hookMemory:withData:size:"),
@@ -127,6 +145,13 @@ int main(void) {
         return fail("3.0 legacy batching");
     }
 
-    puts("HookKit canonical facade: PASS");
+    // Both facade calls have already released their internal plans/runtimes.
+    if (!hk_batched_original || hk_batched_function() != 123 ||
+        ((int (*)(void))hk_batched_original)() != 23 ||
+        hk_function_original() != 99 || ((int (*)(void))old_function)() != 11) {
+        return fail("single/batch originals after bridge teardown");
+    }
+
+    puts("HookKit canonical facade: PASS (owned single/batch functions, callable originals after bridge teardown)");
     return 0;
 }

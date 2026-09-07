@@ -58,17 +58,18 @@ static int g_failures = 0;
 static int g_patch_calls = 0;
 static void *g_patch_dst = NULL;
 static uint8_t g_patch_bytes[8];
+static hk_mutation_state_t g_patch_result = HK_MUTATION_COMPLETE;
 
 // Fake hk_native_patch_pointer: records the store instead of touching memory.
 // The engine's own definition (src/native/hk_native.c) is not linked here. The
 // engine uses the pointer-store entry point, not hk_native_patch_memory —
 // a live vtable slot must not go through the page-remap fallback.
-bool hk_native_patch_pointer(void *slot, void *value) {
+hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value) {
     g_patch_calls += 1;
     g_patch_dst = slot;
     memset(g_patch_bytes, 0, sizeof(g_patch_bytes));
     memcpy(g_patch_bytes, &value, sizeof(value) < sizeof(g_patch_bytes) ? sizeof(value) : sizeof(g_patch_bytes));
-    return true;
+    return g_patch_result;
 }
 
 // hk_native_range_readable's fake lives below, next to the blobs it answers
@@ -386,6 +387,21 @@ static void test_hook_by_index(void) {
     CHECK(g_patch_dst == slot_ptr(0));
     CHECK(orig == g_code_a);
 
+    for (g_patch_result = HK_MUTATION_NONE; g_patch_result <= HK_MUTATION_UNKNOWN; g_patch_result++) {
+        blob_setup();
+        hk_swift_slot_plan_t plan;
+        CHECK(hk_swift_prepare_slot((Class)g_metadata, 1, &plan));
+        g_patch_calls = 0;
+        CHECK(hk_swift_commit_slot(&plan, g_code_c, &orig) ==
+              (g_patch_result == HK_MUTATION_COMPLETE));
+        CHECK(orig == g_code_b && g_patch_calls == 1);
+        CHECK(plan.prepared == (g_patch_result == HK_MUTATION_NONE));
+        if (g_patch_result != HK_MUTATION_NONE) {
+            CHECK(!hk_swift_commit_slot(&plan, g_code_c, &orig));
+            CHECK(g_patch_calls == 1);  // no retry after possible publication
+        }
+    }
+    g_patch_result = HK_MUTATION_COMPLETE;
     printf("  PASS\n");
 }
 

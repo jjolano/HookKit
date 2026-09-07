@@ -63,12 +63,12 @@ static bool seam_seal(void *ctx, uintptr_t page, size_t size) {
     s->sealed = true;
     return true;
 }
-static bool seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t seam_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     seam_t *s = ctx;
     s->write_calls++;
-    if (s->refuse_write) return false;
+    if (s->refuse_write) return HK_MUTATION_NONE;
     memcpy((void *)address, data, size);
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 // The engine's reclaim seam. Distinct from seam_free below, which is the
 // test's own teardown for a page the engine kept.
@@ -178,6 +178,12 @@ static void test_prepare_builds_a_trampoline_and_commit_patches(void) {
     assert(t.mapping.base == (uintptr_t)s.page && t.mapping.size == s.page_size);
     assert(t.mapping.protection.read && t.mapping.protection.execute && !t.mapping.protection.write);
     assert(memcmp(a.original_bytes.inline_bytes.data, body, 4) == 0);
+
+    // Restoring the entry does not prove nobody is still in its continuation.
+    memcpy(fn, body, sizeof(body));
+    s.refuse_write = true;
+    assert(hk_reloc_commit(&plan, seam_write, &s, seam_free_page, &s, &sink) == HK_MUTATION_UNKNOWN);
+    assert(s.write_calls == 1 && s.free_calls == 0 && s.page && plan.activated);
 
     hk_artifact_snapshot_release(snap);
     hk_artifact_ledger_destroy(ledger);
@@ -356,6 +362,21 @@ static void test_revalidation_and_argument_validation(void) {
     assert(hk_reloc_commit(&plan, seam_write, &s, seam_free_page, &s, NULL) == HK_MUTATION_NONE);
     assert(fn[0] == A64_RET);       // their patch survives
     assert(s.write_calls == 0);     // and nothing was attempted
+    assert(s.free_calls == 1 && !s.page && !plan.captured);
+    seam_free(&s);
+
+    // A stale entry without a reclaim seam must retain and account for backing.
+    fn[0] = A64_NOP;
+    memset(&s, 0, sizeof(s));
+    assert(hk_reloc_prepare(target, target + 0x1000, NULL, 0,
+                            seam_alloc, seam_seal, seam_free_page, &s, &plan) == HK_RELOC_OK);
+    fn[0] = A64_RET;
+    hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+    hk_artifact_sink_t sink = {.ledger = ledger};
+    assert(hk_reloc_commit(&plan, seam_write, &s, NULL, NULL, &sink) == HK_MUTATION_NONE);
+    assert(s.write_calls == 0 && s.free_calls == 0 && s.page && plan.captured);
+    assert(hk_artifact_ledger_count(ledger) == 1);
+    hk_artifact_ledger_destroy(ledger);
     seam_free(&s);
 
     memset(&s, 0, sizeof(s));

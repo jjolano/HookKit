@@ -1,6 +1,8 @@
 #ifndef hk_native_h
 #define hk_native_h
 
+#include "../../include/HookKit/HookKitResults.h"
+
 // HookKit's own hooking engine: no ElleKit, Substrate or Substitute required.
 //
 // arm64/arm64e only. On armv7 every entry point degrades to "unsupported" --
@@ -51,14 +53,16 @@ HK_INTERNAL bool hk_native_supported(void);
 // (class pointers, prologue windows).
 HK_INTERNAL bool hk_native_range_readable(const void *addr, size_t len);
 
-// Raw memory patch, no relocation. The region's original protection is restored
-// afterwards, so this is safe on data as well as code.
+// Raw memory patch, no relocation. Attempts to restore the original protection
+// afterward; restoration failure is UNKNOWN even though the bytes were stored.
 //
 // Note the blast radius when the protection flip is refused (arm64e under
 // PPL): the fallback rebuilds the whole page and swaps the mapping with
 // vm_remap, so the unit of change is a page, not `size`. Fine for code being
 // patched at load time; use hk_native_patch_pointer for anything live.
-HK_INTERNAL bool hk_native_patch_memory(void *target, const void *data, size_t size);
+// NONE proves no target write; COMPLETE includes restored protection. A failed
+// restore after a store, or an uncertain remap, is UNKNOWN, never retry-safe.
+HK_INTERNAL hk_mutation_state_t hk_native_patch_memory(void *target, const void *data, size_t size);
 
 // Single-copy-atomic store of one pointer into an aligned slot, for live
 // metadata (the Swift vtable engine). Readers see either the old or the new
@@ -66,7 +70,7 @@ HK_INTERNAL bool hk_native_patch_memory(void *target, const void *data, size_t s
 // hk_native_patch_memory cannot promise, since its arm64e fallback swaps the
 // whole page mapping out from under them. Fails rather than falling back to
 // the remap, and fails on a misaligned slot.
-HK_INTERNAL bool hk_native_patch_pointer(void *slot, void *value);
+HK_INTERNAL hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value);
 
 // Seams for the 3.0 relocating-inline adapter. The allocator owns one page
 // per trampoline and prefers a page near `near`; seal makes it executable and

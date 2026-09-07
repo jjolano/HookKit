@@ -78,10 +78,10 @@ static void build_image(uint8_t *img) {
     put_u64(img, GOT_OFF + 8, ORIGINAL);
 }
 
-static bool buffer_write(void *ctx, uintptr_t address, uint64_t value) {
+static hk_mutation_state_t buffer_write(void *ctx, uintptr_t address, uint64_t value) {
     (void)ctx;
     memcpy((void *)address, &value, sizeof(value));
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 
 static uint64_t slot(const uint8_t *img, size_t off) {

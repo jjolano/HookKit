@@ -333,7 +333,7 @@ bool hk_swift_prepare_slot(Class cls, uint32_t index,
     return true;
 }
 
-bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
+bool hk_swift_commit_slot(hk_swift_slot_plan_t *plan,
                           void *replacement, void **out_orig) {
     hk_swift_errno = 0;
 
@@ -370,7 +370,11 @@ bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
     // when the protection flip is refused. hk_native_patch_pointer breaks the
     // COW and stores atomically, or fails — a vtable slot is never worth a
     // page swap.
-    if(!hk_native_patch_pointer(plan->slot, new_value)) {
+    hk_mutation_state_t mutation = hk_native_patch_pointer(plan->slot, new_value);
+    if(mutation != HK_MUTATION_NONE) {
+        plan->prepared = false;  // no retry after a possible publication
+    }
+    if(mutation != HK_MUTATION_COMPLETE) {
         hk_swift_errno = HK_SWIFT_ERR_WRITE;
         return false;
     }

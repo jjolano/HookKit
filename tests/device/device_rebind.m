@@ -17,7 +17,7 @@ static int replacement_puts(const char *message) {
     return g_original_puts(message);
 }
 
-static bool write_pointer(void *ctx, uintptr_t address, uint64_t value) {
+static hk_mutation_state_t write_pointer(void *ctx, uintptr_t address, uint64_t value) {
     (void)ctx;
     return hk_native_patch_pointer((void *)address, (void *)(uintptr_t)value);
 }

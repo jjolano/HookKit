@@ -80,11 +80,11 @@ static void pool_free(void *ctx, uintptr_t slot, size_t size) {
         p->dynamic_page = NULL;
     }
 }
-static bool pool_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t pool_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     pool_seam_t *p = ctx;
-    if (p->refuse_write) return false;
+    if (p->refuse_write) return HK_MUTATION_NONE;
     memcpy((void *)address, data, size);
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 
 static void pool_seam_init(pool_seam_t *p) {
@@ -267,6 +267,8 @@ static void test_backing_metadata(bool static_route, bool exhaust) {
     hk_report_release(report);
     hk_plan_release(plan);
     hk_runtime_release(rt);
+    assert(p.releases == 0);
+    assert(hk_static_pool_free_count(&p.pool) == (exhaust ? 0 : SLOTS - 1));
     pool_seam_free(&p);
     free(fn);
     printf("  backing-metadata static-route=%d exhausted=%d: PASS\n", static_route, exhaust);
@@ -473,7 +475,89 @@ static void test_backing_failure_metadata(void) {
     puts("  backing-failure-metadata: PASS");
 }
 
+static void test_abandoned_preparations_reuse_pool(void) {
+    pool_seam_t p;
+    pool_seam_init(&p);
+    hk_reloc_engine_ctx_t ctx = static_ctx(&p);
+    const hk_engine_vtable_t *vtable = hk_static_inline_vtable();
+    const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+    uint32_t *fn = make_fn(body, 5);
+    hk_hook_spec_t spec = address_spec("pool.reuse", (uintptr_t)fn,
+                                      (void *)((uintptr_t)fn + 0x1000));
+    for (unsigned i = 0; i < 1000; i++) {
+        void *prepared = NULL;
+        hk_prepare_diag_t diag = {0};
+        assert(vtable->prepare_one_ctx_status(&ctx, &spec, &prepared, &diag) == HK_PREPARE_OK);
+        assert(hk_static_pool_free_count(&p.pool) == SLOTS - 1);
+        vtable->release_prepared(&ctx, prepared);
+        assert(hk_static_pool_free_count(&p.pool) == SLOTS);
+    }
+    assert(p.claims == 1000 && p.seals == 1000 && p.releases == 1000);
+    assert(fn[0] == A64_NOP);
+    free(fn);
+    pool_seam_free(&p);
+    puts("  abandoned-preparations-reuse-pool: PASS");
+}
+
+static void test_domain_rollback_clears_continuation(void) {
+    for (unsigned dynamic = 0; dynamic < 2; dynamic++) {
+        pool_seam_t p;
+        pool_seam_init(&p);
+        p.fallback = dynamic != 0;
+        if (dynamic) {
+            for (unsigned i = 0; i < SLOTS; i++)
+                assert(hk_static_pool_claim(&p.pool, HK_RELOC_PAGE_BYTES, 0));
+        }
+        hk_reloc_engine_ctx_t ctx = static_ctx(&p);
+        hk_runtime_t *rt = NULL;
+        hk_plan_t *plan = NULL;
+        assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_with_context(rt,
+            dynamic ? hk_reloc_inline_vtable() : hk_static_inline_vtable(), &ctx));
+        assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+        hk_domain_spec_t domain_spec = { .struct_size = sizeof(domain_spec),
+            .struct_version = HK_ABI_VERSION_3_0, .stable_domain_id = "rollback",
+            .require_all_mandatory_prepared = true };
+        hk_domain_t *domain = NULL;
+        assert(hk_plan_define_domain(plan, &domain_spec, &domain) == HK_STATUS_OK);
+        const uint32_t body[] = {A64_NOP, A64_NOP, A64_NOP, A64_NOP, A64_RET};
+        uint32_t *fn = make_fn(body, 5);
+        hk_hook_spec_t spec = address_spec("prepared", (uintptr_t)fn,
+                                          (void *)((uintptr_t)fn + 0x1000));
+        spec.domain = domain;
+        hk_hook_t *hook = NULL, *bad = NULL;
+        assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+        spec.stable_hook_id = "fails";
+        spec.target.address.address++;
+        assert(hk_plan_add_hook(plan, &spec, &bad) == HK_STATUS_OK);
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        hk_report_t *report = NULL;
+        assert(hk_plan_prepare(plan, &report) == HK_STATUS_OK);
+        assert(p.seals == 1 && p.releases == 1 && !p.dynamic_page);
+        assert(hk_static_pool_free_count(&p.pool) == (dynamic ? 0 : SLOTS));
+        assert(!hook->prepared_state && !hook->has_prepared_continuation);
+        hk_hook_result_t result;
+        assert(hk_hook_copy_result(hook, &result) == HK_STATUS_OK);
+        assert(result.outcome == HK_OUTCOME_FAILED_SAFE && !result.currently_valid);
+        hk_continuation_info_t empty = {.struct_size = sizeof(empty),
+                                      .struct_version = HK_ABI_VERSION_3_0};
+        assert(memcmp(&result.continuation, &empty, sizeof(empty)) == 0);
+        assert(memcmp(&report->results[0].continuation, &empty, sizeof(empty)) == 0);
+        assert(!report->results[0].currently_valid);
+        assert(fn[0] == A64_NOP && hk_hook_original_slot(hook) == NULL);
+        hk_report_release(report);
+        hk_plan_release(plan);
+        hk_runtime_release(rt);
+        assert(p.releases == 1);
+        free(fn);
+        pool_seam_free(&p);
+    }
+    puts("  domain-rollback-clears-continuation: PASS");
+}
+
 int main(void) {
+    test_domain_rollback_clears_continuation();
+    test_abandoned_preparations_reuse_pool();
     test_pool_claim_release_and_exhaustion();
     test_pool_rejects_bad_input_and_stray_releases();
     test_pool_contains_bounds();

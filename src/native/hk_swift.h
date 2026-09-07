@@ -211,7 +211,7 @@ typedef struct {
 
 HK_INTERNAL bool hk_swift_prepare_slot(Class cls, uint32_t index,
                                        hk_swift_slot_plan_t *out_plan);
-HK_INTERNAL bool hk_swift_commit_slot(const hk_swift_slot_plan_t *plan,
+HK_INTERNAL bool hk_swift_commit_slot(hk_swift_slot_plan_t *plan,
                                       void *replacement, void **out_orig);
 
 // Name resolution used by hk_swift_hook_method, exposed for the host-side

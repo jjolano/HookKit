@@ -52,7 +52,8 @@ int hk_legacy_build_function_spec(void *function, void *replacement,
 // Apply N pre-built specs through ONE shared runtime/plan lifecycle.
 // originals[i] is the caller's out_old_ptr slot (may be NULL); it is written
 // exactly like the single-call path (early publication at prepare where the
-// engine supports it, final value after commit, cleared on failure).
+// engine supports it, final value after commit, cleared only for proven NONE;
+// a published original survives partial/unknown mutation).
 // out_results[i] receives an HK_LEGACY_* status per op. Returns the aggregate:
 // HK_LEGACY_OK if all succeeded, HK_LEGACY_ERR_PARTIAL if some, HK_LEGACY_ERR otherwise.
 int hk_legacy_apply_specs(const hk_hook_spec_t *specs,

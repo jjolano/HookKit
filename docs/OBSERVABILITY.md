@@ -4,6 +4,8 @@
 data, class, functions, and linked HookKit. No third-party targets, detector
 tests, concealment, inspection spoofing, or anti-debugging. The metadata
 correctness follow-up below changes reporting, not allocation/patch mechanisms.
+The baseline and metadata sections are historical; the final footprint/safety
+validation below records the current lifetime and writer behavior.
 Each mode runs in a fresh process, at serialized startup, with a pinned native
 route. This is a correctness/observation harness, not a stealth score or benchmark.
 
@@ -115,7 +117,7 @@ make -j1 device-objc-smoke device-static-smoke device-smoke \
   DEVICE_SMOKE_SDK="$THEOS/sdks/iPhoneOS16.5.sdk" DEVICE_SMOKE_MIN=15.0
 ```
 
-## Recorded Baseline
+## Recorded Baseline (Historical)
 
 2026-09-07, iPhone9,3 / iPhone 7, iOS 15.8.3 rootless, arm64. Final probe:
 `cf3926a18ab63991901b4f57e5119316`; framework UUID:
@@ -168,7 +170,7 @@ did not rerun the host suite or force native pool exhaustion/VM-protection refus
 the deterministic memory precondition tests the shared preparation-refusal path.
 That harness-only follow-up did not change runtime metadata. The next step did:
 
-## Metadata Correctness
+## Metadata Correctness (Historical)
 
 2026-09-07, same iPhone 7 rootless arm64 device. Internal-only changes; no public
 header layout, symbol allowlist, or ABI version changed. No new allocation,
@@ -202,13 +204,12 @@ placement, protection, activation, or reclamation strategy was introduced.
   representation, separately from the stripped address used to emit branches.
 
 Lifecycle boundaries remain explicit: static claim/release uses the existing
-bitmap; dynamic allocation/free uses the existing native page functions; seal,
-precondition and relocation failures free through the same seam. Ordinary
-native prepared-state release and stale-target refusal still conservatively
-retain storage, and pre-commit snapshots remain empty. Provider-hybrid release
-reclaims only before the provider was called; uncertain activation retains its
-continuation. Those existing retention/reporting boundaries are not redesigned
-by this metadata step, nor is missing-free-callback behavior made leak-free.
+bitmap; dynamic allocation/free uses the existing native page functions. The
+subsequent safety work now reclaims unpublished native backing on abandon/stale
+refusal through those seams; activated or uncertain backing stays retained.
+Provider-hybrid release still reclaims only before the provider was called.
+Missing-free-callback behavior is not made leak-free. See the current results
+below rather than treating the metadata-only step as the final lifetime policy.
 
 ### Verification
 
@@ -256,8 +257,53 @@ Final evidence: `host-tests-final.log`, `sanitizers-final.log`,
 matrix before the reclaimed-continuation metadata regression was added; the
 final matrix uses the rebuilt current framework.
 
-Residual device gaps: arm64e/PAC execution, forced pool exhaustion or far-target
-anonymous fallback, VM allocation/protection failure, and concurrent installs.
-Provider-hybrid metadata has host coverage only in this step. The retained
-native preparation/stale-refusal behavior and non-exhaustive artifact inspection
-remain limitations, not claims of complete allocation accounting.
+## Final Footprint and Safety Validation
+
+2026-09-07, same iPhone 7 / iOS 15.8.3 rootless arm64 device, final current build:
+**110 processes passed, no skips**. Earlier UUIDs, hashes and coverage gaps above
+belong to historical runs, not this final matrix.
+
+| Coverage | Linkage | Processes / Result |
+| --- | --- | --- |
+| Native lifetime and writer checks | Source-linked | 10 modes x 5 = 50 passed |
+| Public observability, including preparation refusal | Packaged framework | 5 modes x 5 = 25 passed |
+| Default provider probe | Packaged framework | 5 processes; Dobby, Gum and ElleKit each passed 5/5 |
+| ElleKit dynamic fallback | Packaged framework | 5 passed, exhausting all 8 actual pool slots |
+| Rebind writer smoke | Source-linked | 5 passed |
+| Rebind adapter smoke | Packaged framework | 5 passed |
+| Swift synthetic / real / facade | Packaged framework | 5 each = 15 passed |
+
+Native device coverage includes 320 abandoned and 160 stale preparations.
+Unpublished native storage is reclaimed; activated/uncertain backing is retained.
+Review also corrected mandatory-domain rollback's fresh result so it cannot
+advertise a stale released continuation. Internal writers return mutation state
+rather than Boolean success: an actual store followed by restoration failure is
+UNKNOWN, propagated correctly through native, terminal, memory, rebind and Swift
+paths. Device fault injection and host VM stubs do not establish actual kernel
+refusal or partial-write behavior.
+
+The runtime agent reported full host and full ASan/UBSan suites passing.
+[PERFORMANCE.md](PERFORMANCE.md#final-execution-results) records the four-lane
+compatibility/export results and resource evidence; its before/after benchmark
+tables are historical cleanup controls, not an overall speedup claim.
+
+Executed packaged framework SHA-256 (identical to the full rootless lane):
+
+```text
+e427d29b06a1ed087decd8525fb39ac6a37b4623933eb0843e88909b6d86bd6a
+```
+
+Final logs: `/tmp/opencode/hookkit-safety-20260907/`:
+`native-final.log`, `public-final.log`, `providers-writers-final.log`,
+`host-final.log`. Source hashes were unchanged across device and lane validation.
+All temporary device and lane staging directories were cleaned; global Theos
+and device providers/frameworks stayed unchanged. No commit, push or global
+install occurred.
+
+Intentional limits: real arm64e/PPL and legacy device execution, actual kernel
+VM refusal/partial-write execution, and syscall overlap remain unproven;
+executing target pages were excluded. Real absent/malformed/late provider-loader
+integration was not implemented, with no loader seam or global changes.
+Adapter availability rediscovery is covered only on host, unlike the packaged
+real-provider execution above. Artifact inspection remains non-exhaustive;
+these runs do not prove complete allocation accounting or RSS/latency savings.

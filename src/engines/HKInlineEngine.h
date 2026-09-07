@@ -93,9 +93,9 @@ typedef enum {
     HK_INLINE_NEEDS_CONTINUATION,
 } hk_inline_status_t;
 
-// The one device-only operation. Returns false if the store could not be
-// performed (protection change refused, address not writable, ...).
-typedef bool (*hk_inline_write_fn)(void *ctx, uintptr_t address,
+// NONE proves no write. COMPLETE includes protection restoration; PARTIAL and
+// UNKNOWN mean possible publication and must never be treated as refusal.
+typedef hk_mutation_state_t (*hk_inline_write_fn)(void *ctx, uintptr_t address,
                                    const uint8_t *data, size_t size);
 
 typedef struct {
@@ -125,11 +125,8 @@ hk_inline_status_t hk_inline_prepare(uintptr_t target, uintptr_t replacement,
 // Returns the honest mutation state:
 //   NONE      nothing was written -- a clean refusal
 //   COMPLETE  the branch was written
-// There is no PARTIAL: the patch is one store of 4 or 16 bytes, and a store
-// that fails leaves nothing behind. (A device writer that could tear would
-// have to report that itself; the seam returns a bool, so a torn write is not
-// representable here and would be a device-side bug, not a state this engine
-// can produce.)
+//   PARTIAL/UNKNOWN propagate a partial or uncertain writer outcome, including
+//                  a store followed by failed protection restoration.
 //
 // `sink` may be NULL; when present, one HK_ARTIFACT_TARGET_TEXT_PATCH is
 // recorded carrying the original bytes.

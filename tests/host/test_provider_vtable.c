@@ -20,6 +20,7 @@ typedef struct {
     bool hook_success;
     bool allow_null_original;
     bool original_visible_during_hook;
+    bool hook_requested_original;
     void *original;
     void *visible_original;
     void *installed;
@@ -33,6 +34,8 @@ typedef struct {
     unsigned seal_calls;
     unsigned free_calls;
     bool static_backing;
+    bool fail_alloc;
+    bool fail_seal;
 } fake_provider_t;
 
 static void fake_original(void) {}
@@ -72,6 +75,7 @@ static int fake_hook(void *opaque, void *target, void *replacement,
                      void **out_original) {
     fake_provider_t *fake = opaque;
     fake->hook_calls++;
+    fake->hook_requested_original = out_original != NULL;
     fake->original_visible_during_hook = fake->visible_original != NULL;
     if (!fake->hook_success || target != fake->entry ||
         replacement != (void *)fake_replacement ||
@@ -90,6 +94,7 @@ static uintptr_t fake_alloc(void *opaque, size_t size, uintptr_t near,
     fake_provider_t *fake = opaque;
     (void)near;
     fake->alloc_calls++;
+    if (fake->fail_alloc) return 0;
     mapping->kind = fake->static_backing ? HK_MAPPING_STATIC_HOOKKIT_SECTION : HK_MAPPING_ANONYMOUS;
     mapping->base = (uintptr_t)fake->page;
     mapping->size = sizeof(fake->page);
@@ -99,7 +104,7 @@ static uintptr_t fake_alloc(void *opaque, size_t size, uintptr_t near,
 static bool fake_seal(void *opaque, uintptr_t page, size_t size) {
     fake_provider_t *fake = opaque;
     fake->seal_calls++;
-    return page == (uintptr_t)fake->page && size == sizeof(fake->page);
+    return !fake->fail_seal && page == (uintptr_t)fake->page && size == sizeof(fake->page);
 }
 
 static void fake_free(void *opaque, uintptr_t page, size_t size) {
@@ -394,6 +399,12 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(bool static_backing) {
            (HK_EFFECT_PROVIDER_IMAGE_LOAD | HK_EFFECT_PROVIDER_ACTIVATION | HK_EFFECT_UNKNOWN_PROCESS_MUTATION | effect));
     assert(hook->result.continuation.relocated_instruction_count == 4);
     assert(hook->result.continuation.fully_inspected);
+    assert(hook->result.continuation.address ==
+           (uintptr_t)fake.page + HK_RELOC_THUNK_BYTES);
+    assert(memcmp((const void *)hook->result.continuation.address,
+                  fake.entry, sizeof(fake.entry)) == 0);
+    hk_id_t mapping_id = hook->result.continuation.mapping_id;
+    assert(mapping_id.high || mapping_id.low);
 
     // This is what the canonical facade publishes after prepare. The fake
     // provider observes it while applying the patch, before it returns.
@@ -401,6 +412,7 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(bool static_backing) {
     report = NULL;
     assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
     assert(fake.hook_calls == 1 && fake.original_visible_during_hook);
+    assert(!fake.hook_requested_original);
     assert(hook->result.outcome == HK_OUTCOME_ACTIVE);
     assert(hook->result.original_available);
     assert(hk_original_slot_load(hk_hook_original_slot(hook)) ==
@@ -421,17 +433,133 @@ static void test_ellekit_uses_hookkit_hybrid_continuation(bool static_backing) {
             assert(a.replacement_pointer == spec.replacement);
         } else {
             assert(a.mapping.kind == hook->result.continuation.mapping_kind);
+            assert(a.mapping.mapping_id.high == mapping_id.high &&
+                   a.mapping.mapping_id.low == mapping_id.low);
             assert(a.mapping.base == (uintptr_t)fake.page && a.mapping.size == sizeof(fake.page));
             assert(a.mapping.protection.read && a.mapping.protection.execute && !a.mapping.protection.write);
         }
     }
-    hk_artifact_snapshot_release(snapshot);
+    const hk_original_slot_t *slot = hk_hook_original_slot(hook);
     hk_report_release(report);
     hk_plan_release(plan);
-    assert(fake.free_calls == 0);
     hk_runtime_release(runtime);
+    assert(fake.free_calls == 0);
+    assert(hk_original_slot_load(slot) == fake.visible_original);
+    assert(snapshot_has(snapshot, static_backing ? HK_ARTIFACT_STATIC_CONTINUATION : HK_ARTIFACT_TRAMPOLINE,
+                        effect));
+    hk_artifact_snapshot_release(snapshot);
     reset_test_state();
     puts("  ellekit-hookkit-hybrid-continuation: PASS");
+}
+
+static void test_ellekit_hybrid_failure_lifetime(bool static_backing) {
+    enum { ALLOC_FAIL, SEAL_FAIL, ACTIVATE_FAIL, ABANDON, STALE, PROVIDER_FAIL };
+    for (int failure = ALLOC_FAIL; failure <= PROVIDER_FAIL; failure++) {
+        fake_provider_t fake = fake_provider();
+        fake.static_backing = static_backing;
+        fake.fail_alloc = failure == ALLOC_FAIL;
+        fake.fail_seal = failure == SEAL_FAIL;
+        fake.activate = failure != ACTIVATE_FAIL;
+        fake.hook_success = failure != PROVIDER_FAIL;
+        hk_provider_engine_ctx_t ctx =
+            provider_context(HK_PROVIDER_ELLEKIT, &fake, true, false);
+        hk_runtime_t *runtime = NULL;
+        hk_plan_t *plan = NULL;
+        hk_hook_t *hook = NULL;
+        assert(hk_runtime_create(NULL, &runtime) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_with_context(runtime,
+               hk_ellekit_provider_vtable(), &ctx));
+        assert(hk_plan_create(runtime, NULL, &plan) == HK_STATUS_OK);
+        hk_hook_spec_t spec = address_spec("provider.ellekit.failure-lifetime", &fake);
+        uint8_t before[sizeof(fake.entry)];
+        memcpy(before, fake.entry, sizeof(before));
+        assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+        assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+        assert(hook->matched_engine == hk_ellekit_provider_vtable());
+        assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+        assert(fake.alloc_calls == 1);
+        assert(fake.seal_calls == (failure != ALLOC_FAIL));
+        assert(fake.activate_calls == (failure >= ACTIVATE_FAIL));
+        assert(fake.hook_calls == 0);
+        assert(memcmp(before, fake.entry, sizeof(before)) == 0);
+        if (failure <= ACTIVATE_FAIL) {
+            assert(hook->result.outcome == HK_OUTCOME_FAILED_SAFE);
+            assert(hook->result.mutation == HK_MUTATION_NONE);
+            assert(fake.free_calls == (failure != ALLOC_FAIL));
+        } else {
+            assert(hook->result.outcome == HK_OUTCOME_PREPARED);
+            assert(fake.free_calls == 0);
+        }
+        if (failure == STALE || failure == PROVIDER_FAIL) {
+            if (failure == STALE) fake.entry[0] ^= 1u;
+            hk_report_t *report = NULL;
+            assert(hk_plan_commit(plan, &report) == HK_STATUS_OK);
+            assert(hook->result.outcome == (failure == STALE
+                   ? HK_OUTCOME_FAILED_SAFE : HK_OUTCOME_FAILED_UNKNOWN));
+            assert(hook->result.mutation == (failure == STALE
+                   ? HK_MUTATION_NONE : HK_MUTATION_UNKNOWN));
+            assert(fake.hook_calls == (failure == PROVIDER_FAIL));
+            assert(!fake.hook_requested_original);
+            hk_artifact_snapshot_t *snapshot = NULL;
+            assert(hk_report_copy_artifacts(report, &snapshot) == HK_STATUS_OK);
+            assert(hk_artifact_snapshot_count(snapshot) == (failure == STALE ? 0u : 2u));
+            if (failure == PROVIDER_FAIL) {
+                hk_effects_t effect = static_backing
+                    ? HK_EFFECT_STATIC_CONTINUATION_USE : HK_EFFECT_EXECUTABLE_ALLOCATION;
+                assert(hook->result.observed_commit_effects ==
+                       (effect | HK_EFFECT_UNKNOWN_PROCESS_MUTATION));
+                assert(snapshot_has(snapshot, static_backing
+                       ? HK_ARTIFACT_STATIC_CONTINUATION : HK_ARTIFACT_TRAMPOLINE, effect));
+                assert(snapshot_has(snapshot, HK_ARTIFACT_UNKNOWN_PROCESS_MUTATION,
+                                    HK_EFFECT_UNKNOWN_PROCESS_MUTATION));
+                assert(hook->result.continuation.mapping_base == (uintptr_t)fake.page);
+            }
+            hk_artifact_snapshot_release(snapshot);
+            hk_report_release(report);
+        }
+        assert(!hook->result.original_available);
+        assert(hk_original_slot_load(hk_hook_original_slot(hook)) == NULL);
+        hk_plan_release(plan);
+        hk_runtime_release(runtime);
+        // Once called, even a failing vendor may have made the continuation live.
+        assert(fake.free_calls == (failure != ALLOC_FAIL && failure != PROVIDER_FAIL));
+        reset_test_state();
+    }
+    puts("  ellekit-hybrid-failure-lifetime: PASS");
+}
+
+static void test_provider_adapter_rediscovers_availability(void) {
+    const hk_engine_vtable_t *engines[] = {
+        hk_gum_provider_vtable(), hk_ellekit_provider_vtable(), hk_substitute_provider_vtable(),
+    };
+    const hk_provider_kind_t kinds[] = {
+        HK_PROVIDER_GUM, HK_PROVIDER_ELLEKIT, HK_PROVIDER_SUBSTITUTE,
+    };
+    // Adapter boundary only: this does not exercise Darwin's file cache/dlsym.
+    for (size_t i = 0; i < sizeof(engines) / sizeof(engines[0]); i++) {
+        fake_provider_t fake = fake_provider();
+        hk_provider_engine_ctx_t ctx = provider_context(kinds[i], &fake, true, false);
+        hk_runtime_t *runtime = NULL;
+        assert(hk_runtime_create(NULL, &runtime) == HK_STATUS_OK);
+        assert(hk_runtime_register_engine_with_context(runtime, engines[i], &ctx));
+        for (unsigned attempt = 0; attempt < 3; attempt++) {
+            fake.available = attempt == 1;
+            hk_plan_t *plan = NULL;
+            hk_hook_t *hook = NULL;
+            assert(hk_plan_create(runtime, NULL, &plan) == HK_STATUS_OK);
+            hk_hook_spec_t spec = address_spec("provider.rediscovery", &fake);
+            assert(hk_plan_add_hook(plan, &spec, &hook) == HK_STATUS_OK);
+            assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+            assert(hook->result.outcome == (fake.available
+                   ? HK_OUTCOME_ANALYZED : HK_OUTCOME_NO_ROUTE));
+            assert(fake.discover_calls == attempt + 1);
+            assert(fake.activate_calls == 0 && fake.alloc_calls == 0 && fake.hook_calls == 0);
+            hk_plan_release(plan);
+        }
+        hk_runtime_release(runtime);
+        reset_test_state();
+    }
+    puts("  provider-adapter-rediscovers-availability: PASS");
 }
 
 static void test_stale_and_provider_failure_are_not_retried(void) {
@@ -552,6 +680,9 @@ int main(void) {
     test_gum_activation_and_constraints();
     test_ellekit_uses_hookkit_hybrid_continuation(false);
     test_ellekit_uses_hookkit_hybrid_continuation(true);
+    test_ellekit_hybrid_failure_lifetime(false);
+    test_ellekit_hybrid_failure_lifetime(true);
+    test_provider_adapter_rediscovers_availability();
     test_stale_and_provider_failure_are_not_retried();
     test_dynamic_continuation_policy_refuses_route();
     test_substitute_old_lane_lifecycle();

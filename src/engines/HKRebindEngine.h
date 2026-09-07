@@ -58,9 +58,9 @@ typedef enum {
     HK_REBIND_SCOPE_UNREPRESENTABLE,
 } hk_rebind_status_t;
 
-// The one device-only operation. Returns false if the store could not be
-// performed (protection change refused, address not writable, ...).
-typedef bool (*hk_rebind_write_fn)(void *ctx, uintptr_t address, uint64_t value);
+// NONE proves no write; COMPLETE includes protection restoration. A partial
+// or uncertain slot write returns PARTIAL or UNKNOWN, including on the first slot.
+typedef hk_mutation_state_t (*hk_rebind_write_fn)(void *ctx, uintptr_t address, uint64_t value);
 
 typedef struct {
     const void *image_base;   // the mach header, as mapped
@@ -119,7 +119,9 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
 //   PARTIAL   some sites were written and then one failed. NO fallback may be
 //             attempted after this; the image is in a mixed state and the
 //             caller is told so rather than left to assume.
-// `sink` may be NULL; when present, one artifact is recorded per written site.
+//   UNKNOWN   a writer cannot prove its final state. NO fallback is safe.
+// `sink` may be NULL; otherwise records completed and potentially written sites.
+// `out_written` counts only sites whose writers returned COMPLETE.
 hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
                                      const hk_rebind_plan_t *plan,
                                      uint64_t replacement,

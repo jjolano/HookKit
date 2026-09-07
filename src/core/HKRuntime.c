@@ -693,13 +693,13 @@ static void *hk_platform_replace_method(void *ctx, void *cls, void *sel,
     return (void *)class_replaceMethod((Class)cls, (SEL)sel, (IMP)imp, types);
 }
 
-static bool hk_platform_write_memory(void *ctx, uintptr_t address,
+static hk_mutation_state_t hk_platform_write_memory(void *ctx, uintptr_t address,
                                      const uint8_t *data, size_t size) {
     (void)ctx;
     return hk_native_patch_memory((void *)address, data, size);
 }
 
-static bool hk_platform_write_pointer(void *ctx, uintptr_t address,
+static hk_mutation_state_t hk_platform_write_pointer(void *ctx, uintptr_t address,
                                       uint64_t value) {
     (void)ctx;
     return hk_native_patch_pointer((void *)address,

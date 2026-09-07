@@ -117,8 +117,9 @@ typedef bool (*hk_reloc_seal_fn)(void *ctx, uintptr_t page, size_t size);
 // page reached by a live entry patch is never passed here -- reclaiming that
 // would free code a thread may be inside. On device this is vm_deallocate.
 typedef void (*hk_reloc_free_fn)(void *ctx, uintptr_t page, size_t size);
-// Write the entry patch. Same shape as the terminal engine's seam.
-typedef bool (*hk_reloc_write_fn)(void *ctx, uintptr_t address,
+// Write the entry patch. NONE proves no write; COMPLETE includes protection
+// restoration. PARTIAL/UNKNOWN forbid reclaiming backing or retrying the hook.
+typedef hk_mutation_state_t (*hk_reloc_write_fn)(void *ctx, uintptr_t address,
                                   const uint8_t *data, size_t size);
 
 typedef struct {
@@ -138,6 +139,7 @@ typedef struct {
     // can enter part-written -- surfaced rather than hidden.
     bool atomic_entry_patch;
     bool captured;
+    bool activated;                       // entry may have been published; never reclaim
 } hk_reloc_plan_t;
 
 // Phase 1. Allocates and seals the trampoline, relocates the prologue into it,
@@ -170,7 +172,7 @@ void hk_reloc_describe_continuation(const hk_reloc_plan_t *plan,
 // Phase 2. Revalidates the entry against what prepare read, then patches it.
 // Records HK_ARTIFACT_TARGET_TEXT_PATCH and, for the page,
 // HK_ARTIFACT_TRAMPOLINE. `sink` may be NULL.
-// If the patch does not land, the trampoline is RECLAIMED via `free_page`
+// Only when the write is proven NONE is the trampoline RECLAIMED via `free_page`
 // rather than left behind: nothing branches to it, so nothing can be executing
 // in it, and keeping it would be a leaked executable page for a hook that
 // never happened. Nothing is recorded either -- MUTATION_NONE with no

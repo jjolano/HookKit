@@ -25,14 +25,14 @@
 #define A64_BRK0  0xD4200000u   // BRK #0
 #define A64_ADRP0 0x90000000u   // ADRP x0, #0 -- relocation-fragile, irrelevant here
 
-static bool buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
+static hk_mutation_state_t buffer_write(void *ctx, uintptr_t address, const uint8_t *data, size_t size) {
     (void)ctx;
     memcpy((void *)address, data, size);
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
-static bool refuse_write(void *ctx, uintptr_t a, const uint8_t *d, size_t s) {
+static hk_mutation_state_t refuse_write(void *ctx, uintptr_t a, const uint8_t *d, size_t s) {
     (void)ctx; (void)a; (void)d; (void)s;
-    return false;
+    return HK_MUTATION_NONE;
 }
 
 // A 4-byte-aligned block of instructions standing in for a function.

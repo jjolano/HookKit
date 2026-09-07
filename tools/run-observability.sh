@@ -9,7 +9,8 @@ if [[ -n ${SSHPASS:-} ]]; then
 fi
 remote() { "${ssh_command[@]}" "$host" "$@"; }
 uuid() {
-    "$THEOS/toolchain/linux/iphone/bin/otool" -l "$1" |
+    # iPhone 7 executes arm64; keep the packaged fat framework byte-for-byte.
+    "$THEOS/toolchain/linux/iphone/bin/otool" -arch arm64 -l "$1" |
         awk '$1 == "uuid" { print tolower($2) }' | tr -d '-'
 }
 framework_uuid=$(uuid "$obj/HookKit.framework/HookKit")
@@ -40,7 +41,7 @@ for run in 1 2 3 4 5; do
     for mode in memory objc inline static prepare-refusal; do
         printf 'RUN repeat=%s mode=%s\n' "$run" "$mode"
         status=0
-        remote "HK_EXPECT_FRAMEWORK='$directory/HookKit.framework/HookKit' HK_EXPECT_FRAMEWORK_UUID='$framework_uuid' HK_EXPECT_PROBE='$directory/device_observability' HK_EXPECT_PROBE_UUID='$probe_uuid' '$directory/device_observability' '$mode'" || status=$?
+        remote "cd '$directory' && ulimit -c 0 && HK_EXPECT_FRAMEWORK='$directory/HookKit.framework/HookKit' HK_EXPECT_FRAMEWORK_UUID='$framework_uuid' HK_EXPECT_PROBE='$directory/device_observability' HK_EXPECT_PROBE_UUID='$probe_uuid' '$directory/device_observability' '$mode'" || status=$?
         printf 'EXIT repeat=%s mode=%s status=%s\n' "$run" "$mode" "$status"
         if [[ $mode == prepare-refusal && $status != 0 ]]; then exit "$status"; fi
         [[ $status == 0 || $status == 77 ]] || exit "$status"

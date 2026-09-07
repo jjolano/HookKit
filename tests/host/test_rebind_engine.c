@@ -95,14 +95,14 @@ typedef struct {
     int fail_on_call;   // 1-based; 0 = never fail
 } writer_t;
 
-static bool test_write(void *ctx, uintptr_t address, uint64_t value) {
+static hk_mutation_state_t test_write(void *ctx, uintptr_t address, uint64_t value) {
     writer_t *w = (writer_t *)ctx;
     w->calls++;
     if (w->fail_on_call && w->calls == w->fail_on_call) {
-        return false;
+        return HK_MUTATION_NONE;
     }
     memcpy((void *)address, &value, sizeof(value));
-    return true;
+    return HK_MUTATION_COMPLETE;
 }
 
 static hk_rebind_target_t make_target(uint8_t *img, writer_t *w) {

@@ -75,9 +75,12 @@ hk_mutation_state_t hk_mempatch_commit(uintptr_t address,
         return HK_MUTATION_NONE;
     }
 
-    if (!write(write_ctx, address, replacement.data, plan->size)) {
-        return HK_MUTATION_NONE;  // store refused before touching anything
+    hk_mutation_state_t mutation = write(write_ctx, address, replacement.data, plan->size);
+    if (mutation == HK_MUTATION_NONE) {
+        return HK_MUTATION_NONE;
     }
+    if (mutation != HK_MUTATION_COMPLETE && mutation != HK_MUTATION_PARTIAL)
+        mutation = HK_MUTATION_UNKNOWN;
 
     if (sink) {
         hk_artifact_t a;
@@ -85,7 +88,7 @@ hk_mutation_state_t hk_mempatch_commit(uintptr_t address,
         a.struct_size = sizeof(a);
         a.struct_version = HK_ABI_VERSION_3_0;
         a.kind = HK_ARTIFACT_MEMORY_PATCH;
-        a.state = HK_ARTIFACT_COMMITTED;
+        a.state = mutation == HK_MUTATION_COMPLETE ? HK_ARTIFACT_COMMITTED : HK_ARTIFACT_PARTIALLY_APPLIED;
         a.effects = HK_EFFECT_MEMORY_MUTATION;
         a.engine_id.data = "memory";
         a.engine_id.length = 6;
@@ -101,8 +104,8 @@ hk_mutation_state_t hk_mempatch_commit(uintptr_t address,
         // relocating inline hook would not be -- that distinction is why this
         // flag exists per artifact rather than per engine.)
         a.mechanically_reversible = true;
-        a.safe_to_reverse_after_activation = true;
+        a.safe_to_reverse_after_activation = mutation == HK_MUTATION_COMPLETE;
         (void)hk_artifact_sink_record(sink, &a);
     }
-    return HK_MUTATION_COMPLETE;
+    return mutation;
 }

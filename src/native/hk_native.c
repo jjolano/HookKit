@@ -173,9 +173,8 @@ static bool hk_range_protection(vm_address_t start, vm_address_t end, vm_prot_t 
     return have;
 }
 
-// Serializes every write to a live mapping. hk_write is the single choke
-// point for hook installs, memory patches and Swift vtable slots, so one lock
-// here covers all of them. Without it two patches landing on the same page
+// Byte and pointer writers share this lock across protection queries, writes
+// and restoration. Without it two patches landing on the same page
 // race the protect/restore pair — the second memcpy hits a page the first has
 // already resealed read-execute, which faults — and on the remap path both
 // threads snapshot the page and the second remap silently discards the first
@@ -194,7 +193,7 @@ static pthread_mutex_t g_write_lock = PTHREAD_MUTEX_INITIALIZER;
 // unmapped instead, and a page left read-write-execute is refused at
 // instruction fetch whatever vm_protect returned. This is the real content of
 // "hooks must be installed at load time".
-static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
+static hk_mutation_state_t hk_write_locked(void *dst, const void *src, size_t size) {
     mach_port_t task = mach_task_self();
     vm_address_t start = 0;
     vm_address_t end = 0;
@@ -203,7 +202,7 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
     // Fail closed on arithmetic overflow: a wrapped range would protect (and
     // memcpy) the wrong bytes.
     if(!hk_range_bounds(dst, size, &start, &end)) {
-        return KERN_INVALID_ADDRESS;
+        return HK_MUTATION_NONE;
     }
 
     vm_size_t len = end - start;
@@ -213,7 +212,7 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
     // The whole range must share one protection: restoring a single value
     // over differently protected regions would flatten them.
     if(!hk_range_protection(start, end, &restore)) {
-        return KERN_INVALID_ADDRESS;
+        return HK_MUTATION_NONE;
     }
 
     // VM_PROT_COPY forces the copy-on-write break, giving us a private dirty
@@ -230,10 +229,10 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
         kr = vm_protect(task, start, len, FALSE, restore);
 
         if(kr != KERN_SUCCESS) {
-            return kr;
+            return HK_MUTATION_UNKNOWN;
         }
 
-        return KERN_SUCCESS;
+        return HK_MUTATION_COMPLETE;
     }
 
     // Refused (arm64e under PPL is the usual reason): patch a private copy and
@@ -242,7 +241,7 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
     kr = vm_allocate(task, &tmp, len, VM_FLAGS_ANYWHERE);
 
     if(kr != KERN_SUCCESS) {
-        return kr;
+        return HK_MUTATION_NONE;
     }
 
     memcpy((void *)tmp, (const void *)start, len);
@@ -252,7 +251,7 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
 
     if(kr != KERN_SUCCESS) {
         vm_deallocate(task, tmp, len);
-        return kr;
+        return HK_MUTATION_NONE;
     }
 
     vm_address_t dest = start;
@@ -270,14 +269,16 @@ static kern_return_t hk_write_locked(void *dst, const void *src, size_t size) {
         sys_icache_invalidate(dst, size);
     }
 
-    return kr;
+    // A failed overwrite remap is not proof that the old target mapping survived.
+    return kr == KERN_SUCCESS ? HK_MUTATION_COMPLETE : HK_MUTATION_UNKNOWN;
 }
 
-static kern_return_t hk_write(void *dst, const void *src, size_t size) {
+static hk_mutation_state_t hk_write(void *dst, const void *src, size_t size) {
     pthread_mutex_lock(&g_write_lock);
-    kern_return_t kr = hk_write_locked(dst, src, size);
+    hk_mutation_state_t mutation = hk_write_locked(dst, src, size);
+    hk_memo_region.valid = false;
     pthread_mutex_unlock(&g_write_lock);
-    return kr;
+    return mutation;
 }
 
 // True when every page of [addr, addr+len) lies inside a VM region with read
@@ -440,25 +441,24 @@ bool hk_native_reloc_unprotect(uintptr_t page, size_t size) {
 
 #pragma mark - Patching
 
-bool hk_native_patch_memory(void *target, const void *data, size_t size) {
+hk_mutation_state_t hk_native_patch_memory(void *target, const void *data, size_t size) {
     if(!target || !data || size == 0) {
-        return false;
+        return HK_MUTATION_NONE;
     }
 
     // Patching a region with its own bytes is a no-op that can only fail.
     if(target == data) {
-        return false;
+        return HK_MUTATION_NONE;
     }
 
-    kern_return_t kr = hk_write(hk_strip_code(target), data, size);
-    return kr == KERN_SUCCESS;
+    return hk_write(hk_strip_code(target), data, size);
 }
 
-bool hk_native_patch_pointer(void *slot, void *value) {
+hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value) {
     // Alignment is the whole contract: an unaligned store is not single-copy
     // atomic, and a reader could observe half of each pointer.
     if(!slot || ((uintptr_t)slot & (sizeof(void *) - 1)) != 0) {
-        return false;
+        return HK_MUTATION_NONE;
     }
 
     vm_address_t start = 0;
@@ -466,29 +466,32 @@ bool hk_native_patch_pointer(void *slot, void *value) {
     vm_prot_t restore = VM_PROT_NONE;
 
     if(!hk_range_bounds(slot, sizeof(void *), &start, &end)) {
-        return false;
+        return HK_MUTATION_NONE;
     }
 
+    pthread_mutex_lock(&g_write_lock);
     if(!hk_range_protection(start, end, &restore)) {
-        return false;
+        pthread_mutex_unlock(&g_write_lock);
+        return HK_MUTATION_NONE;
     }
 
     mach_port_t task = mach_task_self();
     vm_size_t len = end - start;
 
-    pthread_mutex_lock(&g_write_lock);
-
     kern_return_t kr = vm_protect(task, start, len, FALSE,
                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
 
+    hk_mutation_state_t mutation = HK_MUTATION_NONE;
     if(kr == KERN_SUCCESS) {
         __atomic_store_n((void **)slot, value, __ATOMIC_RELEASE);
         kr = vm_protect(task, start, len, FALSE, restore);
+        mutation = kr == KERN_SUCCESS ? HK_MUTATION_COMPLETE : HK_MUTATION_UNKNOWN;
     }
 
+    hk_memo_region.valid = false;
     pthread_mutex_unlock(&g_write_lock);
 
-    return kr == KERN_SUCCESS;
+    return mutation;
 }
 
 #else   // !arm64
@@ -497,14 +500,14 @@ bool hk_native_supported(void) {
     return false;
 }
 
-bool hk_native_patch_memory(void *target, const void *data, size_t size) {
+hk_mutation_state_t hk_native_patch_memory(void *target, const void *data, size_t size) {
     (void)target; (void)data; (void)size;
-    return false;
+    return HK_MUTATION_NONE;
 }
 
-bool hk_native_patch_pointer(void *slot, void *value) {
+hk_mutation_state_t hk_native_patch_pointer(void *slot, void *value) {
     (void)slot; (void)value;
-    return false;
+    return HK_MUTATION_NONE;
 }
 
 bool hk_native_range_readable(const void *addr, size_t len) {

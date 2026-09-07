@@ -200,12 +200,13 @@ static hk_verify_result_t reloc_verify_one_ctx(void *engine_ctx,
 }
 
 static void reloc_release_prepared(void *engine_ctx, void *prepared) {
-    (void)engine_ctx;
-    // Frees the PLAN, not the trampoline. The page is deliberately not
-    // reclaimed here: once sealed it may be executing, and a plan being
-    // released says nothing about whether a thread is inside it. That the page
-    // outlives the plan is why commit records it as an artifact -- the ledger
-    // is how it stays accounted for.
+    const hk_reloc_engine_ctx_t *ctx = engine_ctx;
+    hk_reloc_plan_t *plan = prepared;
+    // Sealing is not activation. An abandoned or core-refused preparation has
+    // published no entry branch or original slot; only its metadata was read.
+    if (ctx && plan && !plan->activated && ctx->free_page && plan->trampoline) {
+        ctx->free_page(ctx->seam_ctx, plan->trampoline, plan->trampoline_size);
+    }
     free(prepared);
 }
 
