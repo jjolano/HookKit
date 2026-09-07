@@ -16,7 +16,7 @@
 // layout), but go through image_path + real temp files instead of the
 // file_image seam, which bypasses the cache.
 
-// _GNU_SOURCE for mkstemp and pthread_barrier_* under -std=c11.
+// _GNU_SOURCE for mkstemp under -std=c11.
 #define _GNU_SOURCE
 
 #include <assert.h>
@@ -138,7 +138,28 @@ typedef struct {
 } image_t;
 
 static image_t g_images[N_IMAGES];
-static pthread_barrier_t g_round_barrier;
+
+// Portable round barrier: pthread_barrier_t is absent on Apple platforms.
+// N_THREADS workers rendezvous through a mutex + generation counter; the
+// last arrival broadcasts and the rest wait for the generation to advance.
+static pthread_mutex_t g_round_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_round_cond = PTHREAD_COND_INITIALIZER;
+static unsigned g_round_arrived = 0, g_round_generation = 0;
+
+static void round_rendezvous(void) {
+    pthread_mutex_lock(&g_round_mutex);
+    unsigned generation = g_round_generation;
+    if (++g_round_arrived == N_THREADS) {
+        g_round_arrived = 0;
+        g_round_generation++;
+        pthread_cond_broadcast(&g_round_cond);
+    } else {
+        while (generation == g_round_generation) {
+            pthread_cond_wait(&g_round_cond, &g_round_mutex);
+        }
+    }
+    pthread_mutex_unlock(&g_round_mutex);
+}
 
 static void make_image(image_t *img, unsigned index) {
     uint8_t uuid[16];
@@ -210,7 +231,7 @@ static void *worker(void *opaque) {
         // Line up the threads so parses and evictions overlap as much as a
         // test can arrange: while one thread parses image i, the others are
         // filling the 4-entry cache with the remaining images.
-        pthread_barrier_wait(&g_round_barrier);
+        round_rendezvous();
         for (unsigned k = 0; k < N_IMAGES; k++) {
             check_prepare(&g_images[(seed + k) % N_IMAGES]);
         }
@@ -288,7 +309,6 @@ int main(void) {
     }
     printf("  single-threaded-warmup: PASS\n");
 
-    assert(pthread_barrier_init(&g_round_barrier, NULL, N_THREADS) == 0);
     pthread_t threads[N_THREADS];
     for (unsigned i = 0; i < N_THREADS; i++) {
         assert(pthread_create(&threads[i], NULL, worker,
@@ -297,7 +317,6 @@ int main(void) {
     for (unsigned i = 0; i < N_THREADS; i++) {
         assert(pthread_join(threads[i], NULL) == 0);
     }
-    pthread_barrier_destroy(&g_round_barrier);
 
     for (unsigned i = 0; i < N_IMAGES; i++) {
         unlink(g_images[i].path);
