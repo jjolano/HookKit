@@ -356,8 +356,14 @@ test-legacy-bridge:
 	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_legacy_bridge tests/host/test_legacy_bridge.c src/core/HKImageCatalog.c src/core/HKIDs.c src/core/HKRuntime.c src/core/HKOwnership.c src/core/HKPlan.c src/core/HKReport.c src/core/HKArtifactLedger.c src/core/HKInstalled.c src/engines/HKSwiftEngine.c src/native/hk_swift.c $(HK_PLATFORM_ENGINE_SOURCES) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_legacy_bridge$(ECHO_END)
 
 .PHONY: test-native-write
+# The native-vm fixtures shadow the platform <mach/mach.h> and
+# <libkern/OSCacheControl.h> so the host test exercises the stubbed Mach/VM
+# seam. Plain -I appends after the SDK include path, which is wrong on macOS
+# where the real headers exist (-idirafter is also "after"). -isystem is
+# searched before the standard system dirs on clang and gcc (but after -I,
+# which is exactly the documented shadow order).
 test-native-write:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -Itests/fixtures/native-vm -o $(THEOS_OBJ_DIR)/test_native_write tests/host/test_native_write.c src/core/HKIDs.c src/core/HKArtifactLedger.c src/core/HKImageCatalog.c $(filter-out src/native/hk_native.c,$(HK_PLATFORM_ENGINE_SOURCES)) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_native_write$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -isystem $(CURDIR)/tests/fixtures/native-vm -o $(THEOS_OBJ_DIR)/test_native_write tests/host/test_native_write.c src/core/HKIDs.c src/core/HKArtifactLedger.c src/core/HKImageCatalog.c $(filter-out src/native/hk_native.c,$(HK_PLATFORM_ENGINE_SOURCES)) -lpthread $(HK_PLATFORM_ENGINE_LDFLAGS) && $(THEOS_OBJ_DIR)/test_native_write$(ECHO_END)
 
 .PHONY: test-pointer-auth
 test-pointer-auth:
