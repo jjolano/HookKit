@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../../src/internal/HKPointerAuth.h"
@@ -61,24 +62,34 @@ int main(void) {
     recorded.target_kind = HK_TARGET_FUNCTION_ADDRESS;
     recorded.target.address.address = raw;
     recorded.target.address.may_strip_pac_or_thumb_state = true;
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    assert(hk_ownership_target_key_copy(&recorded, &key, &key_size));
     hk_ownership_lock();
-    assert(hk_ownership_record_locked(&recorded, "pac-test", (void *)1,
+    assert(hk_ownership_record_locked(key, key_size, "pac-test", (void *)1,
                                       (void *)2));
     hk_ownership_unlock();
+    free(key);
 
     hk_hook_spec_t query = recorded;
     query.target.address.address = callable;
     hk_ownership_state_t state;
+    assert(hk_ownership_target_key_copy(&query, &key, &key_size));
     hk_ownership_lock();
-    assert(hk_ownership_lookup_locked(&query, &state) == HK_OWNERSHIP_FOUND);
+    hk_ownership_lookup_locked(key, key_size, &state);
     hk_ownership_unlock();
+    free(key);
     assert(state.present && state.head_replacement == (void *)1);
 
     query.target.address.address = raw;
     query.target.address.may_strip_pac_or_thumb_state = false;
+    assert(hk_ownership_target_key_copy(&query, &key, &key_size));
     hk_ownership_lock();
-    assert(hk_ownership_lookup_locked(&query, &state) == HK_OWNERSHIP_FOUND);
+    hk_ownership_lookup_locked(key, key_size, &state);
     hk_ownership_unlock();
+    assert(state.present && state.head_replacement == (void *)1);
+    free(key);
+    hk_ownership_reset_for_testing();
 #if defined(HK_EXPECT_NATIVE_PTRAUTH)
     printf("native pointer-auth tests passed\n");
 #else

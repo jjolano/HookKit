@@ -13,13 +13,7 @@
 
 typedef struct {
     hk_artifact_t value;
-    char *engine_id;
-    char *mechanism_id;
-    char *image_path;
-    uint8_t *original_bytes;
-    uint8_t *expected_bytes;
-    uint8_t *expected_mask;
-    uint8_t *current_bytes;
+    char *payload;
 } hk_owned_artifact_t;
 
 // Mutable, append-only. Grows geometrically -- the same array-doubling the
@@ -42,85 +36,81 @@ static void owned_release(hk_owned_artifact_t *item) {
     if (!item) {
         return;
     }
-    free(item->engine_id);
-    free(item->mechanism_id);
-    free(item->image_path);
-    free(item->original_bytes);
-    free(item->expected_bytes);
-    free(item->expected_mask);
-    free(item->current_bytes);
+    free(item->payload);
     memset(item, 0, sizeof(*item));
-}
-
-static bool copy_string_view(hk_string_view_t *view, char **owned) {
-    if (!view->data) {
-        return true;
-    }
-    if (view->length == SIZE_MAX) {
-        return false;
-    }
-    char *copy = (char *)malloc(view->length + 1);
-    if (!copy) {
-        return false;
-    }
-    memcpy(copy, view->data, view->length);
-    copy[view->length] = '\0';
-    *owned = copy;
-    view->data = copy;
-    return true;
-}
-
-static bool copy_image_path(hk_image_identity_t *image, char **owned) {
-    if (!image->path) {
-        return true;
-    }
-    size_t length = strlen(image->path);
-    if (length == SIZE_MAX) {
-        return false;
-    }
-    char *copy = (char *)malloc(length + 1);
-    if (!copy) {
-        return false;
-    }
-    memcpy(copy, image->path, length + 1);
-    *owned = copy;
-    image->path = copy;
-    return true;
-}
-
-static bool copy_inline_bytes(hk_byte_storage_t *storage, uint8_t **owned) {
-    if (storage->representation != HK_BYTE_STORAGE_INLINE &&
-        storage->representation != HK_BYTE_STORAGE_INLINE_AND_HASH) {
-        return true;
-    }
-    if (storage->inline_bytes.size == 0) {
-        return true;
-    }
-    if (!storage->inline_bytes.data) {
-        return false;
-    }
-    uint8_t *copy = (uint8_t *)malloc(storage->inline_bytes.size);
-    if (!copy) {
-        return false;
-    }
-    memcpy(copy, storage->inline_bytes.data, storage->inline_bytes.size);
-    *owned = copy;
-    storage->inline_bytes.data = copy;
-    return true;
 }
 
 static bool owned_copy(const hk_artifact_t *source, hk_owned_artifact_t *out) {
     memset(out, 0, sizeof(*out));
     out->value = *source;
-    if (!copy_string_view(&out->value.engine_id, &out->engine_id) ||
-        !copy_string_view(&out->value.mechanism_id, &out->mechanism_id) ||
-        !copy_image_path(&out->value.image, &out->image_path) ||
-        !copy_inline_bytes(&out->value.original_bytes, &out->original_bytes) ||
-        !copy_inline_bytes(&out->value.expected_bytes, &out->expected_bytes) ||
-        !copy_inline_bytes(&out->value.expected_mask, &out->expected_mask) ||
-        !copy_inline_bytes(&out->value.current_bytes, &out->current_bytes)) {
-        owned_release(out);
+    hk_string_view_t path = {
+        .data = source->image.path,
+        .length = source->image.path ? strlen(source->image.path) : 0,
+    };
+    hk_string_view_t *strings[] = {
+        &out->value.engine_id, &out->value.mechanism_id, &path,
+    };
+    hk_byte_storage_t *bytes[] = {
+        &out->value.original_bytes, &out->value.expected_bytes,
+        &out->value.expected_mask, &out->value.current_bytes,
+    };
+    size_t sizes[4] = {0};
+    size_t total = 0;
+    for (size_t i = 0; i < 3; i++) {
+        if (!strings[i]->data) {
+            if (strings[i]->length != 0) {
+                return false;
+            }
+            continue;
+        }
+        if (strings[i]->length == SIZE_MAX ||
+            strings[i]->length + 1 > SIZE_MAX - total) {
+            return false;
+        }
+        total += strings[i]->length + 1;
+    }
+    for (size_t i = 0; i < 4; i++) {
+        if (bytes[i]->representation != HK_BYTE_STORAGE_INLINE &&
+            bytes[i]->representation != HK_BYTE_STORAGE_INLINE_AND_HASH) {
+            continue;
+        }
+        sizes[i] = bytes[i]->inline_bytes.size;
+        if (sizes[i] == 0) {
+            bytes[i]->inline_bytes.data = NULL;
+        }
+        if ((sizes[i] && !bytes[i]->inline_bytes.data) ||
+            sizes[i] > SIZE_MAX - total) {
+            return false;
+        }
+        total += sizes[i];
+    }
+    if (total == 0) {
+        return true;
+    }
+    // Only character/byte views live here, so no alignment padding is needed.
+    // Each ledger/snapshot still owns an independent deep copy.
+    out->payload = malloc(total);
+    if (!out->payload) {
         return false;
+    }
+    char *cursor = out->payload;
+    for (size_t i = 0; i < 3; i++) {
+        if (!strings[i]->data) {
+            continue;
+        }
+        memcpy(cursor, strings[i]->data, strings[i]->length);
+        cursor[strings[i]->length] = '\0';
+        strings[i]->data = cursor;
+        cursor += strings[i]->length + 1;
+    }
+    out->value.image.path = path.data;
+    for (size_t i = 0; i < 4; i++) {
+        if (sizes[i] == 0) {
+            continue;
+        }
+        memcpy(cursor, bytes[i]->inline_bytes.data, sizes[i]);
+        bytes[i]->inline_bytes.data = (const uint8_t *)cursor;
+        cursor += sizes[i];
     }
     return true;
 }

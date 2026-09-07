@@ -444,6 +444,18 @@ static void test_grouped_commit_revalidates_and_verifies_each_member(void) {
     assert(first->result.verified);
     assert(second->result.verified);
 
+    hk_ownership_state_t ownership;
+    hk_ownership_lock();
+    hk_ownership_lookup_locked(first->target_key, first->target_key_size,
+                               &ownership);
+    assert(ownership.present);
+    assert(ownership.head_replacement == first_spec.replacement);
+    hk_ownership_lookup_locked(second->target_key, second->target_key_size,
+                               &ownership);
+    assert(ownership.present);
+    assert(ownership.head_replacement == second_spec.replacement);
+    hk_ownership_unlock();
+
     hk_artifact_snapshot_t *snapshot = NULL;
     assert(hk_report_copy_artifacts(report, &snapshot) == HK_STATUS_OK);
     assert(hk_artifact_snapshot_count(snapshot) == 2);
@@ -458,6 +470,17 @@ static void test_grouped_commit_revalidates_and_verifies_each_member(void) {
 
     hk_artifact_snapshot_release(snapshot);
     hk_report_release(report);
+    hk_plan_release(plan);
+    // Both grouped records survive their plan and exclude a later group.
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &first_spec, &first) == HK_STATUS_OK);
+    assert(hk_plan_add_hook(plan, &second_spec, &second) == HK_STATUS_OK);
+    assert(hk_plan_analyze(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_prepare(plan, NULL) == HK_STATUS_OK);
+    assert(hk_plan_commit(plan, NULL) == HK_STATUS_OK);
+    assert(first->result.outcome == HK_OUTCOME_CONFLICT);
+    assert(second->result.outcome == HK_OUTCOME_CONFLICT);
+    assert(fake_group_commit_calls == 1);
     hk_plan_release(plan);
     hk_runtime_release(rt);
     printf("  grouped-commit-revalidates-and-verifies-each-member: PASS\n");

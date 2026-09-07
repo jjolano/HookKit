@@ -142,6 +142,7 @@ static void test_pointer_views_are_owned(void) {
     char mechanism[] = "temporary-mechanism";
     char path[] = "/temporary/image";
     uint8_t bytes[] = {1, 2, 3, 4};
+    uint8_t expected[] = {5, 6, 7}, mask[] = {0xFF, 0}, current[] = {8};
     hk_artifact_t a = make_marked_artifact(77);
     a.engine_id.data = engine;
     a.engine_id.length = strlen(engine);
@@ -152,6 +153,12 @@ static void test_pointer_views_are_owned(void) {
     a.original_bytes.inline_bytes.data = bytes;
     a.original_bytes.inline_bytes.size = sizeof(bytes);
     a.original_bytes.length = sizeof(bytes);
+    a.expected_bytes = a.expected_mask = a.current_bytes = a.original_bytes;
+    a.expected_bytes.inline_bytes = (hk_bytes_view_t){expected, sizeof(expected)};
+    a.expected_mask.inline_bytes = (hk_bytes_view_t){mask, sizeof(mask)};
+    a.current_bytes.inline_bytes = (hk_bytes_view_t){current, sizeof(current)};
+    a.current_bytes.representation = HK_BYTE_STORAGE_INLINE_AND_HASH;
+    memset(a.current_bytes.sha256, 0xA5, sizeof(a.current_bytes.sha256));
 
     hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
     assert(ledger && hk_artifact_ledger_append(ledger, &a));
@@ -159,9 +166,22 @@ static void test_pointer_views_are_owned(void) {
     strcpy(mechanism, "changed");
     strcpy(path, "/changed");
     memset(bytes, 9, sizeof(bytes));
+    memset(expected, 9, sizeof(expected));
+    memset(mask, 9, sizeof(mask));
+    memset(current, 9, sizeof(current));
 
     hk_artifact_snapshot_t *snapshot = NULL;
     assert(hk_artifact_snapshot_from_ledger(ledger, &snapshot) == HK_STATUS_OK);
+    assert(hk_artifact_ledger_mark_verified(ledger, 0, 1));
+    hk_artifact_snapshot_t *verified = NULL;
+    assert(hk_artifact_snapshot_from_ledger(ledger, &verified) == HK_STATUS_OK);
+    assert(hk_artifact_ledger_mark_compensated(ledger, 0, 1));
+    hk_report_t *report = hk_report_create(NULL, 0);
+    assert(report);
+    hk_report_adopt_artifact_ledger(report, ledger);
+    hk_artifact_snapshot_t *compensated = NULL;
+    assert(hk_report_copy_artifacts(report, &compensated) == HK_STATUS_OK);
+    hk_report_release(report);
     hk_artifact_t out;
     assert(hk_artifact_snapshot_copy_at(snapshot, 0, &out) == HK_STATUS_OK);
     assert(out.engine_id.length == strlen("temporary-engine"));
@@ -170,9 +190,26 @@ static void test_pointer_views_are_owned(void) {
     assert(strcmp(out.image.path, "/temporary/image") == 0);
     assert(out.original_bytes.inline_bytes.size == sizeof(bytes));
     assert(memcmp(out.original_bytes.inline_bytes.data, (uint8_t[]){1, 2, 3, 4}, sizeof(bytes)) == 0);
+    assert(out.state == HK_ARTIFACT_COMMITTED && !out.verified);
+    hk_artifact_t later;
+    assert(hk_artifact_snapshot_copy_at(verified, 0, &later) == HK_STATUS_OK);
+    assert(later.state == HK_ARTIFACT_VERIFIED && later.verified);
+    assert(later.engine_id.data != out.engine_id.data);
+    assert(later.original_bytes.inline_bytes.data != out.original_bytes.inline_bytes.data);
+    hk_artifact_snapshot_release(verified);
+    assert(hk_artifact_snapshot_copy_at(compensated, 0, &later) == HK_STATUS_OK);
+    assert(later.state == HK_ARTIFACT_COMPENSATED && !later.verified);
+    hk_artifact_snapshot_release(compensated);
+    assert(out.expected_bytes.inline_bytes.size == sizeof(expected));
+    assert(out.expected_mask.inline_bytes.size == sizeof(mask));
+    assert(out.current_bytes.inline_bytes.size == sizeof(current));
+    assert(memcmp(out.expected_bytes.inline_bytes.data, (uint8_t[]){5, 6, 7}, sizeof(expected)) == 0);
+    assert(memcmp(out.expected_mask.inline_bytes.data, (uint8_t[]){0xFF, 0}, sizeof(mask)) == 0);
+    assert(out.current_bytes.inline_bytes.data[0] == 8);
+    assert(out.current_bytes.representation == HK_BYTE_STORAGE_INLINE_AND_HASH);
+    assert(memcmp(out.current_bytes.sha256, a.current_bytes.sha256, 32) == 0);
 
     hk_artifact_snapshot_release(snapshot);
-    hk_artifact_ledger_destroy(ledger);
     printf("  pointer-views-are-owned: PASS\n");
 }
 
@@ -251,7 +288,111 @@ static void test_report_copy_artifacts_empty(void) {
     printf("  report-copy-artifacts-empty: PASS\n");
 }
 
+static void test_payload_edges(void) {
+    hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+    assert(ledger);
+    hk_artifact_t a = make_marked_artifact(1);
+    a.engine_id = (hk_string_view_t){ .data = "", .length = SIZE_MAX };
+    assert(!hk_artifact_ledger_append(ledger, &a));
+    a.engine_id.length = SIZE_MAX - 1;
+    a.mechanism_id.data = "";
+    assert(!hk_artifact_ledger_append(ledger, &a)); // sum of string sizes overflows
+    a.engine_id.length = 0;
+    a.original_bytes.representation = HK_BYTE_STORAGE_INLINE;
+    a.original_bytes.inline_bytes.size = 1;
+    assert(!hk_artifact_ledger_append(ledger, &a)); // missing inline data
+    a.original_bytes.inline_bytes.data = (const uint8_t *)"x";
+    a.original_bytes.inline_bytes.size = SIZE_MAX;
+    assert(!hk_artifact_ledger_append(ledger, &a)); // strings + bytes overflow
+    a.engine_id.data = a.mechanism_id.data = NULL;
+    a.original_bytes.inline_bytes.size = SIZE_MAX - 1;
+    a.expected_bytes = a.original_bytes;
+    a.expected_bytes.inline_bytes.size = 2;
+    assert(!hk_artifact_ledger_append(ledger, &a)); // sum of byte sizes overflows
+    assert(hk_artifact_ledger_count(ledger) == 0);
+
+    a = make_marked_artifact(2);
+    char bounded[] = {'a', '\0', 'b'}; // length-delimited, not a C string
+    a.engine_id = (hk_string_view_t){ .data = bounded, .length = sizeof(bounded) };
+    a.mechanism_id.data = "";
+    a.image.path = "";
+    a.original_bytes.representation = HK_BYTE_STORAGE_INLINE;
+    a.expected_bytes.representation = HK_BYTE_STORAGE_INLINE_AND_HASH;
+    a.current_bytes.representation = HK_BYTE_STORAGE_HASH;
+    a.current_bytes.length = 123;
+    memset(a.current_bytes.sha256, 0x5A, 32);
+    assert(hk_artifact_ledger_append(ledger, &a));
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_artifact_snapshot_from_ledger(ledger, &snap) == HK_STATUS_OK);
+    hk_artifact_ledger_destroy(ledger);
+    hk_artifact_t out;
+    assert(hk_artifact_snapshot_copy_at(snap, 0, &out) == HK_STATUS_OK);
+    assert(memcmp(out.engine_id.data, bounded, sizeof(bounded)) == 0);
+    assert(out.engine_id.data[sizeof(bounded)] == '\0');
+    assert(out.mechanism_id.data && out.mechanism_id.data[0] == '\0');
+    assert(out.image.path && out.image.path[0] == '\0');
+    assert(out.original_bytes.inline_bytes.data == NULL);
+    assert(out.expected_bytes.inline_bytes.data == NULL);
+    assert(out.current_bytes.representation == HK_BYTE_STORAGE_HASH);
+    assert(out.current_bytes.length == 123);
+    assert(memcmp(out.current_bytes.sha256, a.current_bytes.sha256, 32) == 0);
+    hk_artifact_snapshot_release(snap);
+    printf("  payload-edges: PASS\n");
+}
+
+static void test_payload_view_boundaries(void) {
+    hk_artifact_ledger_t *ledger = hk_artifact_ledger_create();
+    assert(ledger);
+    hk_artifact_t a = make_marked_artifact(3);
+    a.engine_id.length = 1;
+    assert(!hk_artifact_ledger_append(ledger, &a));
+    a.engine_id = (hk_string_view_t){ .data = "engine", .length = 6 };
+    a.mechanism_id.length = 1;
+    hk_artifact_sink_t sink = { .ledger = ledger };
+    assert(!hk_artifact_sink_record(&sink, &a));
+    assert(sink.record_failed && sink.observed_effects == a.effects);
+    assert(hk_artifact_ledger_count(ledger) == 0);
+
+    // Exercise both the allocation-free and populated-payload copy paths.
+    for (int populated = 0; populated < 2; populated++) {
+        uint8_t borrowed = 0xAB;
+        a = make_marked_artifact(4);
+        if (populated) a.engine_id = (hk_string_view_t){ .data = "e", .length = 1 };
+        a.original_bytes.representation = HK_BYTE_STORAGE_INLINE;
+        a.original_bytes.inline_bytes.data = &borrowed;
+        a.expected_bytes = a.expected_mask = a.current_bytes = a.original_bytes;
+        a.expected_bytes.representation = HK_BYTE_STORAGE_INLINE_AND_HASH;
+        a.current_bytes.representation = HK_BYTE_STORAGE_INLINE_AND_HASH;
+        memset(a.current_bytes.sha256, 0x5A, 32);
+        assert(hk_artifact_ledger_append(ledger, &a));
+        assert(a.original_bytes.inline_bytes.data == &borrowed); // input untouched
+    }
+    hk_artifact_ledger_t *copy = hk_artifact_ledger_create();
+    assert(copy && hk_artifact_ledger_append_ledger(copy, ledger));
+    hk_artifact_ledger_destroy(ledger);
+    hk_artifact_snapshot_t *snap = NULL;
+    assert(hk_artifact_snapshot_from_ledger(copy, &snap) == HK_STATUS_OK);
+    hk_artifact_ledger_destroy(copy);
+    for (size_t i = 0; i < 2; i++) {
+        hk_artifact_t out;
+        assert(hk_artifact_snapshot_copy_at(snap, i, &out) == HK_STATUS_OK);
+        assert(out.original_bytes.inline_bytes.data == NULL);
+        assert(out.expected_bytes.inline_bytes.data == NULL);
+        assert(out.expected_mask.inline_bytes.data == NULL);
+        assert(out.current_bytes.inline_bytes.data == NULL);
+        assert(out.original_bytes.inline_bytes.size == 0);
+        assert(out.current_bytes.representation == HK_BYTE_STORAGE_INLINE_AND_HASH);
+        assert(memcmp(out.current_bytes.sha256, a.current_bytes.sha256, 32) == 0);
+        assert(out.engine_id.length == i);
+        if (i == 0) assert(out.engine_id.data == NULL);
+    }
+    hk_artifact_snapshot_release(snap);
+    printf("  payload-view-boundaries: PASS\n");
+}
+
 int main(void) {
+    test_payload_view_boundaries();
+    test_payload_edges();
     test_empty_ledger_snapshot();
     test_append_and_snapshot();
     test_snapshot_independent_of_later_appends();

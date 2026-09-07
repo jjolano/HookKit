@@ -19,12 +19,6 @@
 extern "C" {
 #endif
 
-typedef enum {
-    HK_OWNERSHIP_NO_RECORD = 0,
-    HK_OWNERSHIP_FOUND,
-    HK_OWNERSHIP_OUT_OF_MEMORY,
-} hk_ownership_status_t;
-
 typedef struct {
     bool present;
     void *head_replacement;
@@ -38,12 +32,15 @@ typedef struct {
 void hk_ownership_lock(void);
 void hk_ownership_unlock(void);
 
-hk_ownership_status_t hk_ownership_lookup_locked(
-    const hk_hook_spec_t *spec,
+// Keys must be nonempty canonical keys from hk_ownership_target_key_copy.
+// Lookup borrows the key and cannot fail; out_state must be non-NULL.
+void hk_ownership_lookup_locked(
+    const uint8_t *key, size_t key_size,
     hk_ownership_state_t *out_state);
 
+// Copies the key only when creating a process-lifetime record.
 bool hk_ownership_record_locked(
-    const hk_hook_spec_t *spec,
+    const uint8_t *key, size_t key_size,
     const char *engine_id,
     void *replacement,
     void *predecessor);

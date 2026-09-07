@@ -310,18 +310,10 @@ void hk_ownership_unlock(void) {
     pthread_mutex_unlock(&g_ownership_lock);
 }
 
-hk_ownership_status_t hk_ownership_lookup_locked(
-    const hk_hook_spec_t *spec,
+void hk_ownership_lookup_locked(
+    const uint8_t *key, size_t key_size,
     hk_ownership_state_t *out_state) {
-    if (!out_state) {
-        return HK_OWNERSHIP_OUT_OF_MEMORY;
-    }
     memset(out_state, 0, sizeof(*out_state));
-    uint8_t *key = NULL;
-    size_t key_size = 0;
-    if (!key_build(spec, &key, &key_size)) {
-        return HK_OWNERSHIP_OUT_OF_MEMORY;
-    }
     hk_ownership_record_t *record = find_record(key, key_size);
     if (record) {
         out_state->present = true;
@@ -329,23 +321,14 @@ hk_ownership_status_t hk_ownership_lookup_locked(
         out_state->predecessor = record->predecessor;
         out_state->engine_id = record->engine_id;
     }
-    free(key);
-    return record ? HK_OWNERSHIP_FOUND : HK_OWNERSHIP_NO_RECORD;
 }
 
-bool hk_ownership_record_locked(const hk_hook_spec_t *spec,
+bool hk_ownership_record_locked(const uint8_t *key, size_t key_size,
                                 const char *engine_id,
                                 void *replacement,
                                 void *predecessor) {
-    uint8_t *key = NULL;
-    size_t key_size = 0;
-    if (!key_build(spec, &key, &key_size)) {
-        return false;
-    }
-
     hk_ownership_record_t *record = find_record(key, key_size);
     if (record) {
-        free(key);
         record->head_replacement = replacement;
         record->predecessor = predecessor;
         return true;
@@ -353,20 +336,24 @@ bool hk_ownership_record_locked(const hk_hook_spec_t *spec,
 
     record = calloc(1, sizeof(*record));
     if (!record) {
-        free(key);
         return false;
     }
+    record->key = malloc(key_size);
+    if (!record->key) {
+        free(record);
+        return false;
+    }
+    memcpy(record->key, key, key_size);
     if (engine_id) {
         size_t length = strlen(engine_id) + 1;
         record->engine_id = malloc(length);
         if (!record->engine_id) {
+            free(record->key);
             free(record);
-            free(key);
             return false;
         }
         memcpy(record->engine_id, engine_id, length);
     }
-    record->key = key;
     record->key_size = key_size;
     record->head_replacement = replacement;
     record->predecessor = predecessor;

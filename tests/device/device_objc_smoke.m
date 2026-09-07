@@ -203,6 +203,45 @@ int main(void) {
 
     hk_plan_release(plan);
     hk_runtime_release(runtime);
+
+    // Each attempt outlives the previous plan's cached target key. The stale
+    // head attempt must fail without writing, proving ownership was retained.
+    for (int attempt = 0; attempt < 3; attempt++) {
+        bool stale = attempt == 1;
+        if (attempt > 0) {
+            class_replaceMethod(smoke_class, selector,
+                                stale ? (IMP)hk_replacement : (IMP)hk_deferred_replacement,
+                                "i@:");
+        }
+        runtime = NULL;
+        plan = NULL;
+        hk_objc_spec_init(&spec, "device-objc-ownership",
+                          hk_objc_instance_method(smoke_class, selector),
+                          attempt == 0 ? (void *)hk_deferred_replacement : (void *)hk_original);
+        spec.original_requirement = HK_ORIGINAL_DIRECT_PREDECESSOR;
+        if (hk_runtime_create(NULL, &runtime) != HK_STATUS_OK ||
+            hk_plan_create(runtime, NULL, &plan) != HK_STATUS_OK ||
+            hk_plan_add_hook(plan, &spec, &hook) != HK_STATUS_OK ||
+            hk_plan_analyze(plan, NULL) != HK_STATUS_OK ||
+            hk_plan_prepare(plan, NULL) != HK_STATUS_OK ||
+            hk_plan_commit(plan, NULL) != HK_STATUS_OK ||
+            hk_hook_copy_result(hook, &result) != HK_STATUS_OK) {
+            return fail("ownership lifecycle");
+        }
+        void *original = hk_original_slot_load(hk_hook_original_slot(hook));
+        bool valid = stale
+            ? result.outcome == HK_OUTCOME_FAILED_SAFE &&
+              result.mutation == HK_MUTATION_NONE && send_value(object, selector) == 42
+            : result.outcome == HK_OUTCOME_ACTIVE && original &&
+              ((int (*)(id, SEL))original)(object, selector) == (attempt == 0 ? 42 : 99) &&
+              send_value(object, selector) == (attempt == 0 ? 99 : 7);
+        hk_plan_release(plan);
+        hk_runtime_release(runtime);
+        if (!valid) {
+            return fail("ownership chain or stale-head rejection");
+        }
+    }
+    puts("HookKit ObjC ownership: PASS (2 chains after teardown, 1 stale-head rejection)");
     if (run_deferred_lifecycle_smoke() != 0) {
         return 1;
     }

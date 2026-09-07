@@ -54,6 +54,14 @@ static void test_same_target_chains_after_runtime_release(void) {
     assert(hk_runtime_create(NULL, &first_runtime) == HK_STATUS_OK);
     hk_hook_spec_t first_spec = chain_spec(
         "ownership.first", (void *)0xC0DE5100);
+    hk_image_selector_t path_a = { .kind = HK_IMAGE_EXACT_PATH, .path = "/a" };
+    hk_image_selector_t path_b = { .kind = HK_IMAGE_EXACT_PATH, .path = "/b" };
+    const hk_image_selector_t *images[] = {&path_a, &path_b};
+    first_spec.target.symbol.caller_image_scope = (hk_image_selector_t){
+        .kind = HK_IMAGE_EXPLICIT_SET,
+        .explicit_set = images,
+        .explicit_set_count = 2,
+    };
     hk_plan_t *first_plan = NULL;
     hk_report_t *first_report = NULL;
     hk_hook_t *first = commit_one(first_runtime, &fake_chain_engine,
@@ -71,6 +79,15 @@ static void test_same_target_chains_after_runtime_release(void) {
     assert(hk_runtime_create(NULL, &second_runtime) == HK_STATUS_OK);
     hk_hook_spec_t second_spec = chain_spec(
         "ownership.second", (void *)0xC0DE5200);
+    // Reordering, nesting and repeated selectors retain the same identity.
+    const hk_image_selector_t *equivalent_images[] = {
+        &path_b, &first_spec.target.symbol.caller_image_scope,
+    };
+    second_spec.target.symbol.caller_image_scope = (hk_image_selector_t){
+        .kind = HK_IMAGE_EXPLICIT_SET,
+        .explicit_set = equivalent_images,
+        .explicit_set_count = 2,
+    };
     hk_plan_t *second_plan = NULL;
     hk_report_t *second_report = NULL;
     hk_hook_t *second = commit_one(second_runtime, &fake_chain_engine,
@@ -80,6 +97,13 @@ static void test_same_target_chains_after_runtime_release(void) {
     assert(hk_original_slot_load(hk_hook_original_slot(second)) ==
            (void *)0xC0DE5100);
     assert(fake_chain_head == (void *)0xC0DE5200);
+    hk_ownership_state_t ownership;
+    hk_ownership_lock();
+    hk_ownership_lookup_locked(second->target_key, second->target_key_size,
+                               &ownership);
+    assert(ownership.present && ownership.head_replacement == second_spec.replacement);
+    assert(ownership.predecessor == first_spec.replacement);
+    hk_ownership_unlock();
 
     hk_report_release(second_report);
     hk_plan_release(second_plan);

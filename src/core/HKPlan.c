@@ -746,7 +746,7 @@ static void hk_plan_finish_commit_attempt(
 
     if (ownership && ownership_caps && mutation == HK_MUTATION_COMPLETE &&
         !hk_ownership_record_locked(
-            &hook->spec, ownership_caps->engine_id,
+            hook->target_key, hook->target_key_size, ownership_caps->engine_id,
             hook->spec.replacement, sink->published_original)) {
         mutation = HK_MUTATION_UNKNOWN;
         out->mutation = mutation;
@@ -1288,23 +1288,8 @@ hk_status_t hk_runtime_drain_pending(hk_runtime_t *runtime, hk_report_t **out_re
 
         hk_ownership_lock();
         hk_ownership_state_t ownership;
-        hk_ownership_status_t ownership_status =
-            hk_ownership_lookup_locked(&hook->spec, &ownership);
-        if (ownership_status == HK_OWNERSHIP_OUT_OF_MEMORY) {
-            out->outcome = HK_OUTCOME_FAILED_UNKNOWN;
-            out->mutation = HK_MUTATION_UNKNOWN;
-            out->retryable = false;
-            out->currently_valid = true;
-            out->error_domain.data = "core";
-            out->error_domain.length = 4;
-            out->error_code = HK_STATUS_OUT_OF_MEMORY;
-            out->error_message.data = "could not inspect target ownership";
-            out->error_message.length = strlen(out->error_message.data);
-            hook->result = *out;
-            hk_ownership_unlock();
-            hk_hook_free(hook);
-            continue;
-        }
+        hk_ownership_lookup_locked(hook->target_key, hook->target_key_size,
+                                   &ownership);
         hk_engine_capabilities_t caps = hook->matched_engine->describe();
         if (ownership.present &&
             (!(caps.chainable_target_kinds &
@@ -1375,7 +1360,8 @@ hk_status_t hk_runtime_drain_pending(hk_runtime_t *runtime, hk_report_t **out_re
                                    NULL);
         out->mutation = mutation;
         if (mutation == HK_MUTATION_COMPLETE &&
-            !hk_ownership_record_locked(&hook->spec, caps.engine_id,
+            !hk_ownership_record_locked(hook->target_key, hook->target_key_size,
+                                        caps.engine_id,
                                         hook->spec.replacement,
                                         sink.published_original)) {
             mutation = HK_MUTATION_UNKNOWN;
@@ -2167,10 +2153,10 @@ static size_t hk_plan_commit_group_count(const hk_plan_t *plan,
     }
     hk_ownership_lock();
     hk_ownership_state_t first_ownership;
-    hk_ownership_status_t first_ownership_status =
-        hk_ownership_lookup_locked(&first->spec, &first_ownership);
+    hk_ownership_lookup_locked(first->target_key, first->target_key_size,
+                               &first_ownership);
     hk_ownership_unlock();
-    if (first_ownership_status != HK_OWNERSHIP_NO_RECORD) {
+    if (first_ownership.present) {
         return 0;
     }
     const uint64_t generation =
@@ -2194,13 +2180,10 @@ static size_t hk_plan_commit_group_count(const hk_plan_t *plan,
         }
         hk_ownership_lock();
         hk_ownership_state_t ownership;
-        hk_ownership_status_t ownership_status =
-            hk_ownership_lookup_locked(&hook->spec, &ownership);
+        hk_ownership_lookup_locked(hook->target_key, hook->target_key_size,
+                                   &ownership);
         hk_ownership_unlock();
-        if (ownership_status == HK_OWNERSHIP_OUT_OF_MEMORY) {
-            return 0;
-        }
-        if (ownership_status != HK_OWNERSHIP_NO_RECORD) {
+        if (ownership.present) {
             break;
         }
         count++;
@@ -2379,7 +2362,8 @@ static hk_status_t hk_plan_commit_group(
         if (operation->mutation == HK_MUTATION_COMPLETE &&
             !operation->compensated &&
             !hk_ownership_record_locked(
-                &plan->hooks[commit_order[start + offset]]->spec,
+                plan->hooks[commit_order[start + offset]]->target_key,
+                plan->hooks[commit_order[start + offset]]->target_key_size,
                 caps.engine_id,
                 plan->hooks[commit_order[start + offset]]->spec.replacement,
                 operation->sink->published_original)) {
@@ -2579,15 +2563,8 @@ hk_status_t hk_plan_commit(hk_plan_t *plan, hk_report_t **out_report) {
 
         hk_ownership_lock();
         hk_ownership_state_t ownership;
-        hk_ownership_status_t ownership_status =
-            hk_ownership_lookup_locked(&hook->spec, &ownership);
-        if (ownership_status == HK_OWNERSHIP_OUT_OF_MEMORY) {
-            hk_ownership_unlock();
-            free(commit_order);
-            hk_artifact_ledger_destroy(ledger);
-            free(results);
-            return HK_STATUS_OUT_OF_MEMORY;
-        }
+        hk_ownership_lookup_locked(hook->target_key, hook->target_key_size,
+                                   &ownership);
         hk_engine_capabilities_t caps = hook->matched_engine->describe();
         const hk_target_kind_mask_t target_bit =
             HK_TARGET_KIND_BIT(hook->spec.target_kind);

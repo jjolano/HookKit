@@ -16,12 +16,15 @@
 // moved the plan forward.
 
 #include <assert.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../../src/core/HKOwnership.h"
 #include "../../src/core/HKPlanInternal.h"
+#include "../../src/core/HKReportInternal.h"
 #include "../../src/core/HKRuntimeInternal.h"
 #include "fake_engines.h"
 
@@ -38,8 +41,9 @@ extern void *__real_realloc(void *, size_t);
 
 static int g_fi_target;   // fail this (1-based) allocation while armed; 0 = disabled
 static int g_fi_count;    // allocations seen since arm
+static size_t g_fi_bytes; // requested bytes, not allocator usable size or RSS
 
-static void fi_arm(int nth) { g_fi_target = nth; g_fi_count = 0; g_fi_fired = 0; }
+static void fi_arm(int nth) { g_fi_target = nth; g_fi_count = 0; g_fi_fired = 0; g_fi_bytes = 0; }
 static void fi_disarm(void) { g_fi_target = 0; }
 
 static int fi_should_fail(void) {
@@ -51,14 +55,17 @@ static int fi_should_fail(void) {
 }
 
 void *__wrap_malloc(size_t n) {
+    if (g_fi_target) g_fi_bytes += n;
     if (fi_should_fail()) return NULL;
     return __real_malloc(n);
 }
 void *__wrap_calloc(size_t a, size_t b) {
+    if (g_fi_target) g_fi_bytes += a * b;
     if (fi_should_fail()) return NULL;
     return __real_calloc(a, b);
 }
 void *__wrap_realloc(void *p, size_t n) {
+    if (g_fi_target) g_fi_bytes += n;
     if (fi_should_fail()) return NULL;
     return __real_realloc(p, n);
 }
@@ -153,7 +160,189 @@ static void run_once(int inject_nth) {
     fi_disarm();
 }
 
+static void test_ownership_key_reuse(void) {
+    hk_ownership_reset_for_testing();
+    hk_runtime_t *rt = NULL;
+    hk_plan_t *plan = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_plan_create(rt, NULL, &plan) == HK_STATUS_OK);
+    add_one(plan, "key.first", "getpid");
+    struct hk_hook *hook = plan->hooks[0];
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    assert(hk_ownership_target_key_copy(&hook->spec, &key, &key_size));
+    assert(key != hook->target_key && key_size == hook->target_key_size);
+    assert(memcmp(key, hook->target_key, key_size) == 0);
+
+    hk_ownership_state_t state;
+    hk_ownership_lock();
+    fi_arm(1);
+    hk_ownership_lookup_locked(hook->target_key, hook->target_key_size, &state);
+    assert(!state.present && !g_fi_fired);
+    fi_disarm();
+    assert(hk_ownership_record_locked(hook->target_key, hook->target_key_size,
+                                      "key-engine", (void *)1, (void *)2));
+    // The record must own a copy, not retain the hook's storage.
+    memset(hook->target_key, 0, hook->target_key_size);
+    hk_plan_release(plan);
+    hk_runtime_release(rt);
+
+    fi_arm(1);
+    hk_ownership_lookup_locked(key, key_size, &state);
+    assert(state.present && state.head_replacement == (void *)1);
+    const char *engine_id = state.engine_id;
+    assert(hk_ownership_record_locked(key, key_size, "key-engine",
+                                      (void *)3, (void *)1));
+    hk_ownership_lookup_locked(key, key_size, &state);
+    assert(state.present && state.head_replacement == (void *)3);
+    assert(state.predecessor == (void *)1 && state.engine_id == engine_id);
+    assert(strcmp(state.engine_id, "key-engine") == 0 && !g_fi_fired);
+    fi_disarm();
+    hk_ownership_unlock();
+    free(key);
+    hk_ownership_reset_for_testing();
+    printf("  ownership-key-copy-and-allocation-free-reuse: PASS\n");
+}
+
+static void test_artifact_allocations(void) {
+#if defined(__linux__)
+    for (int shape = 0; shape < 4; shape++) {
+        hk_artifact_t a = {0};
+        uint8_t bytes[] = {1, 2, 3, 4};
+        if (shape > 0) {
+            a.engine_id = (hk_string_view_t){ .data = "objc", .length = 4 };
+        }
+        if (shape > 1) {
+            a.mechanism_id = (hk_string_view_t){ .data = "class_replaceMethod", .length = 19 };
+        }
+        if (shape == 3) {
+            a.image.path = "/temporary/image";
+            a.original_bytes.representation = HK_BYTE_STORAGE_INLINE_AND_HASH;
+            a.original_bytes.inline_bytes = (hk_bytes_view_t){ .data = bytes, .size = sizeof(bytes) };
+            a.original_bytes.length = sizeof(bytes);
+            a.expected_bytes = a.expected_mask = a.current_bytes = a.original_bytes;
+        }
+        fi_arm(INT_MAX);
+        hk_artifact_ledger_t *source = hk_artifact_ledger_create();
+        assert(source);
+        for (int i = 0; i < 64; i++) assert(hk_artifact_ledger_append(source, &a));
+        int append_count = g_fi_count;
+        size_t append_bytes = g_fi_bytes;
+        fi_arm(INT_MAX);
+        hk_artifact_ledger_t *copy = hk_artifact_ledger_create();
+        assert(copy && hk_artifact_ledger_append_ledger(copy, source));
+        int copy_count = g_fi_count;
+        size_t copy_bytes = g_fi_bytes;
+        fi_arm(INT_MAX);
+        hk_artifact_snapshot_t *snapshot = NULL;
+        assert(hk_artifact_snapshot_from_ledger(copy, &snapshot) == HK_STATUS_OK);
+        int snapshot_count = g_fi_count;
+        size_t snapshot_bytes = g_fi_bytes;
+        fi_disarm();
+        assert(append_count == (shape ? 70 : 6));
+        assert(copy_count == (shape ? 66 : 2));
+        assert(snapshot_count == (shape ? 66 : 2));
+        hk_artifact_ledger_destroy(source);
+        hk_artifact_ledger_destroy(copy);
+        assert(hk_artifact_snapshot_count(snapshot) == 64);
+        hk_artifact_snapshot_release(snapshot);
+        printf("  artifact-allocations shape=%d records=64: append=%d/%zu copy=%d/%zu snapshot=%d/%zu (calls/requested-bytes)\n",
+               shape, append_count, append_bytes, copy_count, copy_bytes,
+               snapshot_count, snapshot_bytes);
+    }
+#endif
+}
+
+static void test_artifact_copy_failures_and_lifetimes(void) {
+    uint8_t bytes[] = {1, 2, 3, 4};
+    hk_artifact_t a = {0};
+    a.engine_id = (hk_string_view_t){ .data = "engine", .length = 6 };
+    a.mechanism_id = (hk_string_view_t){ .data = "mechanism", .length = 9 };
+    a.image.path = "/image";
+    a.original_bytes.representation = HK_BYTE_STORAGE_INLINE;
+    a.original_bytes.inline_bytes = (hk_bytes_view_t){ .data = bytes, .size = sizeof(bytes) };
+    a.expected_bytes = a.expected_mask = a.current_bytes = a.original_bytes;
+    hk_artifact_ledger_t *source = hk_artifact_ledger_create();
+    assert(source && hk_artifact_ledger_append(source, &a));
+    assert(hk_artifact_ledger_append(source, &a));
+    for (int op = 0; op < 3; op++) {
+        int n = 1;
+        for (;; n++) {
+            hk_artifact_ledger_t *dest = hk_artifact_ledger_create();
+            assert(dest);
+            // A full destination forces growth, then failure can occur after
+            // a completed payload copy. The old four records must survive.
+            for (int i = 0; i < 4; i++) assert(hk_artifact_ledger_append(dest, &a));
+            hk_artifact_snapshot_t *snap = (hk_artifact_snapshot_t *)(uintptr_t)1;
+            fi_arm(n);
+            bool ok;
+            if (op == 0) {
+                ok = hk_artifact_ledger_append(dest, &a);
+            } else if (op == 1) {
+                ok = hk_artifact_ledger_append_ledger(dest, source);
+            } else {
+                hk_status_t status = hk_artifact_snapshot_from_ledger(source, &snap);
+                assert(status == HK_STATUS_OK || status == HK_STATUS_OUT_OF_MEMORY);
+                ok = status == HK_STATUS_OK;
+                if (!ok) assert(snap == NULL);
+            }
+            fi_disarm();
+            assert(ok == !g_fi_fired);
+            assert(hk_artifact_ledger_count(dest) ==
+                   (size_t)(4 + (ok && op < 2 ? op + 1 : 0)));
+            if (op == 2) hk_artifact_snapshot_release(snap);
+            assert(hk_artifact_snapshot_from_ledger(dest, &snap) == HK_STATUS_OK);
+            hk_artifact_ledger_destroy(dest);
+            hk_artifact_t out;
+            assert(hk_artifact_snapshot_copy_at(snap, 3, &out) == HK_STATUS_OK);
+            assert(memcmp(out.current_bytes.inline_bytes.data, bytes, sizeof(bytes)) == 0);
+            hk_artifact_snapshot_release(snap);
+            if (!g_fi_fired) break;
+            assert(n < 32);
+        }
+#if defined(__linux__)
+        assert(n == (op == 0 ? 3 : op == 1 ? 4 : 5));
+#endif
+        printf("  artifact-oom op=%d: %d allocation sites swept\n", op, n - 1);
+    }
+
+    hk_runtime_t *rt = NULL;
+    assert(hk_runtime_create(NULL, &rt) == HK_STATUS_OK);
+    assert(hk_runtime_append_artifacts(rt, source));
+    assert(hk_artifact_process_append_ledger(source));
+    hk_report_t *report = hk_report_create(NULL, 0);
+    assert(report);
+    hk_report_adopt_artifact_ledger(report, source);
+    hk_artifact_snapshot_t *report_snap = NULL, *runtime_snap = NULL, *process_snap = NULL;
+    assert(hk_report_copy_artifacts(report, &report_snap) == HK_STATUS_OK);
+    hk_report_release(report);
+    assert(hk_runtime_copy_artifacts(rt, &runtime_snap) == HK_STATUS_OK);
+    hk_runtime_release(rt);
+    assert(hk_copy_process_artifacts(&process_snap) == HK_STATUS_OK);
+    hk_artifact_t report_a, runtime_a, process_a;
+    assert(hk_artifact_snapshot_copy_at(report_snap, 0, &report_a) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_copy_at(runtime_snap, 0, &runtime_a) == HK_STATUS_OK);
+    assert(hk_artifact_snapshot_copy_at(process_snap,
+        hk_artifact_snapshot_count(process_snap) - 1, &process_a) == HK_STATUS_OK);
+    assert(report_a.engine_id.data != runtime_a.engine_id.data);
+    assert(runtime_a.engine_id.data != process_a.engine_id.data);
+    hk_artifact_snapshot_release(report_snap);
+    hk_artifact_snapshot_release(runtime_snap);
+    assert(strcmp(process_a.engine_id.data, "engine") == 0);
+    assert(strcmp(process_a.mechanism_id.data, "mechanism") == 0);
+    assert(strcmp(process_a.image.path, "/image") == 0);
+    assert(memcmp(process_a.original_bytes.inline_bytes.data, bytes, sizeof(bytes)) == 0);
+    assert(memcmp(process_a.expected_bytes.inline_bytes.data, bytes, sizeof(bytes)) == 0);
+    assert(memcmp(process_a.expected_mask.inline_bytes.data, bytes, sizeof(bytes)) == 0);
+    assert(memcmp(process_a.current_bytes.inline_bytes.data, bytes, sizeof(bytes)) == 0);
+    hk_artifact_snapshot_release(process_snap);
+    printf("  artifact-report-runtime-process-lifetimes: PASS\n");
+}
+
 int main(void) {
+    test_artifact_allocations();
+    test_artifact_copy_failures_and_lifetimes();
+    test_ownership_key_reuse();
     int n = 1;
     for (;;) {
         run_once(n);
