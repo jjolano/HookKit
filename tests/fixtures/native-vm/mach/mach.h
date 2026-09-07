@@ -84,7 +84,12 @@ typedef vm_region_basic_info_data_64_t *vm_region_info_t;
 #ifndef mach_task_self
 #define mach_task_self() 1
 #endif
+#endif // fixture types skipped: real <mach/mach.h> already included
 // Keep fixture functions from interposing on host system-library VM calls.
+// Outside the guard: the renames + stubs must apply on BOTH paths, since
+// the test file defines hk_test_* bodies and hk_native.c calls the short
+// names. On the real-headers path the signatures use the REAL types, which
+// is correct -- the stubs take/return the same platform ABI types.
 #define vm_region_64 hk_test_vm_region_64
 #define mach_port_deallocate hk_test_mach_port_deallocate
 #define vm_protect hk_test_vm_protect
@@ -99,5 +104,4 @@ kern_return_t vm_allocate(mach_port_t, vm_address_t *, vm_size_t, int);
 kern_return_t vm_deallocate(mach_port_t, vm_address_t, vm_size_t);
 kern_return_t vm_remap(mach_port_t, vm_address_t *, vm_size_t, vm_address_t,
                        int, mach_port_t, vm_address_t, int, vm_prot_t *, vm_prot_t *, int);
-#endif // fixture types skipped: real <mach/mach.h> already included
 #endif

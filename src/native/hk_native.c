@@ -3,11 +3,11 @@
 
 #if defined(__arm64__) || defined(__aarch64__)
 
-#include <pthread.h>
 #include <string.h>
 #include <unistd.h>
 #include <libkern/OSCacheControl.h>
 #include <mach/mach.h>
+#include <pthread.h>
 
 #define hk_strip_code(p) ((void *)hk_pac_strip_code((uintptr_t)(p)))
 
