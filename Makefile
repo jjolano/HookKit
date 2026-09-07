@@ -655,10 +655,21 @@ comma := ,
 HK_PLATFORM_ENGINE_SOURCES = src/core/HKImageScope.c src/engines/HKInlineEngine.c src/engines/HKInlineVtable.c src/engines/HKMemoryEngine.c src/engines/HKMemoryVtable.c src/engines/HKObjCEngine.c src/engines/HKObjCVtable.c src/engines/HKRebindEngine.c src/engines/HKRebindVtable.c src/engines/HKRelocInlineEngine.c src/engines/HKRelocInlineVtable.c src/resolvers/HKChainedFixups.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKExportTrie.c src/resolvers/HKImportSlots.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/native/hk_arm64.c src/native/hk_native.c src/native/hk_symbols.c
 HK_PLATFORM_ENGINE_LDFLAGS = $(if $(filter Darwin,$(HOST_OS)),-lobjc)
 MODERN_TOOLCHAIN ?= $(THEOS)/toolchain/modern/linux/iphone
+# Device smokes need a cross clang, but SDKBINPATH is only set by the lane
+# wrappers (lane.sh theos_abi_args) -- a bare `gmake device-compile-check`
+# (as CI runs it) sees `/clang`. Default to the bundled Linux cross toolchain
+# so the gate works standalone; lane wrappers and explicit overrides still win.
+ifeq ($(HOST_OS),Linux)
+DEVICE_SMOKE_CLANG ?= $(THEOS)/toolchain/linux/iphone/bin/clang
+DEVICE_CANONICAL_CLANG ?= $(THEOS)/toolchain/linux/iphone/bin/clang
+DEVICE_CANONICAL_SWIFTC ?= $(THEOS)/toolchain/linux/iphone/bin/swiftc
+DEVICE_CANONICAL_LD ?= $(THEOS)/toolchain/linux/iphone/bin/ld
+else
 DEVICE_SMOKE_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_SWIFTC ?= $(SDKBINPATH)/swiftc
 DEVICE_CANONICAL_LD ?= $(SDKBINPATH)/ld
+endif
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
 DEVICE_SMOKE_CLANG := $(MODERN_TOOLCHAIN)/bin/clang
