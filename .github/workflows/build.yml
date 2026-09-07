@@ -297,7 +297,11 @@ jobs:
         run: |
           brew untap aws/tap 2>/dev/null || true
           brew install make dpkg ldid
-          sudo git clone --recursive --quiet https://github.com/roothide/theos.git "$THEOS"
+          # jjolano/theos is upstream Theos plus RootHide support and this
+          # repo's lane contract (bin/lane.sh, provision.lock): build.sh
+          # sources lane.sh, so a Theos without it fails every lane before
+          # compiling. RootHide support is additive; other lanes ignore it.
+          sudo git clone --recursive --quiet https://github.com/jjolano/theos.git "$THEOS"
 
       # The lane TARGETs pin iPhoneOS16.5.sdk (see Makefile) so builds are
       # reproducible across toolchains; Xcode's bundled SDK may be newer, so
