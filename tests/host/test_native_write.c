@@ -7,11 +7,15 @@
 #ifndef __aarch64__
 #define __aarch64__ 1
 #endif
-#include <mach/mach.h>
-#include <libkern/OSCacheControl.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+// Forced first: the fixture <mach/mach.h> / <libkern/OSCacheControl.h> must
+// win over any same-named system headers. -isystem puts the fixture dir
+// before the standard system dirs, and -Werror=missing-include-dirs would
+// have caught a wrong path; the #error in the fixture catches a lost race.
+#include <mach/mach.h>
+#include <libkern/OSCacheControl.h>
 #include "../../src/native/hk_native.c"
 #include "../../src/engines/HKRelocInlineVtable.h"
 #include "../../src/engines/HKInlineEngine.h"
