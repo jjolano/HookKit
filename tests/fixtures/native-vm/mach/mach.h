@@ -2,6 +2,7 @@
 #define HK_TEST_MACH_H
 #include <stddef.h>
 #include <stdint.h>
+#if !defined(mach_port_t) && !defined(__darwin_mach_port_t)
 // On macOS the real <mach/mach.h> may already be pulled in (e.g. via
 // pthread.h) before hk_native.c's include resolves here. Guard every name
 // so the fixture degrades to "already provided" instead of redefinition.
@@ -98,4 +99,5 @@ kern_return_t vm_allocate(mach_port_t, vm_address_t *, vm_size_t, int);
 kern_return_t vm_deallocate(mach_port_t, vm_address_t, vm_size_t);
 kern_return_t vm_remap(mach_port_t, vm_address_t *, vm_size_t, vm_address_t,
                        int, mach_port_t, vm_address_t, int, vm_prot_t *, vm_prot_t *, int);
+#endif // fixture types skipped: real <mach/mach.h> already included
 #endif
