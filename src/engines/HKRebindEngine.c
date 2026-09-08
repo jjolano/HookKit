@@ -760,7 +760,7 @@ static hk_rebind_status_t prepare_file_chains(
     if (ctx.malformed || chained == HK_CHAINED_MALFORMED)
         return HK_REBIND_MALFORMED_IMAGE;
     if (chained != HK_CHAINED_OK) return HK_REBIND_UNSUPPORTED_FORMAT;
-    if (1) {
+    {
         pthread_mutex_lock(&g_rebind_symbol_cache_lock);
         int existing = -1;
         for (int i = 0; i < HK_REBIND_SYMBOL_CACHE_SIZE; i++) {
@@ -807,10 +807,8 @@ static hk_rebind_status_t prepare_file_chains(
             } else {
                 free(p); free(s);
             }
-        } else {
         }
         pthread_mutex_unlock(&g_rebind_symbol_cache_lock);
-    } else {
     }
     return plan->count ? HK_REBIND_OK : HK_REBIND_NOT_FOUND;
 }

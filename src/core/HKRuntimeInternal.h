@@ -5,7 +5,6 @@
 #ifndef HK_CORE_RUNTIME_INTERNAL_H
 #define HK_CORE_RUNTIME_INTERNAL_H
 
-#include <stdatomic.h>
 #include <stddef.h>
 
 #include "../../include/HookKit/HookKitRuntime.h"
@@ -39,8 +38,6 @@ struct hk_runtime {
     // no separate allocation needed (unlike string/bytes-bearing specs
     // elsewhere in the ABI, which deep-copy into owned storage instead).
     hk_runtime_config_t config;
-
-    atomic_bool shutdown_called;
 
     // Host runs leave these zero. Apple builds initialize them once from the
     // slice and deployment target so production routing can fail closed for

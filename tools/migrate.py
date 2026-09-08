@@ -172,7 +172,6 @@ def revert(paths):
 def collect_all():
     out = []
     for pat in ("*.x", "*.xm", "*.m", "*.mm", "Makefile", "*.mk"):
-        out.extend(Path(".").glob(pat))
         out.extend(Path(".").glob(f"**/{pat}"))
     # dedup, keep files
     seen = set()

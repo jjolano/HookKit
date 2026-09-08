@@ -160,19 +160,6 @@ HK_INTERNAL bool hk_swift_supported(void);
 // it immediately after the call that failed.
 HK_INTERNAL int hk_swift_last_error(void);
 
-// Hook a Swift class method by name. `name` semantics:
-//   - "$s..." or "_$s..."  -> exact match against the slot implementation's
-//     symbol name (dladdr dli_sname, mangled form, leading underscore dropped)
-//   - anything else        -> substring (case-sensitive) match against the
-//     demangled name (swift_demangle of dli_sname)
-// Requires EXACTLY ONE matching slot: zero -> NOT_FOUND, more -> AMBIGUOUS
-// (never a silent first match).
-HK_INTERNAL bool hk_swift_hook_method(Class cls, const char *name, void *replacement, void **out_orig);
-
-// Hook a Swift class method by vtable slot index (declaration order, see
-// hk_swift_hook_slot).
-HK_INTERNAL bool hk_swift_hook_vtable_slot(Class cls, uint32_t index, void *replacement, void **out_orig);
-
 // Shared core. `index` is the declaration order of the class's own methods
 // (slot i <-> method descriptor i, Metadata.cpp initClassVTable). On success
 // *out_orig receives the original implementation as an unsigned code pointer
@@ -195,8 +182,8 @@ HK_INTERNAL bool hk_swift_hook_vtable_slot(Class cls, uint32_t index, void *repl
 // hk_native_patch_memory (handles read-only __DATA_CONST via
 // VM_PROT_COPY + vm_remap).
 //
-// Not gated on hk_swift_supported(): the two entry points above check it, and
-// this core is hidden so nothing else can reach it on unsupported archs.
+// Not gated on hk_swift_supported(): this core is hidden, and the public
+// request engine checks support before preparation.
 HK_INTERNAL bool hk_swift_hook_slot(Class cls, uint32_t index, void *replacement, void **out_orig);
 
 // Two-phase slot primitive used by the 3.0 Swift request surface. Preparation
@@ -214,8 +201,13 @@ HK_INTERNAL bool hk_swift_prepare_slot(Class cls, uint32_t index,
 HK_INTERNAL bool hk_swift_commit_slot(hk_swift_slot_plan_t *plan,
                                       void *replacement, void **out_orig);
 
-// Name resolution used by hk_swift_hook_method, exposed for the host-side
-// test. Same matching rules and uniqueness requirement; on success
+// Name resolution for a Swift class method. `name` semantics:
+//   - "$s..." or "_$s..."  -> exact match against the slot implementation's
+//     symbol name (dladdr dli_sname, mangled form, leading underscore dropped)
+//   - anything else        -> substring (case-sensitive) match against the
+//     demangled name (swift_demangle of dli_sname)
+// Requires EXACTLY ONE matching slot: zero -> NOT_FOUND, more -> AMBIGUOUS
+// (never a silent first match). Exposed for the host-side test; on success
 // *out_index receives the unique slot.
 HK_INTERNAL bool hk_swift_find_slot(Class cls, const char *name, uint32_t *out_index);
 

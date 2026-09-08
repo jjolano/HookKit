@@ -980,8 +980,6 @@ static hk_status_t hk_runtime_create_impl(
     }
 #endif
 
-    atomic_init(&runtime->shutdown_called, false);
-
     hk_runtime_register_platform_engines(runtime);
     if (backend_override) {
         hk_runtime_apply_backend_override(runtime, backend_override);
@@ -1026,10 +1024,7 @@ hk_runtime_t *hk_shared_runtime(void) {
 }
 
 void hk_runtime_shutdown(hk_runtime_t *runtime) {
-    if (!runtime) {
-        return;
-    }
-    atomic_store_explicit(&runtime->shutdown_called, true, memory_order_release);
+    (void)runtime;
 }
 
 // Does not generically unhook active targets. Installed hooks outlive the

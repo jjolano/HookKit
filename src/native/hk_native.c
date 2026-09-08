@@ -183,13 +183,6 @@ static bool hk_range_protection(vm_address_t start, vm_address_t end, vm_prot_t 
 // threads snapshot the page and the second remap silently discards the first
 // patch, leaving a hook whose caller holds a live trampoline but whose target
 // was never redirected.
-// Byte and pointer writers share this lock across protection queries, writes
-// and restoration. Without it two patches landing on the same page
-// race the protect/restore pair — the second memcpy hits a page the first has
-// already resealed read-execute, which faults — and on the remap path both
-// threads snapshot the page and the second remap silently discards the first
-// patch, leaving a hook whose caller holds a live trampoline but whose target
-// was never redirected.
 //
 // A spinlock, not pthread_mutex_t: <pthread.h> on macOS injects the real
 // <mach/mach.h> types, which collide with the native-vm test fixture

@@ -337,52 +337,48 @@ jobs:
           MAKE_COMMAND: gmake
         run: |
           set -euo pipefail
-          if [[ "${{ matrix.flavor }}" == rootful-legacy ]]; then
-            ./build.sh rootful-legacy >/dev/null
-          else
-            CLANG=$(xcrun -sdk iphoneos -f clang)
-            SWIFTC=$(xcrun -sdk iphoneos -f swiftc)
-            LD=$(xcrun -sdk iphoneos -f ld)
-            STAGE="$RUNNER_TEMP/hkfw-${{ matrix.flavor }}"
-            rm -rf "$STAGE" && mkdir -p "$STAGE"
-            case "${{ matrix.flavor }}" in
-              rootful-modern) WANT=hookkit-rootful-modern; PAYLOAD=Library/Frameworks/HookKit.framework ;;
-              rootless) WANT=hookkit-rootless; PAYLOAD=var/jb/Library/Frameworks/HookKit.framework ;;
-              roothide) WANT=hookkit-roothide; PAYLOAD=Library/Frameworks/HookKit.framework ;;
-            esac
-            # build.sh records each lane package path in .theos/last_package
-            # (absolute path into .theos/packages/); copy_release_artifact
-            # additionally mirrors it to .theos/release/$WANT.deb.
-            DEB=""
-            if [ -f .theos/last_package ]; then
-              while IFS= read -r line; do
-                case "$line" in
-                  *gum*) continue ;;
-                  *.deb) [ -f "$line" ] && { DEB="$line"; break; } ;;
-                esac
-              done < .theos/last_package
-            fi
-            if [ -z "$DEB" ]; then
-              for cand in ".theos/release/$WANT.deb" .theos/*.deb packages/*.deb; do
-                for f in $cand; do
-                  [ -f "$f" ] || continue
-                  case "$f" in
-                    *gum*) continue ;;
-                    *"$WANT"*|*hookkit*) DEB="$f"; break 2 ;;
-                  esac
-                done
-              done
-            fi
-            test -n "$DEB" || { echo "error: no $WANT package found" >&2; exit 1; }
-            echo "staging $DEB for device-smoke link"
-            dpkg-deb -x "$DEB" "$STAGE"
-            gmake device-compile-check \
-              "DEVICE_SMOKE_CLANG=$CLANG" \
-              "DEVICE_CANONICAL_CLANG=$CLANG" \
-              "DEVICE_CANONICAL_SWIFTC=$SWIFTC" \
-              "DEVICE_CANONICAL_LD=$LD" \
-              "DEVICE_OBSERVABILITY_FRAMEWORK_DIR=$STAGE/$(dirname "$PAYLOAD")"
+          CLANG=$(xcrun -sdk iphoneos -f clang)
+          SWIFTC=$(xcrun -sdk iphoneos -f swiftc)
+          LD=$(xcrun -sdk iphoneos -f ld)
+          STAGE="$RUNNER_TEMP/hkfw-${{ matrix.flavor }}"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          case "${{ matrix.flavor }}" in
+            rootful-modern) WANT=hookkit-rootful-modern; PAYLOAD=Library/Frameworks/HookKit.framework ;;
+            rootless) WANT=hookkit-rootless; PAYLOAD=var/jb/Library/Frameworks/HookKit.framework ;;
+            roothide) WANT=hookkit-roothide; PAYLOAD=Library/Frameworks/HookKit.framework ;;
+          esac
+          # build.sh records each lane package path in .theos/last_package
+          # (absolute path into .theos/packages/); copy_release_artifact
+          # additionally mirrors it to .theos/release/$WANT.deb.
+          DEB=""
+          if [ -f .theos/last_package ]; then
+            while IFS= read -r line; do
+              case "$line" in
+                *gum*) continue ;;
+                *.deb) [ -f "$line" ] && { DEB="$line"; break; } ;;
+              esac
+            done < .theos/last_package
           fi
+          if [ -z "$DEB" ]; then
+            for cand in ".theos/release/$WANT.deb" .theos/*.deb packages/*.deb; do
+              for f in $cand; do
+                [ -f "$f" ] || continue
+                case "$f" in
+                  *gum*) continue ;;
+                  *"$WANT"*|*hookkit*) DEB="$f"; break 2 ;;
+                esac
+              done
+            done
+          fi
+          test -n "$DEB" || { echo "error: no $WANT package found" >&2; exit 1; }
+          echo "staging $DEB for device-smoke link"
+          dpkg-deb -x "$DEB" "$STAGE"
+          gmake device-compile-check \
+            "DEVICE_SMOKE_CLANG=$CLANG" \
+            "DEVICE_CANONICAL_CLANG=$CLANG" \
+            "DEVICE_CANONICAL_SWIFTC=$SWIFTC" \
+            "DEVICE_CANONICAL_LD=$LD" \
+            "DEVICE_OBSERVABILITY_FRAMEWORK_DIR=$STAGE/$(dirname "$PAYLOAD")"
 
       - uses: actions/upload-artifact@v7
         with:
