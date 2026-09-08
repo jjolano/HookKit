@@ -34,6 +34,7 @@
 #include "../core/HKArtifactLedger.h"
 #include "../internal/HKPointerAuth.h"
 #include "../resolvers/HKImportSlots.h"
+#include "../resolvers/HKDyldCachePatches.h"
 #include "../resolvers/HKSymbolTable.h"
 
 #ifdef __cplusplus
@@ -110,6 +111,12 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
                                      const char *symbol_name,
                                      hk_symbol_name_convention_t convention,
                                      hk_rebind_plan_t *out_plan);
+
+// Shares only immutable export lookup work across one catalog traversal.
+hk_rebind_status_t hk_rebind_prepare_with_lookup(
+    const hk_rebind_target_t *target, const char *symbol_name,
+    hk_symbol_name_convention_t convention, hk_rebind_plan_t *out_plan,
+    hk_cache_patch_lookup_t *lookup);
 
 // Phase 2. Revalidates each slot against what prepare recorded, then writes.
 //

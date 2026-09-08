@@ -340,27 +340,6 @@ void hk_rebind_symbol_cache_clear_for_testing(void) {
 }
 #endif
 
-// Third level: dyld cache patch per-symbol cache. The shared cache's patch table
-// for a given symbol is the same for all hooks in the process, so caching it
-// avoids re-scanning the cache's patch table (thousands of entries) per hook.
-// Keyed per (cache, importer, symbol): the site list is per-importer, so a
-// symbol-only key would serve one image's sites to every other image.
-// ponytail: fixed-size array sized to the loaded-image working set; a hash
-// table keyed by (cache, importer, symbol) if memory pressure ever matters.
-#define HK_CACHE_PATCH_CACHE_SIZE 256
-static pthread_mutex_t g_cache_patch_cache_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct {
-    bool valid;
-    bool found;
-    const void *cache_base;
-    const void *image_header;
-    char *symbol;
-    hk_symbol_name_convention_t convention;
-    bool include_shared_got;
-    hk_rebind_plan_t plan;
-} g_cache_patch_cache[HK_CACHE_PATCH_CACHE_SIZE] = {0};
-static uint32_t g_cache_patch_cache_next = 0;
-
 static bool collect_segment(void *opaque, uint32_t index,
                             const hk_macho_segment_t *segment) {
     segment_collect_t *ctx = opaque;
@@ -844,10 +823,11 @@ static void live_cache_range(const hk_rebind_target_t *target,
 #endif
 }
 
-hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
+hk_rebind_status_t hk_rebind_prepare_with_lookup(const hk_rebind_target_t *target,
                                      const char *symbol_name,
                                      hk_symbol_name_convention_t convention,
-                                     hk_rebind_plan_t *out_plan) {
+                                     hk_rebind_plan_t *out_plan,
+                                     hk_cache_patch_lookup_t *lookup) {
     if (!target || !target->image_base || !symbol_name || !out_plan) {
         return HK_REBIND_INVALID_ARGUMENT;
     }
@@ -879,17 +859,7 @@ hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
     const void *cache_base = NULL;
     size_t cache_size = 0;
     live_cache_range(target, &cache_base, &cache_size);
-    // Check cache patch per-(importer,symbol) cache
-    if (cache_base && symbol_name) {
-        pthread_mutex_lock(&g_cache_patch_cache_lock);
-        for (int i=0;i<HK_CACHE_PATCH_CACHE_SIZE;i++) if (g_cache_patch_cache[i].valid && g_cache_patch_cache[i].cache_base==cache_base && g_cache_patch_cache[i].image_header==image && g_cache_patch_cache[i].include_shared_got==target->include_shared_cache_got && g_cache_patch_cache[i].symbol && strcmp(g_cache_patch_cache[i].symbol,symbol_name)==0 && g_cache_patch_cache[i].convention==convention) {
-            *out_plan = g_cache_patch_cache[i].plan;
-            pthread_mutex_unlock(&g_cache_patch_cache_lock);
-            return g_cache_patch_cache[i].found ? finalize_plan(out_plan) : HK_REBIND_NOT_FOUND;
-        }
-        pthread_mutex_unlock(&g_cache_patch_cache_lock);
-    }
-if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
+    if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
         (uintptr_t)image - (uintptr_t)cache_base < cache_size) {
         hk_cache_patch_target_t cache_target;
         memset(&cache_target, 0, sizeof(cache_target));
@@ -903,19 +873,15 @@ if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
         memcpy(cache_target.uuid, target->uuid, sizeof(cache_target.uuid));
         cache_target.include_shared_got = target->include_shared_cache_got;
         cache_collect_ctx_t collect = { .plan = out_plan };
-        hk_cache_patch_status_t status = hk_dyld_cache_iterate_symbol_uses(
-            &cache_target, symbol_name, convention, cache_patch_cb, &collect);
+        hk_cache_patch_status_t status = hk_dyld_cache_iterate_symbol_uses_with_lookup(
+            &cache_target, symbol_name, convention, cache_patch_cb, &collect, lookup);
         if (collect.overflow) return HK_REBIND_TOO_MANY_SITES;
         if (collect.pac_mismatch) return HK_REBIND_PAC_MISMATCH;
         if (collect.malformed) return HK_REBIND_MALFORMED_IMAGE;
         switch (status) {
         case HK_CACHE_PATCH_OK:
-        case HK_CACHE_PATCH_NOT_FOUND: {
-            pthread_mutex_lock(&g_cache_patch_cache_lock);
-            int victim=-1; for(int i=0;i<HK_CACHE_PATCH_CACHE_SIZE;i++) if(!g_cache_patch_cache[i].valid){victim=i;break;} if(victim==-1){victim=g_cache_patch_cache_next%HK_CACHE_PATCH_CACHE_SIZE; free(g_cache_patch_cache[victim].symbol); memset(&g_cache_patch_cache[victim],0,sizeof(g_cache_patch_cache[victim])); g_cache_patch_cache_next=(victim+1)%HK_CACHE_PATCH_CACHE_SIZE;}
-            size_t slen=strlen(symbol_name)+1; char *s=(char*)malloc(slen); if(s){memcpy(s,symbol_name,slen); g_cache_patch_cache[victim].cache_base=cache_base; g_cache_patch_cache[victim].image_header=image; g_cache_patch_cache[victim].include_shared_got=target->include_shared_cache_got; g_cache_patch_cache[victim].symbol=s; g_cache_patch_cache[victim].convention=convention; g_cache_patch_cache[victim].plan=*out_plan; g_cache_patch_cache[victim].found=(status==HK_CACHE_PATCH_OK); g_cache_patch_cache[victim].valid=true; }
-            pthread_mutex_unlock(&g_cache_patch_cache_lock);
-            return (status==HK_CACHE_PATCH_OK) ? finalize_plan(out_plan) : HK_REBIND_NOT_FOUND; }
+        case HK_CACHE_PATCH_NOT_FOUND:
+            return status == HK_CACHE_PATCH_OK ? finalize_plan(out_plan) : HK_REBIND_NOT_FOUND;
         case HK_CACHE_PATCH_SCOPE_UNREPRESENTABLE:
             return HK_REBIND_SCOPE_UNREPRESENTABLE;
         case HK_CACHE_PATCH_UNSUPPORTED:
@@ -1083,4 +1049,11 @@ hk_mutation_state_t hk_rebind_commit(const hk_rebind_target_t *target,
         *out_written = written;
     }
     return HK_MUTATION_COMPLETE;
+}
+
+hk_rebind_status_t hk_rebind_prepare(const hk_rebind_target_t *target,
+                                     const char *symbol_name,
+                                     hk_symbol_name_convention_t convention,
+                                     hk_rebind_plan_t *out_plan) {
+    return hk_rebind_prepare_with_lookup(target, symbol_name, convention, out_plan, NULL);
 }

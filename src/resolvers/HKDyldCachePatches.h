@@ -42,6 +42,23 @@ typedef struct {
 typedef bool (*hk_cache_patch_visit_fn)(void *ctx,
                                         const hk_cache_patch_site_t *site);
 
+// A lookup belongs to one preparation and borrows immutable cache metadata.
+// It retains matching export indices, never slot values or prepared plans.
+typedef struct hk_cache_patch_lookup hk_cache_patch_lookup_t;
+hk_cache_patch_lookup_t *hk_cache_patch_lookup_create(
+    const char *symbol_name, hk_symbol_name_convention_t convention);
+void hk_cache_patch_lookup_destroy(hk_cache_patch_lookup_t *lookup);
+
+#ifdef HK_CACHE_PATCH_TEST
+size_t hk_cache_patch_lookup_scan_count(const hk_cache_patch_lookup_t *lookup);
+void hk_cache_patch_lookup_fail_allocations_for_testing(bool fail);
+#endif
+
+hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses_with_lookup(
+    const hk_cache_patch_target_t *target, const char *symbol_name,
+    hk_symbol_name_convention_t convention, hk_cache_patch_visit_fn visit,
+    void *ctx, hk_cache_patch_lookup_t *lookup);
+
 // Enumerates patch-table uses of `symbol_name` belonging to one loaded cache
 // image. The live cache is read-only; only the returned runtime slots are used
 // later by the rebind engine.

@@ -371,7 +371,7 @@ test-pointer-auth:
 
 .PHONY: test-cache-patches
 test-cache-patches:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -o $(THEOS_OBJ_DIR)/test_cache_patches tests/host/test_cache_patches.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/resolvers/HKExportTrie.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(HK_TEST_CC) -Wall -Wextra -Werror -std=c11 -O2 -DHK_CACHE_PATCH_TEST -o $(THEOS_OBJ_DIR)/test_cache_patches tests/host/test_cache_patches.c src/resolvers/HKDyldCachePatches.c src/resolvers/HKMachO.c src/resolvers/HKSymbolResolve.c src/resolvers/HKSymbolTable.c src/resolvers/HKExportTrie.c src/native/hk_symbols.c && $(THEOS_OBJ_DIR)/test_cache_patches$(ECHO_END)
 
 .PHONY: test-shadow-manifest
 test-shadow-manifest:

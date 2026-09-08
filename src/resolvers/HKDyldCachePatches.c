@@ -1,6 +1,7 @@
 #include "HKDyldCachePatches.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "HKMachO.h"
@@ -69,6 +70,96 @@ typedef struct {
     const uint8_t *patch;
     size_t patch_size;
 } cache_view_t;
+
+typedef struct {
+    uint64_t defining_image;
+    uint32_t export_index;
+} cache_export_match_t;
+
+struct hk_cache_patch_lookup {
+    cache_view_t view;
+    uint32_t version;
+    hk_symbol_name_convention_t convention;
+    cache_export_match_t *matches;
+    size_t count, capacity;
+    bool complete, allocation_failed;
+#ifdef HK_CACHE_PATCH_TEST
+    size_t scans;
+#endif
+    char symbol[];
+};
+
+#ifdef HK_CACHE_PATCH_TEST
+static bool lookup_fail_allocations;
+void hk_cache_patch_lookup_fail_allocations_for_testing(bool fail) {
+    lookup_fail_allocations = fail;
+}
+size_t hk_cache_patch_lookup_scan_count(const hk_cache_patch_lookup_t *lookup) {
+    return lookup ? lookup->scans : 0;
+}
+#endif
+
+hk_cache_patch_lookup_t *hk_cache_patch_lookup_create(
+    const char *symbol_name, hk_symbol_name_convention_t convention) {
+    if (!symbol_name) return NULL;
+    size_t length = strlen(symbol_name);
+    if (length >= SIZE_MAX - sizeof(hk_cache_patch_lookup_t)) return NULL;
+#ifdef HK_CACHE_PATCH_TEST
+    if (lookup_fail_allocations) return NULL;
+#endif
+    hk_cache_patch_lookup_t *lookup = calloc(1, sizeof(*lookup) + length + 1);
+    if (lookup) {
+        memcpy(lookup->symbol, symbol_name, length + 1);
+        lookup->convention = convention;
+    }
+    return lookup;
+}
+
+void hk_cache_patch_lookup_destroy(hk_cache_patch_lookup_t *lookup) {
+    if (!lookup) return;
+    free(lookup->matches);
+    free(lookup);
+}
+
+static void lookup_begin(hk_cache_patch_lookup_t *lookup,
+                         const cache_view_t *view, uint32_t version) {
+    if (lookup->view.base != view->base || lookup->view.size != view->size ||
+        lookup->view.unslid_base != view->unslid_base ||
+        lookup->view.patch != view->patch || lookup->view.patch_size != view->patch_size ||
+        lookup->version != version) {
+        lookup->complete = false;
+    }
+    if (!lookup->complete) {
+        lookup->count = 0;
+        lookup->view = *view;
+        lookup->version = version;
+#ifdef HK_CACHE_PATCH_TEST
+        lookup->scans++;
+#endif
+    }
+}
+
+static void lookup_append(hk_cache_patch_lookup_t *lookup, uint64_t image,
+                          uint32_t export_index) {
+    if (!lookup || lookup->allocation_failed) return;
+    if (lookup->count == lookup->capacity) {
+        size_t capacity = lookup->capacity ? lookup->capacity * 2 : 4;
+        cache_export_match_t *matches = NULL;
+        if (capacity > lookup->capacity && capacity <= SIZE_MAX / sizeof(*matches)) {
+#ifdef HK_CACHE_PATCH_TEST
+            if (!lookup_fail_allocations)
+#endif
+                matches = realloc(lookup->matches, capacity * sizeof(*matches));
+        }
+        if (!matches) {
+            lookup->allocation_failed = true;
+            return;
+        }
+        lookup->matches = matches;
+        lookup->capacity = capacity;
+    }
+    lookup->matches[lookup->count++] = (cache_export_match_t){image, export_index};
+}
 
 static bool patch_array(const cache_view_t *view, uint64_t address,
                         uint64_t count, size_t stride, const uint8_t **out) {
@@ -383,14 +474,24 @@ static hk_cache_patch_status_t parse_v2_v4(
     const hk_cache_patch_target_t *target, const cache_view_t *view,
     uint32_t version, uint32_t importer_index,
     const hk_symbol_candidates_t *candidates, hk_cache_patch_visit_fn visit,
-    void *ctx, bool *found) {
+    void *ctx, bool *found, hk_cache_patch_lookup_t *lookup) {
     table_v2_t table;
     if (!load_v2(view, version, &table) || table.image_count == 0 ||
         importer_index >= table.image_count ||
         (version >= 3 && table.got_client_count != table.image_count)) {
         return HK_CACHE_PATCH_MALFORMED;
     }
+    if (lookup && lookup->allocation_failed) lookup = NULL;
+    if (lookup) lookup_begin(lookup, view, version);
+    bool reuse = lookup && lookup->complete;
+    size_t match = 0;
     for (uint64_t def = 0; def < table.image_count; def++) {
+        // A completed scan validated every row of this immutable metadata.
+        // Revisit only definitions with matches, including none for a miss.
+        if (reuse) {
+            if (match == lookup->count) break;
+            def = lookup->matches[match].defining_image;
+        }
         const uint8_t *image = table.images + def * CACHE_IMAGE_PATCH_V2_SIZE;
         uint32_t client_first = read_u32(image);
         uint32_t client_count = read_u32(image + 4);
@@ -401,17 +502,25 @@ static hk_cache_patch_status_t parse_v2_v4(
             return HK_CACHE_PATCH_MALFORMED;
         }
         for (uint32_t e = 0; e < export_count; e++) {
+            if (reuse) {
+                if (match == lookup->count || lookup->matches[match].defining_image != def)
+                    break;
+                e = lookup->matches[match++].export_index - export_first;
+            }
             uint32_t global_export = export_first + e;
             const uint8_t *export = table.image_exports +
                 (uint64_t)global_export * CACHE_IMAGE_EXPORT_V2_SIZE;
             uint32_t name_and_kind = read_u32(export + 4);
-            const char *name = bounded_string(table.names, (size_t)table.names_size,
-                                              name_and_kind & 0x0FFFFFFFu);
-            if (!name) {
-                return HK_CACHE_PATCH_MALFORMED;
-            }
-            if (!candidate_matches(candidates, name)) {
-                continue;
+            if (!reuse) {
+                const char *name = bounded_string(table.names, (size_t)table.names_size,
+                                                  name_and_kind & 0x0FFFFFFFu);
+                if (!name) {
+                    return HK_CACHE_PATCH_MALFORMED;
+                }
+                if (!candidate_matches(candidates, name)) {
+                    continue;
+                }
+                lookup_append(lookup, def, global_export);
             }
             if ((name_and_kind >> 28) != 0) {
                 return HK_CACHE_PATCH_UNSUPPORTED;
@@ -459,13 +568,16 @@ static hk_cache_patch_status_t parse_v2_v4(
             }
         }
     }
+    if (lookup && !lookup->allocation_failed) lookup->complete = true;
     return HK_CACHE_PATCH_OK;
 }
 
-hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
+hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses_with_lookup(
     const hk_cache_patch_target_t *target, const char *symbol_name,
     hk_symbol_name_convention_t convention, hk_cache_patch_visit_fn visit,
-    void *ctx) {
+    void *ctx, hk_cache_patch_lookup_t *lookup) {
+    if (lookup && (lookup->convention != convention || !symbol_name ||
+                   strcmp(lookup->symbol, symbol_name) != 0)) lookup = NULL;
     if (!target || !target->cache_base || !target->image_header ||
         !target->image_path ||
         !symbol_name || !visit || target->cache_size < 168u) {
@@ -600,12 +712,21 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
                           visit, ctx, &found);
     } else if (version >= 2 && version <= 4) {
         status = parse_v2_v4(target, &view, version, importer_index,
-                             &candidates, visit, ctx, &found);
+                             &candidates, visit, ctx, &found, lookup);
     } else {
         return HK_CACHE_PATCH_UNSUPPORTED;
     }
     if (status != HK_CACHE_PATCH_OK) {
+        if (lookup) lookup->complete = false;
         return status;
     }
     return found ? HK_CACHE_PATCH_OK : HK_CACHE_PATCH_NOT_FOUND;
+}
+
+hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses(
+    const hk_cache_patch_target_t *target, const char *symbol_name,
+    hk_symbol_name_convention_t convention, hk_cache_patch_visit_fn visit,
+    void *ctx) {
+    return hk_dyld_cache_iterate_symbol_uses_with_lookup(
+        target, symbol_name, convention, visit, ctx, NULL);
 }

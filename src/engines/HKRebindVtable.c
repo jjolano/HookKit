@@ -76,6 +76,7 @@ typedef struct {
     const hk_hook_spec_t *spec;
     rebind_bundle_t *bundle;
     hk_rebind_status_t error;
+    hk_cache_patch_lookup_t *lookup;
 } rebind_collect_ctx_t;
 
 static bool rebind_collect_image(void *opaque, size_t index,
@@ -126,9 +127,9 @@ static bool rebind_collect_image(void *opaque, size_t index,
                                           (uintptr_t)entry->header);
     }
 
-    hk_rebind_status_t status = hk_rebind_prepare(
+    hk_rebind_status_t status = hk_rebind_prepare_with_lookup(
         &out->target, ctx->spec->target.symbol.name,
-        ctx->spec->target.symbol.name_convention, &out->plan);
+        ctx->spec->target.symbol.name_convention, &out->plan, ctx->lookup);
     if (status == HK_REBIND_NOT_FOUND) {
         return true;
     }
@@ -227,10 +228,13 @@ static hk_prepare_result_t rebind_prepare_one_ctx_status(void *engine_ctx,
             .spec = spec,
             .bundle = bundle,
             .error = HK_REBIND_OK,
+            .lookup = hk_cache_patch_lookup_create(spec->target.symbol.name,
+                                                   spec->target.symbol.name_convention),
         };
         (void)hk_image_catalog_match(ctx->catalog,
                                      &spec->target.symbol.caller_image_scope,
                                      rebind_collect_image, &collect);
+        hk_cache_patch_lookup_destroy(collect.lookup);
         if (collect.error != HK_REBIND_OK) {
             hk_prepare_result_t result = rebind_classify(collect.error, out_diag);
             free(bundle);

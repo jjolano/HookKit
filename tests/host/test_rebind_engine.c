@@ -312,6 +312,76 @@ static void test_nonweak_null_slot_is_malformed(void) {
     printf("  nonweak-null-slot-is-malformed: PASS\n");
 }
 
+
+static void test_cache_prepare_reads_current_slots_and_metadata(void) {
+    // Minimal v2 cache: one importer, one export, one unauthenticated slot.
+    const size_t cache_size = 0x2000, image_off = 0x400, slot_off = 0x600;
+    uint8_t *cache = aligned_alloc(64, cache_size);
+    assert(cache);
+    memset(cache, 0, cache_size);
+    put_u32(cache, 16, 0x200);
+    put_u32(cache, 20, 1);
+    put_u64(cache, 0x200, V_BASE);
+    put_u64(cache, 0x208, cache_size);
+    put_u64(cache, 152, V_BASE + 0x1000);
+    put_u64(cache, 160, 0x400);
+    put_u32(cache, 448, 0x240);
+    put_u32(cache, 452, 1);
+    put_u64(cache, 0x240, V_BASE + image_off);
+    put_u32(cache, 0x258, 0x300);
+    memcpy(cache + 0x300, "/usr/lib/importer.dylib", 24);
+    uint8_t *img = cache + image_off;
+    put_u32(img, 0, HK_MH_MAGIC_64);
+    put_u32(img, 16, 1);
+    put_u32(img, 20, HK_SEGMENT_COMMAND_64_SIZE);
+    put_u32(img, 32, HK_LC_SEGMENT_64);
+    put_u32(img, 36, HK_SEGMENT_COMMAND_64_SIZE);
+    memcpy(img + 40, "__DATA", 6);
+    put_u64(img, 56, V_BASE + image_off);
+    put_u64(img, 64, 0x400);
+    put_u32(img, 88, 3);
+    put_u32(img, 92, 3);
+    put_u32(cache, 0x1000, 2);
+    const size_t arrays[] = {0x1100, 0x1120, 0x1130, 0x1140, 0x1150, 0x1160};
+    for (size_t i = 0; i < sizeof(arrays) / sizeof(arrays[0]); i++) {
+        put_u64(cache, 0x1008 + 16 * i, V_BASE + arrays[i]);
+        put_u64(cache, 0x1010 + 16 * i, i == 5 ? 8 : 1);
+    }
+    put_u32(cache, 0x1104, 1);
+    put_u32(cache, 0x110C, 1);
+    put_u32(cache, 0x1138, 1);
+    put_u32(cache, 0x1148, 1);
+    put_u32(cache, 0x1150, slot_off - image_off);
+    memcpy(cache + 0x1160, "_malloc", 8);
+    put_u64(cache, slot_off, ORIGINAL);
+    writer_t w = {0, 0};
+    hk_rebind_target_t target = make_target(img, &w);
+    target.slide = (uintptr_t)cache - (uintptr_t)V_BASE;
+    target.image_path = "/usr/lib/importer.dylib";
+    target.cache_base = cache;
+    target.cache_size = cache_size;
+    hk_rebind_plan_t plan;
+    assert(hk_rebind_prepare(&target, "malloc", HK_SYMBOL_NAME_C, &plan) == HK_REBIND_OK);
+    assert(plan.count == 1 && plan.sites[0].from_cache);
+    assert(plan.original == ORIGINAL);
+    put_u64(cache, slot_off, REPLACEMENT);
+    assert(hk_rebind_prepare(&target, "malloc", HK_SYMBOL_NAME_C, &plan) == HK_REBIND_OK);
+    assert(plan.sites[0].original == REPLACEMENT && plan.original == REPLACEMENT);
+    assert(w.calls == 0);
+
+    target.image_path = "/wrong/path";
+    assert(hk_rebind_prepare(&target, "malloc", HK_SYMBOL_NAME_C, &plan) ==
+           HK_REBIND_MALFORMED_IMAGE);
+    target.image_path = "/usr/lib/importer.dylib";
+    memcpy(cache + 0x1160, "_other!", 8);
+    assert(hk_rebind_prepare(&target, "malloc", HK_SYMBOL_NAME_C, &plan) == HK_REBIND_NOT_FOUND);
+    memcpy(cache + 0x1160, "_malloc", 8);
+    assert(hk_rebind_prepare(&target, "malloc", HK_SYMBOL_NAME_C, &plan) == HK_REBIND_OK);
+    assert(plan.original == REPLACEMENT && w.calls == 0);
+    free(cache);
+    printf("  cache-prepare-reads-current-slots-and-metadata: PASS\n");
+}
+
 int main(void) {
     test_prepare_finds_sites_and_mutates_nothing();
     test_commit_writes_every_site();
@@ -320,6 +390,7 @@ int main(void) {
     test_revalidation_refuses_a_changed_slot();
     test_absent_symbol_and_arguments();
     test_nonweak_null_slot_is_malformed();
+    test_cache_prepare_reads_current_slots_and_metadata();
     printf("all rebind engine tests passed\n");
     return 0;
 }

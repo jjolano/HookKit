@@ -192,6 +192,198 @@ static hk_cache_patch_target_t target_for(uint8_t *cache, bool include_got) {
     return target;
 }
 
+
+// Both images import duplicate exports of the same name. Keep each client's
+// locations relative to its own header, so accidental importer reuse fails.
+static void build_multi_importer(uint8_t *cache, uint32_t version) {
+    build_cache(cache, version);
+    memcpy(cache + 0x600, cache + IMPORTER_OFF, 104);
+    put_u64(cache, 0x600 + 56, UNSLID + 0x600);
+    put_u64(cache, 0x600 + 72, 0x600);
+    pair(cache + PATCH_OFF, 24, UNSLID + 0x1230, 2);
+    pair(cache + PATCH_OFF, 40, UNSLID + 0x1200, 2);
+    pair(cache + PATCH_OFF, 56, UNSLID + 0x1250, 2);
+    put_u32(cache, 0x1104, 2);
+    put_u32(cache, 0x110C, 2);
+    for (uint32_t i = 0; i < 2; i++) {
+        put_u32(cache, 0x1200 + i * 12, i);
+        put_u32(cache, 0x1208 + i * 12, 2);
+        put_u32(cache, 0x1230 + i * 8, 0x100 + i * 8);
+        put_u32(cache, 0x1250 + i * 12, i);
+        put_u32(cache, 0x1254 + i * 12, i);
+        put_u32(cache, 0x1258 + i * 12, 1);
+    }
+}
+
+static void compare_lookup(hk_cache_patch_target_t *target, const char *name,
+                           hk_symbol_name_convention_t convention,
+                           hk_cache_patch_lookup_t *lookup,
+                           hk_cache_patch_status_t expected, size_t count) {
+    collected_t plain = {0}, cached = {0};
+    assert(hk_dyld_cache_iterate_symbol_uses(target, name, convention,
+               collect, &plain) == expected);
+    assert(hk_dyld_cache_iterate_symbol_uses_with_lookup(target, name, convention,
+               collect, &cached, lookup) == expected);
+    assert(plain.count == count && cached.count == count);
+    assert(memcmp(plain.sites, cached.sites,
+                  count * sizeof(plain.sites[0])) == 0);
+}
+
+static void test_lookup_reuse(uint8_t *cache) {
+    for (uint32_t version = 2; version <= 4; version++) {
+        build_multi_importer(cache, version);
+        hk_cache_patch_target_t target = target_for(cache, true);
+        hk_cache_patch_lookup_t *lookup = hk_cache_patch_lookup_create(
+            "foo", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        size_t count = version >= 3 ? 3 : 2;
+        compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_OK, count);
+        target.image_header = cache + 0x600;
+        target.image_path = "/usr/lib/def.dylib";
+        compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_OK, count);
+        assert(hk_cache_patch_lookup_scan_count(lookup) == 1);
+        // A context for a different convention/name must not return foo sites.
+        compare_lookup(&target, "foo", HK_SYMBOL_NAME_MACHO_EXACT, lookup,
+                       HK_CACHE_PATCH_NOT_FOUND, 0);
+        compare_lookup(&target, "missing", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_NOT_FOUND, 0);
+        target.image_path = "/wrong/path";
+        compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_MALFORMED, 0);
+        target.image_path = "/usr/lib/def.dylib";
+        if (version >= 3) {
+            target.include_shared_got = false;
+            compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                           HK_CACHE_PATCH_SCOPE_UNREPRESENTABLE, 1);
+        }
+        hk_cache_patch_lookup_destroy(lookup);
+
+        lookup = hk_cache_patch_lookup_create("missing", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        for (unsigned i = 0; i < 3; i++)
+            compare_lookup(&target, "missing", HK_SYMBOL_NAME_C, lookup,
+                           HK_CACHE_PATCH_NOT_FOUND, 0);
+        assert(hk_cache_patch_lookup_scan_count(lookup) == 1);
+        hk_cache_patch_lookup_destroy(lookup);
+    }
+}
+
+
+static void test_lookup_nonadjacent_definitions(uint8_t *cache) {
+    for (uint32_t version = 2; version <= 4; version++) {
+        build_multi_importer(cache, version);
+        // Definitions 0 and 3 match; 0 has two matching exports. Definitions
+        // 1 and 2 have none. A replay must exhaust 0 before jumping to 3.
+        put_u32(cache, 452, 4);
+        for (unsigned i = 2; i < 4; i++) {
+            put_u64(cache, 0x240 + 32 * i, UNSLID + 0x400 + 0x100 * (i - 2));
+            put_u32(cache, 0x258 + 32 * i, 0x300);
+        }
+        memcpy(cache + 0x1280, cache + 0x1100, 16);
+        pair(cache + PATCH_OFF, 8, UNSLID + 0x1280, 4);
+        put_u32(cache, 0x12B4, 2);
+        put_u32(cache, 0x12B8, 2);
+        put_u32(cache, 0x12BC, 1);
+        pair(cache + PATCH_OFF, 24, UNSLID + 0x1230, 3);
+        put_u32(cache, 0x1240, 0x110);
+        pair(cache + PATCH_OFF, 56, UNSLID + 0x1250, 3);
+        put_u32(cache, 0x1268, 2);
+        put_u32(cache, 0x1270, 1);
+        put_u32(cache, 0x1208, 3);
+        put_u32(cache, 0x1214, 3);
+        if (version >= 3) {
+            pair(cache + PATCH_OFF, 104, UNSLID + 0x12C0, 4);
+            put_u32(cache, 0x12C4, 1);
+        }
+        hk_cache_patch_target_t target = target_for(cache, true);
+        hk_cache_patch_lookup_t *lookup = hk_cache_patch_lookup_create(
+            "foo", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        size_t count = version >= 3 ? 4 : 3;
+        for (unsigned i = 0; i < 3; i++)
+            compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                           HK_CACHE_PATCH_OK, count);
+        assert(hk_cache_patch_lookup_scan_count(lookup) == 1);
+        hk_cache_patch_lookup_destroy(lookup);
+
+        lookup = hk_cache_patch_lookup_create("missing", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        for (unsigned i = 0; i < 3; i++)
+            compare_lookup(&target, "missing", HK_SYMBOL_NAME_C, lookup,
+                           HK_CACHE_PATCH_NOT_FOUND, 0);
+        assert(hk_cache_patch_lookup_scan_count(lookup) == 1);
+        hk_cache_patch_lookup_destroy(lookup);
+
+        // The first traversal still validates an unmatched definition row.
+        put_u32(cache, 0x12A0, UINT32_MAX);
+        lookup = hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_MALFORMED, count - 1);
+        hk_cache_patch_lookup_destroy(lookup);
+        lookup = hk_cache_patch_lookup_create("missing", HK_SYMBOL_NAME_C);
+        assert(lookup);
+        compare_lookup(&target, "missing", HK_SYMBOL_NAME_C, lookup,
+                       HK_CACHE_PATCH_MALFORMED, 0);
+        hk_cache_patch_lookup_destroy(lookup);
+    }
+}
+
+static void test_lookup_identity_and_failures(uint8_t *cache) {
+    build_multi_importer(cache, 4);
+    hk_cache_patch_target_t target = target_for(cache, true);
+    hk_cache_patch_lookup_t *lookup = hk_cache_patch_lookup_create(
+        "foo", HK_SYMBOL_NAME_C);
+    assert(lookup);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup, HK_CACHE_PATCH_OK, 3);
+    uint8_t *other = aligned_alloc(64, CACHE_SIZE);
+    assert(other);
+    build_multi_importer(other, 4);
+    target = target_for(other, true);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup, HK_CACHE_PATCH_OK, 3);
+    assert(hk_cache_patch_lookup_scan_count(lookup) == 2);
+    hk_cache_patch_lookup_destroy(lookup);
+    free(other);
+
+    // New preparation must see changed names even at the same cache address.
+    memcpy(cache + 0x1160, "_bar", 5);
+    target = target_for(cache, true);
+    lookup = hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C);
+    assert(lookup);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                   HK_CACHE_PATCH_NOT_FOUND, 0);
+    hk_cache_patch_lookup_destroy(lookup);
+
+    // An error after a valid export must preserve already-emitted sites and
+    // must not publish the partial match list for the next call.
+    build_multi_importer(cache, 4);
+    put_u32(cache, 0x123C, 0x10000000);
+    lookup = hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C);
+    assert(lookup);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                   HK_CACHE_PATCH_UNSUPPORTED, 2);
+    put_u32(cache, 0x123C, 0x0FFFFFFF);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
+                   HK_CACHE_PATCH_MALFORMED, 2);
+    put_u32(cache, 0x123C, 0);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup, HK_CACHE_PATCH_OK, 3);
+    hk_cache_patch_lookup_destroy(lookup);
+
+    hk_cache_patch_lookup_fail_allocations_for_testing(true);
+    assert(!hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C));
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, NULL, HK_CACHE_PATCH_OK, 3);
+    hk_cache_patch_lookup_fail_allocations_for_testing(false);
+    lookup = hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C);
+    assert(lookup);
+    hk_cache_patch_lookup_fail_allocations_for_testing(true);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup, HK_CACHE_PATCH_OK, 3);
+    hk_cache_patch_lookup_fail_allocations_for_testing(false);
+    compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup, HK_CACHE_PATCH_OK, 3);
+    hk_cache_patch_lookup_destroy(lookup);
+}
+
 int main(void) {
     uint8_t *cache = aligned_alloc(64, CACHE_SIZE);
     assert(cache);
@@ -245,6 +437,9 @@ int main(void) {
                &target, "foo", HK_SYMBOL_NAME_C, collect, &result) ==
            HK_CACHE_PATCH_MALFORMED);
 
+    test_lookup_reuse(cache);
+    test_lookup_nonadjacent_definitions(cache);
+    test_lookup_identity_and_failures(cache);
     free(cache);
     printf("dyld shared-cache patch v1-v4 tests passed\n");
     return 0;
