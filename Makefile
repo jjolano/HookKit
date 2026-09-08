@@ -127,7 +127,7 @@ endif
 HookKit_CFLAGS += -DHOOKKIT_CANONICAL_3=1
 # Current version advertises 3.0; compatibility stays at 2.5 so existing
 # binaries linked against HookKit v1/2.x continue to load against the facade.
-HookKit_LDFLAGS += -current_version 3.0.2 -compatibility_version 2.5.1
+HookKit_LDFLAGS += -current_version 3.0.3 -compatibility_version 2.5.1
 HookKit_LDFLAGS += -exported_symbols_list $(CURDIR)/packaging/exports/export-HookKit.list
 
 ifneq ($(HK_NEEDS_THEOS),)
