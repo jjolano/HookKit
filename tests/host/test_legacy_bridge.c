@@ -18,6 +18,18 @@ static hk_status_t bridge_commit(hk_plan_t *, hk_report_t **);
 #undef hk_plan_commit
 #undef hk_runtime_create_with_backend_override
 
+// Aligned fixture pages. aligned_alloc is iOS 13+, and this file is also
+// cross-compiled at the rootful-legacy floor (iOS 9); posix_memalign is
+// available there but hidden by glibc under -std=c11, so split by platform.
+static void *fixture_aligned_alloc(size_t alignment, size_t size) {
+#if defined(__APPLE__)
+    void *page = NULL;
+    return posix_memalign(&page, alignment, size) == 0 ? page : NULL;
+#else
+    return aligned_alloc(alignment, size);
+#endif
+}
+
 enum { WRITE_UNKNOWN, WRITE_PARTIAL, VERIFY_FAIL, REFUSE, SUCCESS };
 static struct {
     uint32_t *targets[2];
@@ -31,7 +43,7 @@ static uintptr_t alloc_page(void *ctx, size_t size, uintptr_t near,
     (void)ctx;
     unsigned i = near == (uintptr_t)fixture.targets[0] ? 0 : 1;
     assert(near == (uintptr_t)fixture.targets[i]);
-    void *page = aligned_alloc(16, (size + 15) & ~(size_t)15);
+    void *page = fixture_aligned_alloc(16, (size + 15) & ~(size_t)15);
     assert(page);
     fixture.pages[i] = page;
     fixture.expected[i] = (void *)hk_pac_make_callable((uintptr_t)page + HK_RELOC_THUNK_BYTES);
@@ -98,7 +110,7 @@ int main(void) {
                 void **originals[2];
                 int results[2] = {0};
                 for (size_t i = 0; i < count; i++) {
-                    fixture.targets[i] = aligned_alloc(16, 32);
+                    fixture.targets[i] = fixture_aligned_alloc(16, 32);
                     assert(fixture.targets[i]);
                     for (size_t j = 0; j < 8; j++) fixture.targets[i][j] = 0xD503201Fu;
                     originals[i] = &fixture.originals[i];

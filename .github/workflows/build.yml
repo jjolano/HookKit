@@ -373,8 +373,12 @@ jobs:
           test -n "$DEB" || { echo "error: no $WANT package found" >&2; exit 1; }
           echo "staging $DEB for device-smoke link"
           dpkg-deb -x "$DEB" "$STAGE"
+          # Only iPhoneOS16.5.sdk is staged above, so the legacy-coverage
+          # device_smoke target (default DEVICE_SMOKE_SDK is 13.7, provisioned
+          # on the Ubuntu legacy lane) has to link against the pinned SDK here.
           gmake device-compile-check \
             "DEVICE_SMOKE_CLANG=$CLANG" \
+            "DEVICE_SMOKE_SDK=$THEOS/sdks/iPhoneOS16.5.sdk" \
             "DEVICE_CANONICAL_CLANG=$CLANG" \
             "DEVICE_CANONICAL_SWIFTC=$SWIFTC" \
             "DEVICE_CANONICAL_LD=$LD" \

@@ -716,14 +716,22 @@ endif
 # it needs os_signpost (iOS 12+) and its own run harness. Swift probes are
 # parse-checked where a Swift driver exists.
 DEVICE_SMOKE_TARGETS := device-smoke
+# The two real-Swift smokes compile and link a Swift object, so they need a
+# Swift driver for the target. The old-ABI lane's toolchain ships none (iOS
+# 9-13 predates Swift's stable ABI), so select them on the driver actually
+# existing instead of failing that lane on a missing binary.
+DEVICE_SWIFT_REAL_TARGETS := $(if $(wildcard $(DEVICE_CANONICAL_SWIFTC)),\
+	device-swift-real-smoke device-swift-facade-real-smoke)
 DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
-	device-swift-real-smoke device-swift-facade-real-smoke \
+	$(DEVICE_SWIFT_REAL_TARGETS) \
 	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
 	device-legacy-facade-smoke device-legacy-bridge-smoke device-rebind-adapter-smoke \
 	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
 	device-provider-lifecycle-smoke device-provider-alias-smoke device-observability
 .PHONY: device-compile-check
 device-compile-check: $(DEVICE_SMOKE_TARGETS) $(DEVICE_CANONICAL_TARGETS)
+	$(ECHO_NOTHING)test -n "$(DEVICE_SWIFT_REAL_TARGETS)" || \
+	  echo "device-compile-check: no Swift driver at $(DEVICE_CANONICAL_SWIFTC), real Swift smokes skipped"$(ECHO_END)
 	$(ECHO_NOTHING)if [ "$(HOST_OS)" = Darwin ]; then \
 	  xcrun swiftc -parse tests/device/device_swift_real_probe.swift; \
 	elif swiftc -parse tests/device/device_swift_real_probe.swift >/dev/null 2>&1; then \
