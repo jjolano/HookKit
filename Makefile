@@ -715,6 +715,13 @@ endif
 # recipe rather than a parallel reimplementation. device-bench is excluded:
 # it needs os_signpost (iOS 12+) and its own run harness. Swift probes are
 # parse-checked where a Swift driver exists.
+DEVICE_SMOKE_TARGETS := device-smoke
+DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
+	device-swift-real-smoke device-swift-facade-real-smoke \
+	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
+	device-legacy-facade-smoke device-legacy-bridge-smoke device-rebind-adapter-smoke \
+	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
+	device-provider-lifecycle-smoke device-provider-alias-smoke device-observability
 .PHONY: device-compile-check
 device-compile-check: $(DEVICE_SMOKE_TARGETS) $(DEVICE_CANONICAL_TARGETS)
 	$(ECHO_NOTHING)if [ "$(HOST_OS)" = Darwin ]; then \
@@ -723,13 +730,6 @@ device-compile-check: $(DEVICE_SMOKE_TARGETS) $(DEVICE_CANONICAL_TARGETS)
 	  :; \
 	else echo "device-compile-check: no Swift driver, probe skipped"; fi$(ECHO_END)
 
-DEVICE_SMOKE_TARGETS := device-smoke
-DEVICE_CANONICAL_TARGETS := device-lifecycle-smoke device-objc-smoke device-swift-smoke \
-	device-swift-real-smoke device-swift-facade-real-smoke \
-	device-catalog-smoke device-resolver-smoke device-rebind-smoke \
-	device-legacy-facade-smoke device-legacy-bridge-smoke device-rebind-adapter-smoke \
-	device-legacy-abi-smoke device-shadow376-smoke device-static-smoke device-provider-smoke \
-	device-provider-lifecycle-smoke device-provider-alias-smoke device-observability
 .PHONY: check-device-smoke-toolchain check-device-canonical-toolchain
 check-device-smoke-toolchain:
 ifeq ($(HOST_OS),Linux)
