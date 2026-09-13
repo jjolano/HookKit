@@ -229,6 +229,85 @@ static void compare_lookup(hk_cache_patch_target_t *target, const char *name,
                   count * sizeof(plain.sites[0])) == 0);
 }
 
+// The immutable-index path must be indistinguishable from the direct scan on
+// an opted-in target: same status, same number of sites, same order, and every
+// field of every site (schema, addend, weak, shared_got) equal. The direct
+// scan defines the expectation, so a replayed list can never be "verified"
+// against a guess.
+static void compare_indexed(hk_cache_patch_target_t *target, const char *name,
+                            hk_symbol_name_convention_t convention,
+                            hk_cache_patch_status_t expected) {
+    collected_t plain = {0};
+    assert(hk_dyld_cache_iterate_symbol_uses(target, name, convention,
+               collect, &plain) == expected);
+    hk_cache_patch_target_t immutable = *target;
+    immutable.immutable_metadata = true;
+    collected_t indexed = {0};
+    assert(hk_dyld_cache_iterate_symbol_uses(&immutable, name, convention,
+               collect, &indexed) == expected);
+    assert(indexed.count == plain.count);
+    assert(memcmp(plain.sites, indexed.sites,
+                  plain.count * sizeof(plain.sites[0])) == 0);
+}
+
+// v2/v3/v4 over one immutable fixture: every listed query shares one build,
+// duplicate definitions keep their traversal order, a distinct cache identity
+// gets its own index, a failed build falls back to the direct scan, and a
+// default (mutable) target still reads the bytes at that address.
+static void test_immutable_index(uint8_t *cache) {
+    hk_cache_patch_index_reset_for_testing();
+    for (uint32_t version = 2; version <= 4; version++) {
+        build_multi_importer(cache, version);
+        hk_cache_patch_target_t target = target_for(cache, true);
+        compare_indexed(&target, "foo", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_OK);
+        compare_indexed(&target, "foo", HK_SYMBOL_NAME_MACHO_EXACT,
+                        HK_CACHE_PATCH_NOT_FOUND);
+        compare_indexed(&target, "bar", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_NOT_FOUND);
+        compare_indexed(&target, "missing", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_NOT_FOUND);
+        assert(hk_cache_patch_index_build_count() == version - 1);
+        if (version >= 3) {
+            target.include_shared_got = false;
+            compare_indexed(&target, "foo", HK_SYMBOL_NAME_C,
+                            HK_CACHE_PATCH_SCOPE_UNREPRESENTABLE);
+            assert(hk_cache_patch_index_build_count() == version - 1);
+        }
+    }
+
+    // A different cache view must not be served by the first view's index.
+    hk_cache_patch_index_reset_for_testing();
+    build_multi_importer(cache, 4);
+    hk_cache_patch_target_t first = target_for(cache, true);
+    compare_indexed(&first, "foo", HK_SYMBOL_NAME_C, HK_CACHE_PATCH_OK);
+    uint8_t *other = aligned_alloc(64, CACHE_SIZE);
+    assert(other);
+    build_multi_importer(other, 4);
+    hk_cache_patch_target_t second = target_for(other, true);
+    compare_indexed(&second, "foo", HK_SYMBOL_NAME_C, HK_CACHE_PATCH_OK);
+    assert(hk_cache_patch_index_build_count() == 2);
+    compare_indexed(&first, "foo", HK_SYMBOL_NAME_C, HK_CACHE_PATCH_OK);
+    assert(hk_cache_patch_index_build_count() == 2);
+    free(other);
+
+    // Build failure: no index, and the traversal is still the direct scan.
+    hk_cache_patch_index_reset_for_testing();
+    hk_cache_patch_lookup_fail_allocations_for_testing(true);
+    compare_indexed(&first, "foo", HK_SYMBOL_NAME_C, HK_CACHE_PATCH_OK);
+    assert(hk_cache_patch_index_build_count() == 0);
+    hk_cache_patch_lookup_fail_allocations_for_testing(false);
+
+    // Default mutable target: the new name at the same address is what a
+    // preparation sees, index or not.
+    memcpy(cache + 0x1160, "_bar", 5);
+    collected_t result = {0};
+    assert(hk_dyld_cache_iterate_symbol_uses(&first, "foo", HK_SYMBOL_NAME_C,
+               collect, &result) == HK_CACHE_PATCH_NOT_FOUND);
+    assert(result.count == 0);
+    hk_cache_patch_index_reset_for_testing();
+}
+
 static void test_lookup_reuse(uint8_t *cache) {
     for (uint32_t version = 2; version <= 4; version++) {
         build_multi_importer(cache, version);
@@ -298,10 +377,18 @@ static void test_lookup_nonadjacent_definitions(uint8_t *cache) {
             put_u32(cache, 0x12C4, 1);
         }
         hk_cache_patch_target_t target = target_for(cache, true);
+        size_t count = version >= 3 ? 4 : 3;
+        // Nonadjacent and duplicate definitions: the index replays them in the
+        // scan's order, and a name with no definition at all stays a miss.
+        hk_cache_patch_index_reset_for_testing();
+        compare_indexed(&target, "foo", HK_SYMBOL_NAME_C, HK_CACHE_PATCH_OK);
+        compare_indexed(&target, "missing", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_NOT_FOUND);
+        assert(hk_cache_patch_index_build_count() == 1);
+
         hk_cache_patch_lookup_t *lookup = hk_cache_patch_lookup_create(
             "foo", HK_SYMBOL_NAME_C);
         assert(lookup);
-        size_t count = version >= 3 ? 4 : 3;
         for (unsigned i = 0; i < 3; i++)
             compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
                            HK_CACHE_PATCH_OK, count);
@@ -316,8 +403,16 @@ static void test_lookup_nonadjacent_definitions(uint8_t *cache) {
         assert(hk_cache_patch_lookup_scan_count(lookup) == 1);
         hk_cache_patch_lookup_destroy(lookup);
 
-        // The first traversal still validates an unmatched definition row.
+        // The first traversal still validates an unmatched definition row. The
+        // row also fails the index build, so the opted-in path must fall back to
+        // the scan and report the same partial sites and status.
         put_u32(cache, 0x12A0, UINT32_MAX);
+        hk_cache_patch_index_reset_for_testing();
+        compare_indexed(&target, "foo", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_MALFORMED);
+        compare_indexed(&target, "missing", HK_SYMBOL_NAME_C,
+                        HK_CACHE_PATCH_MALFORMED);
+        assert(hk_cache_patch_index_build_count() == 0);
         lookup = hk_cache_patch_lookup_create("foo", HK_SYMBOL_NAME_C);
         assert(lookup);
         compare_lookup(&target, "foo", HK_SYMBOL_NAME_C, lookup,
@@ -438,6 +533,7 @@ int main(void) {
            HK_CACHE_PATCH_MALFORMED);
 
     test_lookup_reuse(cache);
+    test_immutable_index(cache);
     test_lookup_nonadjacent_definitions(cache);
     test_lookup_identity_and_failures(cache);
     free(cache);

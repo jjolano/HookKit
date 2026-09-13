@@ -813,12 +813,19 @@ extern const void *_dyld_get_shared_cache_range(size_t *length)
 #endif
 
 static void live_cache_range(const hk_rebind_target_t *target,
-                             const void **out_base, size_t *out_size) {
+                             const void **out_base, size_t *out_size,
+                             bool *out_immutable) {
     *out_base = target->cache_base;
     *out_size = target->cache_size;
+    *out_immutable = false;
 #if defined(__APPLE__)
     if (!*out_base && _dyld_get_shared_cache_range) {
         *out_base = _dyld_get_shared_cache_range(out_size);
+        // The live shared cache is read-only and mapped for the process
+        // lifetime, so its patch table and name pool cannot change under a
+        // reuse. A caller-supplied range is a test seam over mutable memory
+        // and never earns that claim.
+        *out_immutable = *out_base != NULL && *out_size != 0;
     }
 #endif
 }
@@ -858,13 +865,15 @@ hk_rebind_status_t hk_rebind_prepare_with_lookup(const hk_rebind_target_t *targe
     // patch table is dyld's authoritative symbol-to-use map.
     const void *cache_base = NULL;
     size_t cache_size = 0;
-    live_cache_range(target, &cache_base, &cache_size);
+    bool cache_immutable = false;
+    live_cache_range(target, &cache_base, &cache_size, &cache_immutable);
     if (cache_base && (uintptr_t)image >= (uintptr_t)cache_base &&
         (uintptr_t)image - (uintptr_t)cache_base < cache_size) {
         hk_cache_patch_target_t cache_target;
         memset(&cache_target, 0, sizeof(cache_target));
         cache_target.cache_base = cache_base;
         cache_target.cache_size = cache_size;
+        cache_target.immutable_metadata = cache_immutable;
         cache_target.image_header = image;
         cache_target.image_header_size = header_size;
         cache_target.image_slide = target->slide;

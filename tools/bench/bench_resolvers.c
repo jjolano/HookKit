@@ -82,15 +82,30 @@ static hk_image_catalog_t *make_catalog(int n){
 
 // One sample models one preparation across 64 importers in a 2048-image cache.
 // Keep lookup allocation and its first export scan inside the timed sample.
+//
+// Besides the single _bench_target symbol, the pool carries CACHE_SYMBOLS
+// distinct symbols and every importer's client-export list references all of
+// them, so one preparation resolves all of them. Symbols live at the tail of
+// the export pool (below _bench_target) and each owns one patch location.
 enum {
     CACHE_IMPORTERS = 64, CACHE_IMAGE_COUNT = 2048, CACHE_EXPORTS = 16384,
+    CACHE_SYMBOLS = 32,
+    // Symbol seeds [0, CACHE_PRESENT_SYMBOLS) exist in the cache; higher seeds
+    // are queried under names the cache does not carry (missing-heavy case).
+    CACHE_PRESENT_SYMBOLS = 8,
+    // Client-export entries per importer: CACHE_SYMBOLS plus _bench_target.
+    CACHE_CLIENT_ENTRIES = CACHE_SYMBOLS + 1,
+    CACHE_SYMBOL_EXPORT_BASE = CACHE_EXPORTS - 1 - CACHE_SYMBOLS,
+    // Location of symbol `k` (location 0 belongs to _bench_target at 0x200).
+    CACHE_SYMBOL_LOCATION_BASE = 0x208,
+    CACHE_SYMBOL_LOCATION_STRIDE = 8,
     CACHE_HEADERS = 0x20000, CACHE_PATCH = 0x40000,
     CACHE_IMAGES = CACHE_PATCH + 0x100,
     CACHE_EXPORT_TABLE = CACHE_IMAGES + CACHE_IMAGE_COUNT * 16,
     CACHE_CLIENTS = CACHE_EXPORT_TABLE + CACHE_EXPORTS * 8,
     CACHE_CLIENT_EXPORTS = CACHE_CLIENTS + CACHE_IMPORTERS * 12,
-    CACHE_LOCATIONS = CACHE_CLIENT_EXPORTS + CACHE_IMPORTERS * 12,
-    CACHE_GOT_CLIENTS = CACHE_LOCATIONS + 8,
+    CACHE_LOCATIONS = CACHE_CLIENT_EXPORTS + CACHE_IMPORTERS * CACHE_CLIENT_ENTRIES * 12,
+    CACHE_GOT_CLIENTS = CACHE_LOCATIONS + CACHE_CLIENT_ENTRIES * 8,
     CACHE_NAMES = CACHE_GOT_CLIENTS + CACHE_IMAGE_COUNT * 8,
     CACHE_BYTES = CACHE_NAMES + CACHE_EXPORTS * 32
 };
@@ -140,17 +155,27 @@ static uint8_t *make_patch_cache(void) {
         cache_u32(b, header + 88, 3);
         cache_u32(b, header + 92, 3);
         cache_u32(b, CACHE_CLIENTS + i * 12, i);
-        cache_u32(b, CACHE_CLIENTS + i * 12 + 4, i);
-        cache_u32(b, CACHE_CLIENTS + i * 12 + 8, 1);
-        cache_u32(b, CACHE_CLIENT_EXPORTS + i * 12, CACHE_EXPORTS - 1);
-        cache_u32(b, CACHE_CLIENT_EXPORTS + i * 12 + 8, 1);
+        cache_u32(b, CACHE_CLIENTS + i * 12 + 4, i * CACHE_CLIENT_ENTRIES);
+        cache_u32(b, CACHE_CLIENTS + i * 12 + 8, CACHE_CLIENT_ENTRIES);
+        // Entry 0 is _bench_target; entries 1..CACHE_SYMBOLS are the symbols,
+        // each pointing at its own location so emitted addresses stay distinct.
+        size_t entry = CACHE_CLIENT_EXPORTS + (size_t)i * CACHE_CLIENT_ENTRIES * 12;
+        cache_u32(b, entry, CACHE_EXPORTS - 1);
+        cache_u32(b, entry + 8, 1);
+        for (unsigned k = 0; k < CACHE_SYMBOLS; k++) {
+            size_t symbol_entry = entry + (size_t)(k + 1) * 12;
+            cache_u32(b, symbol_entry, CACHE_SYMBOL_EXPORT_BASE + k);
+            cache_u32(b, symbol_entry + 4, k + 1);
+            cache_u32(b, symbol_entry + 8, 1);
+        }
     }
     cache_u32(b, CACHE_PATCH, 4);
     cache_pair(b, CACHE_PATCH + 8, CACHE_IMAGES, CACHE_IMAGE_COUNT);
     cache_pair(b, CACHE_PATCH + 24, CACHE_EXPORT_TABLE, CACHE_EXPORTS);
     cache_pair(b, CACHE_PATCH + 40, CACHE_CLIENTS, CACHE_IMPORTERS);
-    cache_pair(b, CACHE_PATCH + 56, CACHE_CLIENT_EXPORTS, CACHE_IMPORTERS);
-    cache_pair(b, CACHE_PATCH + 72, CACHE_LOCATIONS, 1);
+    cache_pair(b, CACHE_PATCH + 56, CACHE_CLIENT_EXPORTS,
+               CACHE_IMPORTERS * CACHE_CLIENT_ENTRIES);
+    cache_pair(b, CACHE_PATCH + 72, CACHE_LOCATIONS, CACHE_CLIENT_ENTRIES);
     cache_pair(b, CACHE_PATCH + 88, CACHE_NAMES, CACHE_EXPORTS * 32);
     cache_pair(b, CACHE_PATCH + 104, CACHE_GOT_CLIENTS, CACHE_IMAGE_COUNT);
     cache_pair(b, CACHE_PATCH + 120, CACHE_GOT_CLIENTS, 0);
@@ -161,6 +186,12 @@ static uint8_t *make_patch_cache(void) {
     for (unsigned i = 0; i < CACHE_EXPORTS; i++) {
         cache_u32(b, CACHE_EXPORT_TABLE + i * 8 + 4, i * 32);
         snprintf((char *)b + CACHE_NAMES + i * 32, 32, "_irrelevant_export_%u", i);
+    }
+    for (unsigned k = 0; k < CACHE_SYMBOLS; k++) {
+        cache_u32(b, CACHE_LOCATIONS + (k + 1) * CACHE_SYMBOL_LOCATION_STRIDE,
+                  CACHE_SYMBOL_LOCATION_BASE + k * CACHE_SYMBOL_LOCATION_STRIDE);
+        snprintf((char *)b + CACHE_NAMES + (CACHE_SYMBOL_EXPORT_BASE + k) * 32, 32,
+                 "_bench_sym_%02u", k);
     }
     strcpy((char *)b + CACHE_NAMES + (CACHE_EXPORTS - 1) * 32, "_bench_target");
     return b;
@@ -175,19 +206,26 @@ static bool cache_collect(void *ctx, const hk_cache_patch_site_t *site) {
            !site->shared_got && site->addend == 0);
     return true;
 }
+static hk_cache_patch_target_t cache_target(uint8_t *b, unsigned importer) {
+    size_t header = CACHE_HEADERS + (size_t)importer * 0x400;
+    // Synthetic ranges are caller-supplied, so immutable_metadata stays false:
+    // only HKRebindEngine opts a live shared-cache range into the metadata index.
+    hk_cache_patch_target_t target = {
+        .cache_base = b, .cache_size = CACHE_BYTES,
+        .image_header = b + header,
+        .image_header_size = HK_MACHO_HEADER_64_SIZE + HK_SEGMENT_COMMAND_64_SIZE,
+        .image_slide = (uintptr_t)b - (uintptr_t)CACHE_UNSLID,
+        .image_path = (char *)b + 0x11000 + importer * 64,
+    };
+    return target;
+}
 static void bench_cache_traversal(uint8_t *b, bool cached) {
     hk_cache_patch_lookup_t *lookup = cached
         ? hk_cache_patch_lookup_create("bench_target", HK_SYMBOL_NAME_C) : NULL;
     assert(!cached || lookup);
     for (unsigned i = 0; i < CACHE_IMPORTERS; i++) {
         size_t header = CACHE_HEADERS + i * 0x400;
-        hk_cache_patch_target_t target = {
-            .cache_base = b, .cache_size = CACHE_BYTES,
-            .image_header = b + header,
-            .image_header_size = HK_MACHO_HEADER_64_SIZE + HK_SEGMENT_COMMAND_64_SIZE,
-            .image_slide = (uintptr_t)b - (uintptr_t)CACHE_UNSLID,
-            .image_path = (char *)b + 0x11000 + i * 64,
-        };
+        hk_cache_patch_target_t target = cache_target(b, i);
         cache_result_t result = {0};
         hk_cache_patch_status_t status = cached
             ? hk_dyld_cache_iterate_symbol_uses_with_lookup(&target, "bench_target",
@@ -201,6 +239,94 @@ static void bench_cache_traversal(uint8_t *b, bool cached) {
 }
 static void bench_cache_uncached(void *ctx) { bench_cache_traversal(ctx, false); }
 static void bench_cache_lookup(void *ctx) { bench_cache_traversal(ctx, true); }
+
+// ---- multi-symbol preparation: per-symbol lookup vs immutable metadata index
+// A sample resolves CACHE_SYMBOLS symbols across CACHE_IMPORTERS importers, one
+// symbol-scoped lookup per symbol (the production shape). The `scan` variant
+// leaves immutable_metadata false and pays one full metadata scan per symbol;
+// the `index` variant opts in and reuses the process-lifetime index, whose
+// build lands in warmup.
+typedef struct {
+    hk_cache_patch_status_t status[CACHE_SYMBOLS][CACHE_IMPORTERS];
+    size_t count[CACHE_SYMBOLS][CACHE_IMPORTERS];
+    uintptr_t address[CACHE_SYMBOLS][CACHE_IMPORTERS];
+} resolve_matrix_t;
+
+static resolve_matrix_t g_scan_results, g_index_results;
+
+typedef struct {
+    uint8_t *cache;
+    unsigned present_symbols;
+    bool immutable_metadata;
+    resolve_matrix_t *results;
+} resolve_bench_t;
+
+static void resolve_symbols(uint8_t *b, bool immutable_metadata,
+                            unsigned present_symbols, resolve_matrix_t *out) {
+    for (unsigned k = 0; k < CACHE_SYMBOLS; k++) {
+        char name[32];
+        snprintf(name, sizeof(name),
+                 k < present_symbols ? "bench_sym_%02u" : "bench_gone_%02u", k);
+        hk_cache_patch_lookup_t *lookup =
+            hk_cache_patch_lookup_create(name, HK_SYMBOL_NAME_C);
+        assert(lookup);
+        for (unsigned i = 0; i < CACHE_IMPORTERS; i++) {
+            hk_cache_patch_target_t target = cache_target(b, i);
+            target.immutable_metadata = immutable_metadata;
+            cache_result_t result = {0};
+            out->status[k][i] = hk_dyld_cache_iterate_symbol_uses_with_lookup(
+                &target, name, HK_SYMBOL_NAME_C, cache_collect, &result, lookup);
+            out->count[k][i] = result.count;
+            out->address[k][i] = result.address;
+        }
+        hk_cache_patch_lookup_destroy(lookup);
+    }
+}
+
+static void bench_resolve_symbols(void *ctx) {
+    const resolve_bench_t *bench = ctx;
+    resolve_symbols(bench->cache, bench->immutable_metadata,
+                    bench->present_symbols, bench->results);
+}
+
+static void verify_matrix(uint8_t *b, const resolve_matrix_t *m,
+                          unsigned present_symbols) {
+    for (unsigned k = 0; k < CACHE_SYMBOLS; k++) {
+        for (unsigned i = 0; i < CACHE_IMPORTERS; i++) {
+            size_t header = CACHE_HEADERS + (size_t)i * 0x400;
+            if (k < present_symbols) {
+                assert(m->status[k][i] == HK_CACHE_PATCH_OK);
+                assert(m->count[k][i] == 1);
+                assert(m->address[k][i] == (uintptr_t)b + header +
+                       CACHE_SYMBOL_LOCATION_BASE + k * CACHE_SYMBOL_LOCATION_STRIDE);
+            } else {
+                assert(m->status[k][i] == HK_CACHE_PATCH_NOT_FOUND);
+                assert(m->count[k][i] == 0);
+            }
+        }
+    }
+}
+
+// The indexed path must emit exactly what the per-symbol scan emits.
+static void assert_matching_results(const resolve_matrix_t *scan,
+                                    const resolve_matrix_t *index) {
+    for (unsigned k = 0; k < CACHE_SYMBOLS; k++) {
+        for (unsigned i = 0; i < CACHE_IMPORTERS; i++) {
+            assert(scan->status[k][i] == index->status[k][i]);
+            assert(scan->count[k][i] == index->count[k][i]);
+            assert(scan->address[k][i] == index->address[k][i]);
+        }
+    }
+}
+
+// Fails on any result/count mismatch between the two paths, or between either
+// path and the layout make_patch_cache() wrote.
+static void check_scenario(uint8_t *b, unsigned present_symbols) {
+    resolve_symbols(b, false, present_symbols, &g_scan_results);
+    resolve_symbols(b, true, present_symbols, &g_index_results);
+    assert_matching_results(&g_scan_results, &g_index_results);
+    verify_matrix(b, &g_scan_results, present_symbols);
+}
 
 int main(int argc, char **argv){
     size_t iters=50000;
@@ -227,6 +353,38 @@ int main(int argc, char **argv){
                  cache_warmup, cache_iters, 1);
     hk_bench_run("cache_64_importers_lookup", bench_cache_lookup, cache,
                  cache_warmup, cache_iters, 1);
+
+    // Two opt-in scenarios over the same cache: fully populated (32 symbols)
+    // and missing-heavy (8 of the 32 queried names exist). Labels are stable;
+    // medians are ns per (symbol, importer) preparation, so
+    // speedup = scan median / index median for the same scenario.
+    int multi_ops = CACHE_SYMBOLS * CACHE_IMPORTERS;
+    static const struct { const char *label; unsigned present; } multi_scenarios[] = {
+        {"cache_32sym_64imp", CACHE_SYMBOLS},
+        {"cache_32sym_64imp_missheavy", CACHE_PRESENT_SYMBOLS},
+    };
+    for (size_t s = 0; s < sizeof(multi_scenarios) / sizeof(multi_scenarios[0]); s++) {
+        unsigned present = multi_scenarios[s].present;
+        printf("# %s: %d preparations/sample, %u of %d symbols present\n",
+               multi_scenarios[s].label, multi_ops, present, (int)CACHE_SYMBOLS);
+        check_scenario(cache, present);
+        resolve_bench_t bench = {
+            .cache = cache, .present_symbols = present, .results = &g_scan_results,
+        };
+        char label[64];
+        snprintf(label, sizeof(label), "%s_scan", multi_scenarios[s].label);
+        hk_bench_run(label, bench_resolve_symbols, &bench, cache_warmup, cache_iters,
+                     multi_ops);
+        bench.immutable_metadata = true;
+        bench.results = &g_index_results;
+        snprintf(label, sizeof(label), "%s_index", multi_scenarios[s].label);
+        hk_bench_run(label, bench_resolve_symbols, &bench, cache_warmup, cache_iters,
+                     multi_ops);
+        // Timed runs must emit exactly what the verified runs emitted, without
+        // re-running resolve_symbols and clobbering the timed matrices.
+        assert_matching_results(&g_scan_results, &g_index_results);
+        verify_matrix(cache, &g_scan_results, present);
+    }
     free(cache);
 
     hk_image_catalog_destroy(cat100);

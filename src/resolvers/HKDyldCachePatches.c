@@ -1,6 +1,7 @@
 #include "HKDyldCachePatches.h"
 
 #include <limits.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,6 +72,14 @@ typedef struct {
     size_t patch_size;
 } cache_view_t;
 
+// The full identity of one cache view. Two views that differ here may hold
+// unrelated bytes, so nothing derived from one may be reused for the other.
+static bool cache_view_equal(const cache_view_t *a, const cache_view_t *b) {
+    return a->base == b->base && a->size == b->size &&
+           a->unslid_base == b->unslid_base && a->patch == b->patch &&
+           a->patch_size == b->patch_size;
+}
+
 typedef struct {
     uint64_t defining_image;
     uint32_t export_index;
@@ -123,10 +132,7 @@ void hk_cache_patch_lookup_destroy(hk_cache_patch_lookup_t *lookup) {
 
 static void lookup_begin(hk_cache_patch_lookup_t *lookup,
                          const cache_view_t *view, uint32_t version) {
-    if (lookup->view.base != view->base || lookup->view.size != view->size ||
-        lookup->view.unslid_base != view->unslid_base ||
-        lookup->view.patch != view->patch || lookup->view.patch_size != view->patch_size ||
-        lookup->version != version) {
+    if (!cache_view_equal(&lookup->view, view) || lookup->version != version) {
         lookup->complete = false;
     }
     if (!lookup->complete) {
@@ -406,6 +412,212 @@ static bool load_v2(const cache_view_t *view, uint32_t version,
     return true;
 }
 
+// ---- process-scoped immutable export index ------------------------------
+//
+// A v2-v4 patch table lists every image's exports in one flat table whose
+// names live in a bounded string pool. Immutable live cache metadata therefore
+// supports an index that outlives one preparation AND one symbol: an opted-in
+// target's export names are recorded once, sorted for binary name lookup, and
+// later queries for any symbol replay their matches from the index instead of
+// rescanning every export. Entries are borrowed (names point into the cache's
+// pool) and the index holds no slot values, PAC data, or prepared plans.
+
+// Entries sort by (name, defining_image, export_index). That pair is exactly
+// the order the direct parser visits -- definitions ascending, each
+// definition's exports ascending -- so equal names replay in traversal order.
+typedef struct {
+    const char *name;       // borrowed from the cache's immutable name pool
+    uint32_t defining_image;
+    uint32_t export_index;  // global index into the image-export table
+} cache_index_entry_t;
+
+typedef struct {
+    size_t count;
+    cache_index_entry_t *entries;
+} cache_export_index_t;
+
+// One slot per distinct cache identity, filled once. Published entries are
+// never freed for the process lifetime: a query drops the lock and keeps
+// reading them, so replacing a live index in place would be a use-after-free.
+// An identity with no slot left simply keeps the direct per-symbol scan.
+// ponytail: 4 pinned slots, no eviction. Sized for the handful of cache views
+// one process maps; anything else falls back instead of churning memory.
+#define HK_CACHE_INDEX_SLOTS 4u
+static pthread_mutex_t g_cache_index_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    cache_view_t view;
+    uint32_t version;
+    cache_export_index_t index;
+} g_cache_index_slots[HK_CACHE_INDEX_SLOTS];
+static size_t g_cache_index_used;
+
+#ifdef HK_CACHE_PATCH_TEST
+// Number of built (therefore pinned) indices. There is one build per slot, so
+// this doubles as the build count the tests assert on.
+size_t hk_cache_patch_index_build_count(void) {
+    return g_cache_index_used;
+}
+
+void hk_cache_patch_index_reset_for_testing(void) {
+    pthread_mutex_lock(&g_cache_index_lock);
+    for (size_t i = 0; i < g_cache_index_used; i++) {
+        free(g_cache_index_slots[i].index.entries);
+        g_cache_index_slots[i].index.entries = NULL;
+        g_cache_index_slots[i].index.count = 0;
+    }
+    g_cache_index_used = 0;
+    pthread_mutex_unlock(&g_cache_index_lock);
+}
+#endif
+
+// Direct-parser traversal order for two entries of the same name.
+static bool cache_index_entry_less(const cache_index_entry_t *a,
+                                   const cache_index_entry_t *b) {
+    if (a->defining_image != b->defining_image) {
+        return a->defining_image < b->defining_image;
+    }
+    return a->export_index < b->export_index;
+}
+
+static int cache_index_entry_compare(const void *left, const void *right) {
+    const cache_index_entry_t *a = left;
+    const cache_index_entry_t *b = right;
+    int order = strcmp(a->name, b->name);
+    if (order != 0) {
+        return order;
+    }
+    if (a->defining_image != b->defining_image) {
+        return a->defining_image < b->defining_image ? -1 : 1;
+    }
+    if (a->export_index == b->export_index) {
+        return 0;
+    }
+    return a->export_index < b->export_index ? -1 : 1;
+}
+
+// Records every export of one immutable v2-v4 patch table into `out`, or
+// returns false leaving `out` untouched. Everything the direct parser
+// validates while scanning a table is validated here too, and a failure
+// abandons the index before any caller can use it, so the direct parser still
+// reports the same status at the same point.
+//
+// A definition row may overlap another's export range, so the entry count is
+// the sum over rows, not the size of the flat export table: the traversal is
+// per row.
+static bool cache_index_build(const cache_view_t *view, uint32_t version,
+                              cache_export_index_t *out) {
+    table_v2_t table;
+    if (!load_v2(view, version, &table) || table.image_count == 0 ||
+        table.image_count > UINT32_MAX ||
+        (version >= 3 && table.got_client_count != table.image_count) ||
+        table.image_export_count > UINT32_MAX) {
+        return false;
+    }
+    size_t capacity = 0;
+    for (uint64_t def = 0; def < table.image_count; def++) {
+        const uint8_t *image = table.images + def * CACHE_IMAGE_PATCH_V2_SIZE;
+        uint32_t client_first = read_u32(image);
+        uint32_t client_count = read_u32(image + 4);
+        uint32_t export_first = read_u32(image + 8);
+        uint32_t export_count = read_u32(image + 12);
+        if ((uint64_t)client_first + client_count > table.client_count ||
+            (uint64_t)export_first + export_count > table.image_export_count ||
+            capacity > SIZE_MAX - export_count) {
+            return false;
+        }
+        capacity += export_count;
+    }
+    cache_index_entry_t *entries = NULL;
+    if (capacity) {
+        if (capacity > SIZE_MAX / sizeof(*entries)) {
+            return false;
+        }
+#ifdef HK_CACHE_PATCH_TEST
+        if (!lookup_fail_allocations)
+#endif
+            entries = malloc(capacity * sizeof(*entries));
+        if (!entries) {
+            return false;
+        }
+    }
+    size_t used = 0;
+    for (uint64_t def = 0; def < table.image_count; def++) {
+        const uint8_t *image = table.images + def * CACHE_IMAGE_PATCH_V2_SIZE;
+        uint32_t export_first = read_u32(image + 8);
+        uint32_t export_count = read_u32(image + 12);
+        for (uint32_t e = 0; e < export_count; e++) {
+            uint32_t global_export = export_first + e;
+            const uint8_t *export = table.image_exports +
+                (uint64_t)global_export * CACHE_IMAGE_EXPORT_V2_SIZE;
+            const char *name = bounded_string(
+                table.names, (size_t)table.names_size,
+                read_u32(export + 4) & 0x0FFFFFFFu);
+            if (!name) {
+                free(entries);
+                return false;
+            }
+            entries[used] = (cache_index_entry_t){
+                .name = name,
+                .defining_image = (uint32_t)def,
+                .export_index = global_export,
+            };
+            used++;
+        }
+    }
+    if (used) {
+        qsort(entries, used, sizeof(*entries), cache_index_entry_compare);
+    }
+    out->count = used;
+    out->entries = entries;
+    return true;
+}
+
+// This view's index, built on first use. NULL -- malformed table, allocation
+// failure, or a different view -- sends the caller to the direct scan.
+static const cache_export_index_t *cache_index_acquire(const cache_view_t *view,
+                                                       uint32_t version) {
+    pthread_mutex_lock(&g_cache_index_lock);
+    const cache_export_index_t *found = NULL;
+    for (size_t i = 0; i < g_cache_index_used; i++) {
+        if (g_cache_index_slots[i].version == version &&
+            cache_view_equal(&g_cache_index_slots[i].view, view)) {
+            found = &g_cache_index_slots[i].index;
+            break;
+        }
+    }
+    if (!found && g_cache_index_used < HK_CACHE_INDEX_SLOTS) {
+        // Publish only a fully built index: a failure here leaves the slot
+        // table exactly as it was.
+        cache_export_index_t built;
+        if (cache_index_build(view, version, &built)) {
+            g_cache_index_slots[g_cache_index_used].view = *view;
+            g_cache_index_slots[g_cache_index_used].version = version;
+            g_cache_index_slots[g_cache_index_used].index = built;
+            g_cache_index_used++;
+            found = &g_cache_index_slots[g_cache_index_used - 1].index;
+        }
+    }
+    pthread_mutex_unlock(&g_cache_index_lock);
+    return found;
+}
+
+// First entry whose name is not less than `name`. Entries sharing a name are
+// ordered by defining image then export index, so one name's run replays
+// exactly the order the direct parser would emit.
+static size_t cache_index_lower_bound(const cache_export_index_t *index,
+                                      const char *name) {
+    size_t low = 0, high = index->count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (strcmp(index->entries[mid].name, name) < 0) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
+
 static hk_cache_patch_status_t emit_client_export(
     const hk_cache_patch_target_t *target, const cache_view_t *view,
     const table_v2_t *table, uint32_t version, uint32_t global_export,
@@ -470,11 +682,74 @@ static hk_cache_patch_status_t emit_got_export(
     return HK_CACHE_PATCH_OK;
 }
 
+// Emits the uses of one already-matched export: every client of that defining
+// image whose image index is the importer, then -- v3 and later -- the defining
+// image's shared-GOT uses. The direct parser and the index replay both emit
+// through here, so a replayed site list cannot differ from a scanned one. The
+// direct loop validates this image row before calling; the index replay relies
+// on the bounds checks below.
+static hk_cache_patch_status_t emit_export_uses(
+    const hk_cache_patch_target_t *target, const cache_view_t *view,
+    const table_v2_t *table, uint32_t version, uint32_t importer_index,
+    uint64_t def, uint32_t global_export, hk_cache_patch_visit_fn visit,
+    void *ctx, bool *found) {
+    const uint8_t *image = table->images + def * CACHE_IMAGE_PATCH_V2_SIZE;
+    uint32_t client_first = read_u32(image);
+    uint32_t client_count = read_u32(image + 4);
+    if ((uint64_t)client_first + client_count > table->client_count) {
+        return HK_CACHE_PATCH_MALFORMED;
+    }
+    for (uint32_t c = 0; c < client_count; c++) {
+        const uint8_t *client = table->clients +
+            (uint64_t)(client_first + c) * CACHE_CLIENT_V2_SIZE;
+        uint32_t ce_first = read_u32(client + 4);
+        uint32_t ce_count = read_u32(client + 8);
+        if ((uint64_t)ce_first + ce_count > table->client_export_count) {
+            return HK_CACHE_PATCH_MALFORMED;
+        }
+        if (read_u32(client) != importer_index) {
+            continue;
+        }
+        for (uint32_t ce = 0; ce < ce_count; ce++) {
+            hk_cache_patch_status_t status = emit_client_export(
+                target, view, table, version, global_export,
+                table->client_exports +
+                    (uint64_t)(ce_first + ce) * CACHE_CLIENT_EXPORT_V2_SIZE,
+                visit, ctx, found);
+            if (status != HK_CACHE_PATCH_OK) {
+                return status;
+            }
+        }
+    }
+    if (version < 3) {
+        return HK_CACHE_PATCH_OK;
+    }
+    const uint8_t *got_client = table->got_clients +
+        def * CACHE_GOT_CLIENT_V3_SIZE;
+    uint32_t ge_first = read_u32(got_client);
+    uint32_t ge_count = read_u32(got_client + 4);
+    if ((uint64_t)ge_first + ge_count > table->got_export_count) {
+        return HK_CACHE_PATCH_MALFORMED;
+    }
+    for (uint32_t ge = 0; ge < ge_count; ge++) {
+        hk_cache_patch_status_t status = emit_got_export(
+            target, view, table, version, global_export,
+            table->got_exports +
+                (uint64_t)(ge_first + ge) * CACHE_GOT_EXPORT_V3_SIZE,
+            visit, ctx, found);
+        if (status != HK_CACHE_PATCH_OK) {
+            return status;
+        }
+    }
+    return HK_CACHE_PATCH_OK;
+}
+
 static hk_cache_patch_status_t parse_v2_v4(
     const hk_cache_patch_target_t *target, const cache_view_t *view,
     uint32_t version, uint32_t importer_index,
     const hk_symbol_candidates_t *candidates, hk_cache_patch_visit_fn visit,
-    void *ctx, bool *found, hk_cache_patch_lookup_t *lookup) {
+    void *ctx, bool *found, hk_cache_patch_lookup_t *lookup,
+    const cache_export_index_t *index) {
     table_v2_t table;
     if (!load_v2(view, version, &table) || table.image_count == 0 ||
         importer_index >= table.image_count ||
@@ -485,6 +760,52 @@ static hk_cache_patch_status_t parse_v2_v4(
     if (lookup) lookup_begin(lookup, view, version);
     bool reuse = lookup && lookup->complete;
     size_t match = 0;
+    if (!reuse && index) {
+        // First pass for this symbol over immutable metadata: take the
+        // candidate names' runs straight from the index. Each run is in
+        // traversal order, so merging the runs by that same order replays the
+        // exact def-major, export-ascending sequence the direct parser emits,
+        // including duplicate exports of one name and overlapping ranges.
+        size_t next[2] = {0, 0}, end[2] = {0, 0};
+        for (unsigned c = 0; c < candidates->count; c++) {
+            const char *name = candidates->names[c];
+            next[c] = cache_index_lower_bound(index, name);
+            end[c] = next[c];
+            while (end[c] < index->count &&
+                   strcmp(index->entries[end[c]].name, name) == 0) {
+                end[c]++;
+            }
+        }
+        for (;;) {
+            size_t pick = SIZE_MAX;
+            for (unsigned c = 0; c < candidates->count; c++) {
+                if (next[c] < end[c] &&
+                    (pick == SIZE_MAX ||
+                     cache_index_entry_less(&index->entries[next[c]],
+                                            &index->entries[next[pick]]))) {
+                    pick = c;
+                }
+            }
+            if (pick == SIZE_MAX) {
+                break;
+            }
+            const cache_index_entry_t *entry = &index->entries[next[pick]++];
+            const uint8_t *export = table.image_exports +
+                (uint64_t)entry->export_index * CACHE_IMAGE_EXPORT_V2_SIZE;
+            if ((read_u32(export + 4) >> 28) != 0) {
+                return HK_CACHE_PATCH_UNSUPPORTED;
+            }
+            lookup_append(lookup, entry->defining_image, entry->export_index);
+            hk_cache_patch_status_t status = emit_export_uses(
+                target, view, &table, version, importer_index,
+                entry->defining_image, entry->export_index, visit, ctx, found);
+            if (status != HK_CACHE_PATCH_OK) {
+                return status;
+            }
+        }
+        if (lookup && !lookup->allocation_failed) lookup->complete = true;
+        return HK_CACHE_PATCH_OK;
+    }
     for (uint64_t def = 0; def < table.image_count; def++) {
         // A completed scan validated every row of this immutable metadata.
         // Revisit only definitions with matches, including none for a miss.
@@ -493,11 +814,9 @@ static hk_cache_patch_status_t parse_v2_v4(
             def = lookup->matches[match].defining_image;
         }
         const uint8_t *image = table.images + def * CACHE_IMAGE_PATCH_V2_SIZE;
-        uint32_t client_first = read_u32(image);
-        uint32_t client_count = read_u32(image + 4);
         uint32_t export_first = read_u32(image + 8);
         uint32_t export_count = read_u32(image + 12);
-        if ((uint64_t)client_first + client_count > table.client_count ||
+        if ((uint64_t)read_u32(image) + read_u32(image + 4) > table.client_count ||
             (uint64_t)export_first + export_count > table.image_export_count) {
             return HK_CACHE_PATCH_MALFORMED;
         }
@@ -525,46 +844,11 @@ static hk_cache_patch_status_t parse_v2_v4(
             if ((name_and_kind >> 28) != 0) {
                 return HK_CACHE_PATCH_UNSUPPORTED;
             }
-            for (uint32_t c = 0; c < client_count; c++) {
-                const uint8_t *client = table.clients +
-                    (uint64_t)(client_first + c) * CACHE_CLIENT_V2_SIZE;
-                uint32_t ce_first = read_u32(client + 4);
-                uint32_t ce_count = read_u32(client + 8);
-                if ((uint64_t)ce_first + ce_count > table.client_export_count) {
-                    return HK_CACHE_PATCH_MALFORMED;
-                }
-                if (read_u32(client) != importer_index) {
-                    continue;
-                }
-                for (uint32_t ce = 0; ce < ce_count; ce++) {
-                    hk_cache_patch_status_t status = emit_client_export(
-                        target, view, &table, version, global_export,
-                        table.client_exports +
-                            (uint64_t)(ce_first + ce) * CACHE_CLIENT_EXPORT_V2_SIZE,
-                        visit, ctx, found);
-                    if (status != HK_CACHE_PATCH_OK) {
-                        return status;
-                    }
-                }
-            }
-            if (version >= 3) {
-                const uint8_t *got_client = table.got_clients +
-                    def * CACHE_GOT_CLIENT_V3_SIZE;
-                uint32_t ge_first = read_u32(got_client);
-                uint32_t ge_count = read_u32(got_client + 4);
-                if ((uint64_t)ge_first + ge_count > table.got_export_count) {
-                    return HK_CACHE_PATCH_MALFORMED;
-                }
-                for (uint32_t ge = 0; ge < ge_count; ge++) {
-                    hk_cache_patch_status_t status = emit_got_export(
-                        target, view, &table, version, global_export,
-                        table.got_exports +
-                            (uint64_t)(ge_first + ge) * CACHE_GOT_EXPORT_V3_SIZE,
-                        visit, ctx, found);
-                    if (status != HK_CACHE_PATCH_OK) {
-                        return status;
-                    }
-                }
+            hk_cache_patch_status_t status = emit_export_uses(
+                target, view, &table, version, importer_index, def,
+                global_export, visit, ctx, found);
+            if (status != HK_CACHE_PATCH_OK) {
+                return status;
             }
         }
     }
@@ -711,8 +995,18 @@ hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses_with_lookup(
         status = parse_v1(target, &view, importer_index, &candidates,
                           visit, ctx, &found);
     } else if (version >= 2 && version <= 4) {
+        // One index for every process-lifetime preparation off the same live
+        // cache. A lookup that already completed for this exact view and
+        // version replays its own matches, so it needs no index and the lock
+        // stays out of that path. Every other case leaves `index` NULL when no
+        // index can be had, which is the direct per-symbol scan.
+        bool lookup_complete = lookup && lookup->complete &&
+            lookup->version == version && cache_view_equal(&lookup->view, &view);
+        const cache_export_index_t *index =
+            target->immutable_metadata && !lookup_complete
+                ? cache_index_acquire(&view, version) : NULL;
         status = parse_v2_v4(target, &view, version, importer_index,
-                             &candidates, visit, ctx, &found, lookup);
+                             &candidates, visit, ctx, &found, lookup, index);
     } else {
         return HK_CACHE_PATCH_UNSUPPORTED;
     }

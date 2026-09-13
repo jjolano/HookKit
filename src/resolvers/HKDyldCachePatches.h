@@ -29,6 +29,14 @@ typedef struct {
     bool uuid_present;
     uint8_t uuid[16];
     bool include_shared_got;
+    // Caller assertion that cache_base/cache_size are the live dyld shared
+    // cache, whose patch table and name pool cannot change for the process
+    // lifetime. Only then may the resolver build and reuse a process-scoped
+    // export index; a caller-supplied or synthetic range leaves this false and
+    // every traversal reads the current bytes. The resolver never re-derives
+    // liveness: HKRebindEngine sets this only when its range came from
+    // _dyld_get_shared_cache_range.
+    bool immutable_metadata;
 } hk_cache_patch_target_t;
 
 typedef struct {
@@ -52,6 +60,11 @@ void hk_cache_patch_lookup_destroy(hk_cache_patch_lookup_t *lookup);
 #ifdef HK_CACHE_PATCH_TEST
 size_t hk_cache_patch_lookup_scan_count(const hk_cache_patch_lookup_t *lookup);
 void hk_cache_patch_lookup_fail_allocations_for_testing(bool fail);
+// Process-scoped immutable export index, introspection only. The reset
+// releases every pinned index and must not run while a traversal still holds
+// one: entries are borrowed, not copied.
+size_t hk_cache_patch_index_build_count(void);
+void hk_cache_patch_index_reset_for_testing(void);
 #endif
 
 hk_cache_patch_status_t hk_dyld_cache_iterate_symbol_uses_with_lookup(
