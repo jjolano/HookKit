@@ -637,7 +637,12 @@ DEVICE_CANONICAL_MIN ?= 15.0
 DEVICE_CANONICAL_LDID ?= ldid
 # The Swift driver otherwise selects the host runtime resources and host ld.
 # Keep the device probe on the iPhoneOS Swift runtime and target linker.
+# -resource-dir names where that runtime lives: the Linux cross toolchain keeps
+# it under its bundled Swift driver, while Xcode's own driver resolves its
+# runtime itself and no /toolchain/linux path exists there -- so Darwin passes
+# no override at all (see the Darwin block below).
 SWIFT_DEVICE_RESOURCE_DIR ?= $(THEOS)/toolchain/linux/iphone/lib/swift
+SWIFT_DEVICE_RESOURCE_DIR_FLAG ?= -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR)
 
 # Modern arm64e uses a versioned ptrauth Mach-O ABI. The canonical package
 # already selects this toolchain in build.sh; standalone device smokes must do
@@ -676,6 +681,8 @@ DEVICE_SMOKE_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_CLANG ?= $(SDKBINPATH)/clang
 DEVICE_CANONICAL_SWIFTC ?= $(SDKBINPATH)/swiftc
 DEVICE_CANONICAL_LD ?= $(SDKBINPATH)/ld
+# xcrun's Swift driver already targets its own iPhoneOS runtime.
+SWIFT_DEVICE_RESOURCE_DIR_FLAG :=
 endif
 ifeq ($(HOST_OS),Linux)
 ifeq ($(DEVICE_SMOKE_ARCH),arm64e)
@@ -688,7 +695,7 @@ endif
 endif
 
 DEVICE_CANONICAL_SWIFT_FLAGS = -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) \
-	-sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) \
+	-sdk $(DEVICE_CANONICAL_SDK) $(SWIFT_DEVICE_RESOURCE_DIR_FLAG) \
 	-parse-as-library -module-name HKSwiftProbe
 DEVICE_CANONICAL_SWIFT_OBJECT = $(DEVICE_CANONICAL_SWIFTC) $(DEVICE_CANONICAL_SWIFT_FLAGS) \
 	-emit-object -o $(1) $(2)
@@ -783,11 +790,11 @@ device-swift-smoke:
 # before exiting. Build canonical HookKit first; this target links that ABI.
 .PHONY: device-swift-real-smoke
 device-swift-real-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_real_smoke.o tests/device/device_swift_real_smoke.c && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_real_smoke $(THEOS_OBJ_DIR)/device_swift_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_real_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_real_smoke.o tests/device/device_swift_real_smoke.c && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) $(SWIFT_DEVICE_RESOURCE_DIR_FLAG) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_real_smoke $(THEOS_OBJ_DIR)/device_swift_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_real_smoke$(ECHO_END)
 
 .PHONY: device-swift-facade-real-smoke
 device-swift-facade-real-smoke:
-	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o tests/device/device_swift_facade_real_smoke.m && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) -resource-dir $(SWIFT_DEVICE_RESOURCE_DIR) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -framework -Xlinker Foundation -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_OBJ_DIR) && $(call DEVICE_CANONICAL_SWIFT_OBJECT,$(THEOS_OBJ_DIR)/device_swift_real_probe.o,tests/device/device_swift_real_probe.swift) && $(call DEVICE_CANONICAL_SWIFT_ABI_GUARD,$(THEOS_OBJ_DIR)/device_swift_real_probe.o) && $(DEVICE_CANONICAL_CLANG) -Wall -Wextra -Werror -O0 -fno-inline -fobjc-arc -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -isysroot $(DEVICE_CANONICAL_SDK) -I$(CURDIR)/include -c -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o tests/device/device_swift_facade_real_smoke.m && $(DEVICE_CANONICAL_SWIFTC) -target $(DEVICE_CANONICAL_ARCH)-apple-ios$(DEVICE_CANONICAL_MIN) -sdk $(DEVICE_CANONICAL_SDK) $(SWIFT_DEVICE_RESOURCE_DIR_FLAG) -use-ld=$(DEVICE_CANONICAL_LD) -F$(CURDIR)/.theos/obj -framework HookKit -Xlinker -framework -Xlinker Foundation -Xlinker -rpath -Xlinker /Library/Frameworks -Xlinker -rpath -Xlinker /var/jb/Library/Frameworks -Xlinker -rpath -Xlinker /usr/lib/swift -o $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke.o $(THEOS_OBJ_DIR)/device_swift_real_probe.o && $(DEVICE_CANONICAL_LDID) -S$(CURDIR)/tests/device/device_smoke.entitlements $(THEOS_OBJ_DIR)/device_swift_facade_real_smoke$(ECHO_END)
 
 .PHONY: device-catalog-smoke
 device-catalog-smoke:
